@@ -13,7 +13,7 @@ const file = () => path.join(epoptesHome(), 'registry.json');
 
 export const readRegistry = (): Registry => readJson<Registry>(file()) ?? { version: 1, goals: [] };
 
-const GITIGNORE = 'run/\ncycles/\nsnapshots.git/\n*.tmp\n.feedback.lock\n';
+const GITIGNORE = 'run/\ncycles/\nsnapshots.git/\nreports/\n*.tmp\n.feedback.lock\n';
 
 /** Validates a goal and registers it (idempotent). Creates the runtime folders and .epoptes/.gitignore. */
 export function addGoal(project: string) {

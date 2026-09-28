@@ -321,7 +321,7 @@ function GoalList() {
   const s = useStore();
   if (!s.state) return html`<p class="empty">Loading…</p>`;
   const goals = [...s.state.goals].sort((a, b) => (b.live ?? 0) - (a.live ?? 0) || (a.name ?? a.id).localeCompare(b.name ?? b.id));
-  return html`<div class="list-head"><h1>Goals</h1><span class="muted">${goals.filter((g) => g.live).length} running · ${goals.length} total</span></div>
+  return html`<div class="list-head"><h1>Goals</h1><span class="muted">${goals.filter((g) => g.live).length} running · ${goals.length} total</span>${goals.length > 0 && html`<a class="btn small" style=${{ marginLeft: 'auto' }} href="/report.html" target="_blank" rel="noopener">Report: all goals</a>`}</div>
     ${goals.length === 0
       ? html`<div class="panel"><h2>No goals yet</h2><p>Ask Claude Code to <b>use the epoptes skill to build a harness for …</b>, or register an existing goal directory:</p><p class="mono">epoptes add path/to/project</p></div>`
       : html`<div class="cards">${goals.map((g) => html`<${GoalCard} key=${g.id} g=${g} />`)}</div>`}`;
@@ -359,6 +359,7 @@ function Controls({ d }) {
       ${[['+30m', 1800], ['+1h', 3600], ['+2h', 7200]].map(([l, s]) => html`<button key=${l} class="btn small" disabled=${busy} onClick=${() => act('extend', { seconds: s })} title="Extend the time box">${l}</button>`)}
     </span>`}
     ${!live && d.clock && html`<button class="btn small" disabled=${busy} onClick=${() => act('reset', {}, 'Reset the clock? The next start begins a new run with the time box from goal.json.')}>Reset clock</button>`}
+    <a class="btn small" href=${`/goals/${d.id}/report.html`} target="_blank" rel="noopener">Report</a>
   </div>`;
 }
 

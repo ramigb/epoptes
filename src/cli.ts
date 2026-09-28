@@ -50,8 +50,12 @@ Skill
 Dashboard
   ui [--port N] [--lan]           live dashboard on http://127.0.0.1:4747 (--lan: whole network, no auth)
 
-Later
-  report [goal|--all]             (M4)
+Import
+  import-runsh <project> [-g id]  import a dress2impress-style run.sh harness into <project>/.epoptes
+
+Reports
+  report [goal] [--all]           Markdown + HTML report into .epoptes/reports/ (--all: ~/.epoptes/reports/)
+         [--md|--html] [--stdout] [--out <dir>]
 
 [goal] is a registered id or a path. Without it: $EPOPTES_GOAL_DIR, then the nearest .epoptes/ above the cwd.`;
 
@@ -140,6 +144,10 @@ async function main(argv: string[]) {
       'dry-run': { type: 'boolean' },
       'new-run': { type: 'boolean' },
       open: { type: 'boolean' },
+      md: { type: 'boolean' },
+      html: { type: 'boolean' },
+      stdout: { type: 'boolean' },
+      out: { type: 'string' },
       goal: { type: 'string', short: 'g' },
       help: { type: 'boolean', short: 'h' },
       all: { type: 'boolean' },
@@ -293,8 +301,49 @@ async function main(argv: string[]) {
       console.log(`recorded ${type}`);
       return;
     }
-    case 'report':
-      throw new Error('reports arrive in M4');
+    case 'import-runsh': {
+      if (!rest[0]) throw new Error('usage: epoptes import-runsh <project> [--goal <id>]');
+      const { importRunSh } = await import('./importers/runsh.ts');
+      const r = importRunSh(path.resolve(rest[0]), { id: values.goal });
+      console.log(`imported ${r.runs} runs, ${r.cycles} cycles, ${r.events} events, ${r.milestones} milestones, ${r.feedback} feedback items into ${tilde(path.join(path.resolve(rest[0]), '.epoptes'))}\nNext: epoptes add ${rest[0]} && epoptes report ${rest[0]}`);
+      return;
+    }
+    case 'report': {
+      const { buildReport, renderMarkdown, renderHtml, renderAllMarkdown, renderAllHtml } = await import('./report.ts');
+      const both = !values.md && !values.html;
+      const stamp = new Date().toISOString().slice(0, 16).replace(/[-:]/g, '').replace('T', '-');
+      let md: string;
+      let htmlOut: string;
+      let dir: string;
+      let name: string;
+      if (values.all) {
+        const reports = readRegistry().goals.flatMap((g) => {
+          try {
+            return [buildReport(goalPaths(g.path))];
+          } catch (e) {
+            console.error(`skipping ${g.id}: ${(e as Error).message.split('\n')[0]}`);
+            return [];
+          }
+        });
+        md = renderAllMarkdown(reports);
+        htmlOut = renderAllHtml(reports);
+        dir = values.out ?? path.join(epoptesHome(), 'reports');
+        name = `all-goals-${stamp}`;
+      } else {
+        const p = goalPaths(resolveGoal(goalArg()));
+        const r = buildReport(p);
+        md = renderMarkdown(r);
+        htmlOut = renderHtml(r);
+        dir = values.out ?? path.join(p.root, 'reports');
+        name = `${r.goal.id}-${stamp}`;
+      }
+      if (values.stdout) return console.log(values.html ? htmlOut : md);
+      fs.mkdirSync(dir, { recursive: true });
+      if (both || values.md) fs.writeFileSync(path.join(dir, `${name}.md`), md);
+      if (both || values.html) fs.writeFileSync(path.join(dir, `${name}.html`), htmlOut);
+      console.log(`report written:${both || values.md ? `\n  ${tilde(path.join(dir, name + '.md'))}` : ''}${both || values.html ? `\n  ${tilde(path.join(dir, name + '.html'))}` : ''}`);
+      return;
+    }
     case 'ui': {
       const cfg = readJson<{ port?: number; lan?: boolean }>(path.join(epoptesHome(), 'config.json')) ?? {};
       const port = Number(values.port ?? cfg.port ?? 4747);

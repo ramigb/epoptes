@@ -7,6 +7,8 @@ import { fileURLToPath } from 'node:url';
 import * as control from '../control.ts';
 import { addFeedback, noteFeedback, setFeedbackStatus, type FeedbackStatus } from '../feedback.ts';
 import { readRegistry } from '../registry.ts';
+import { buildReport, renderAllHtml, renderHtml } from '../report.ts';
+import { goalPaths } from '../paths.ts';
 import { cycleView, detail, markSeen, summary } from './views.ts';
 import { GoalWatch, type GoalUpdate } from './watch.ts';
 
@@ -101,6 +103,27 @@ export function serve({ port, lan, pollMs = 1000 }: ServeOptions) {
         const [file, type] = STATIC[url.pathname];
         res.writeHead(200, { ...SECURITY_HEADERS, 'Content-Type': type, 'Cache-Control': 'no-cache' });
         return res.end(fs.readFileSync(file));
+      }
+
+      // Reports are self-contained pages with inline styles and no scripts.
+      const sendReport = (body: string) => {
+        res.writeHead(200, { ...SECURITY_HEADERS, 'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; img-src data:", 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+        res.end(body);
+      };
+      if (req.method === 'GET' && url.pathname === '/report.html') {
+        return sendReport(renderAllHtml([...watches.values()].flatMap((x) => {
+          try {
+            return [buildReport(goalPaths(x.p.project))];
+          } catch {
+            return [];
+          }
+        })));
+      }
+      const rm = /^\/goals\/([a-z0-9-]+)\/report\.html$/.exec(url.pathname);
+      if (req.method === 'GET' && rm) {
+        const w = watches.get(rm[1]);
+        if (!w) return send(res, 404, { error: `no goal ${rm[1]}` });
+        return sendReport(renderHtml(buildReport(w.p)));
       }
 
       if (!url.pathname.startsWith('/api/')) return send(res, 404, { error: 'not found' });

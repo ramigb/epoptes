@@ -42,3 +42,8 @@ Append-only. Each entry: date · decision · why. To change one, add a new entry
 - **Guardrails are checked, not just written down:** the dry-run lint (template leftovers, deny list, broad allows, secret-looking strings, loop wiring, caps).
 - **Orchestrators use `epoptes clock` and `epoptes feedback --open`.** Why: one line and only-open items keep orient steps small; `status` is for humans.
 - **Secrets point to a secret manager (e.g. the 1Password CLI or MCP).** The baseline deny list blocks `.env`, `~/.ssh`, `~/.aws`, `printenv`.
+
+## 2026-09-28 · M4 reports
+- **Active time in reports is rebuilt from events** (runner spans minus rate-limit waits), not read from `clock.json`. Why: a new run replaces the clock, so past runs would lose their active time.
+- **HTML reports are self-contained and script-free** (inline CSS + SVG chart, native `<title>` tooltips, a table next to the chart). Why: they must open from disk, print, and be safe to pass around; the dashboard serves them under a CSP with no scripts.
+- **The run.sh importer writes into the project's own `.epoptes/`** and refuses to overwrite records. Why: goal = directory, so git history, tags and paths just work. Checked on a clone of dress2impress: 19 cycles, ≈ $186.09, 273 turns and per-model costs match the raw logs exactly.

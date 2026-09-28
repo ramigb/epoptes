@@ -218,10 +218,19 @@ epoptes feedback [goal] "<text>"
 epoptes feedback [goal] [--open]       list (--open: new, seen, in progress, blocked)
 epoptes feedback <F-n> <status> ["note"]
 epoptes event <milestone|blocked|note|artifact|round|wrapup|done> "<text>"
-epoptes report [goal | --all] [--md | --html]
+epoptes report [goal | --all] [--md | --html] [--stdout] [--out <dir>]
+epoptes import-runsh <project> [-g <id>]  import a dress2impress-style run.sh harness into <project>/.epoptes
 epoptes ui [--port N] [--lan]
 epoptes skill install | path           link plugin/skills/epoptes into ~/.claude/skills
 ```
+
+## Reports (`src/report.ts`)
+Built only from recorded files: `events.jsonl`, `cycles/*/result.json`, `feedback.jsonl`, `state/backlog.md`, `state/scores.jsonl`, and git (commits since the first run for `git`, snapshot count for `shadow`). Markdown and a self-contained HTML page (inline CSS and SVG, no scripts, light/dark, printable). `epoptes report` writes both to `.epoptes/reports/` (gitignored); `--all` writes an across-goals report to `~/.epoptes/reports/`. The dashboard serves them at `/goals/<id>/report.html` and `/report.html` with a CSP that allows inline styles and nothing else.
+- **Wall time:** first `run.start` to last `run.end` (or now). **Active time:** each runner process's `run.start`→`run.end` span, minus rate-limit waits when `pause_on_rate_limit` is set; this matches the clock and survives past runs' clocks being replaced.
+- **What's in it:** totals, tokens and cost by model, runs, cost per cycle (⚠ over 2× median), milestones/wrap-up/done, tasks done (`[x]`), commits or snapshots, artifacts, feedback with the cycle and note that closed it, blocked and cut tasks, scores (both `{scores:{…}}` and flat lines), cycles, and deduplicated warnings.
+- Costs carry `≈` and "API-equivalent estimate, not billed" whenever any cycle's `cost_basis` is `estimate`.
+
+**Importer** (`src/importers/runsh.ts`): reads `harness/logs/watchdog.log` (run boundaries, times, rc, timeouts, rate-limit waits), `harness/logs[/run<k>]/cycle-*.json`, `harness/state/*`, `FEEDBACK.md` (`→ F-n`) and git tags (`m<k>-done` → milestones, others → releases), and writes one monotonic cycle sequence into `<project>/.epoptes/`. It refuses to import into a goal that already has records.
 
 ## Skill (`plugin/`)
 A Claude Code plugin (`plugin/.claude-plugin/plugin.json`) with one skill, `plugin/skills/epoptes/`: `SKILL.md` (process + CLI reference), `reference/{interview,design,guardrails}.md`, and `templates/` (`goal.json`, `loop.md`, `settings.json`, `FEEDBACK.md`, `agents/{worker,checker,reviewer}.md`, `state/*.md`). Templates use `{{placeholders}}` and `<!-- template: … -->` notes; the dry-run lint rejects any that are left. Load it with `claude --plugin-dir plugin` (shows as `epoptes:epoptes`) or `epoptes skill install` (a symlink, so it tracks the repo).
