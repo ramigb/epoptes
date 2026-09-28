@@ -123,7 +123,9 @@ function loadDetail(id = store.detailId) {
       set({ detail, seenAtOpen, loadedAt: Date.now() });
       api.post(`/api/goals/${id}/seen`).then(scheduleState).catch(() => {});
     })
-    .catch((e) => toast({ kind: 'bad', title: 'Could not load goal', body: e.message }));
+    .catch((e) => {
+      if (store.detailId === id) set({ detail: { id, error: e.message, missing: /no goal/.test(e.message) } });
+    });
 }
 const scheduleState = () => {
   clearTimeout(stateTimer);
@@ -196,8 +198,10 @@ function celebrate(big) {
   setTimeout(() => box.remove(), 4500);
 }
 
+const flashed = new Map(); // goal id -> time of the last milestone or done
 function announce(u) {
   const goal = store.state?.goals.find((g) => g.id === u.id);
+  if (u.events.some((e) => e.type === 'milestone' || e.type === 'done')) flashed.set(u.id, Date.now());
   const name = goal?.name ?? u.id;
   for (const e of u.events) {
     if (e.type === 'milestone') {
@@ -234,7 +238,7 @@ function announce(u) {
 const Logo = () => html`<svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="6.5" fill="currentColor" /><g stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M16 2.5v4M16 25.5v4M2.5 16h4M25.5 16h4M6.5 6.5l2.8 2.8M22.7 22.7l2.8 2.8M6.5 25.5l2.8-2.8M22.7 9.3l2.8-2.8" /></g></svg>`;
 
 function StatePill({ state }) {
-  return html`<span class="state ${state}"><span class="dot"></span>${STATE_LABEL[state] ?? state}</span>`;
+  return html`<span key=${state} class="state ${state} changed"><span class="dot"></span>${STATE_LABEL[state] ?? state}</span>`;
 }
 
 /** Active time in the browser, ticking between polls while a run is live. */
@@ -299,7 +303,8 @@ function GoalCard({ g }) {
   const unread = g.unread.feedback + g.unread.events;
   const b = g.backlog;
   const total = b ? b.todo + b.doing + b.done + b.blocked : 0;
-  return html`<a class="panel card" href=${`#/g/${g.id}`}>
+  const flash = Date.now() - (flashed.get(g.id) ?? 0) < 4000;
+  return html`<a class=${`panel card ${flash ? 'flash' : ''}`} href=${`#/g/${g.id}`}>
     <div class="top">
       <span class="name">${g.name}</span>
       ${unread > 0 && html`<span class="badge" title=${`${g.unread.events} new events, ${g.unread.feedback} feedback updates`}>${unread}</span>`}
@@ -311,7 +316,7 @@ function GoalCard({ g }) {
       ${g.mode && html`<span class="chip ${g.mode}">${g.mode}</span>`}
       <span>cycle <b class="num">${g.cycle || '–'}</b>${g.round ? html` · round <b>${g.round}</b>` : ''}</span>
       ${b && html`<span>backlog <b class="num">${b.done}/${total}</b></span>`}
-      <span><${Money} usd=${g.cost_usd} basis=${g.cost_basis} /></span>
+      ${g.cycles > 0 && html`<span><${Money} usd=${g.cost_usd} basis=${g.cost_basis} /></span>`}
       ${g.cycle_started_at && g.state === 'running' && html`<span>this cycle <b class="num">${dur((now - Date.parse(g.cycle_started_at)) / 1000)}</b></span>`}
     </div>
   </a>`;
@@ -323,7 +328,15 @@ function GoalList() {
   const goals = [...s.state.goals].sort((a, b) => (b.live ?? 0) - (a.live ?? 0) || (a.name ?? a.id).localeCompare(b.name ?? b.id));
   return html`<div class="list-head"><h1>Goals</h1><span class="muted">${goals.filter((g) => g.live).length} running · ${goals.length} total</span>${goals.length > 0 && html`<a class="btn small" style=${{ marginLeft: 'auto' }} href="/report.html" target="_blank" rel="noopener">Report: all goals</a>`}</div>
     ${goals.length === 0
-      ? html`<div class="panel"><h2>No goals yet</h2><p>Ask Claude Code to <b>use the epoptes skill to build a harness for …</b>, or register an existing goal directory:</p><p class="mono">epoptes add path/to/project</p></div>`
+      ? html`<div class="panel empty-state">
+          <h2>No goals yet</h2>
+          <ol>
+            <li>Install the skill for Claude Code: <span class="mono">epoptes skill install</span></li>
+            <li>In Claude Code, in the folder you want to work in: <b>“use the epoptes skill to build a harness for …”</b>. Claude interviews you, generates the harness and registers it.</li>
+            <li>It appears here. Press <b>Start</b>, then watch, pause and give feedback from this page.</li>
+          </ol>
+          <p class="muted">Already have a goal folder? <span class="mono">epoptes add path/to/project</span>. Want a tiny test first? Copy <span class="mono">examples/glossary</span> somewhere and add it.</p>
+        </div>`
       : html`<div class="cards">${goals.map((g) => html`<${GoalCard} key=${g.id} g=${g} />`)}</div>`}`;
 }
 
@@ -371,6 +384,10 @@ function Banners({ d }) {
     const left = (Date.parse(d.waiting_until) - now) / 1000;
     out.push(html`<div class="banner warn">${d.wait_reason === 'rate_limit' ? 'Rate-limited' : 'Cooling down after failed cycles'}: next cycle in ${dur(Math.max(0, left))}.</div>`);
   }
+  const lastCycle = d.cycles_detail.at(-1);
+  if (lastCycle && ['error', 'timeout'].includes(lastCycle.exit) && !d.live) {
+    out.push(html`<div class="banner bad">Cycle ${lastCycle.cycle} ended with <b>${lastCycle.exit}</b>${lastCycle.error ? html`: <span class="mono">${lastCycle.error}</span>` : ''}. <a href="#" onClick=${(e) => { e.preventDefault(); set({ selectedCycle: lastCycle.cycle, cycleView: null }); api.get(`/api/goals/${d.id}/cycles/${lastCycle.cycle}`).then((cycleView) => set({ cycleView })); }}>See its activity</a>.</div>`);
+  }
   if (d.state === 'crashed') out.push(html`<div class="banner bad">The runner stopped without cleaning up (crashed). The clock was paused at its last heartbeat. Resume to continue.</div>`);
   if (d.state === 'failed') out.push(html`<div class="banner bad">Too many failed cycles in a row. Check the last cycle's error below, then resume.</div>`);
   return out.length ? html`<div class="stack">${out}</div>` : null;
@@ -388,7 +405,7 @@ function Stats({ d }) {
   const bt = b ? b.todo + b.doing + b.done + b.blocked : 0;
   return html`<div class="stats">
     <div class="panel stat"><div class="k">Cycles</div><div class="v num">${all.length}${d.round ? html` <small>round ${d.round} now</small>` : ''}</div></div>
-    <div class="panel stat"><div class="k">Cost</div><div class="v"><${Money} usd=${d.cost_usd} basis=${d.cost_basis} /></div></div>
+    <div class="panel stat"><div class="k">Cost</div><div class="v"><${Money} usd=${all.length ? d.cost_usd : null} basis=${d.cost_basis} /></div></div>
     <div class="panel stat"><div class="k">Cache-read share</div><div class="v num">${totalIn ? pct(read / totalIn) : '–'}</div></div>
     <div class="panel stat"><div class="k">Median cycle</div><div class="v"><${Money} usd=${d.cost_median || null} basis=${d.cost_basis} /></div></div>
     <div class="panel stat"><div class="k">Backlog</div><div class="v num">${b ? html`${b.done}<small>/${bt} done</small>` : '–'}</div></div>
@@ -708,6 +725,18 @@ function About({ d }) {
   </section>`;
 }
 
+function FirstRun({ d }) {
+  return html`<section class="panel first-run">
+    <h2>Before the first cycle</h2>
+    <ol>
+      <li>Check the setup (it never starts the clock): <span class="mono">epoptes run ${d.id} --dry-run</span></li>
+      <li>Read <span class="mono">.epoptes/loop.md</span> and the backlog once: that's exactly what every cycle will do.</li>
+      <li>Press <b>Start</b>. The first cycle begins within seconds; this page follows it live.</li>
+    </ol>
+    <p class="muted">Time box ${dur(d.goal.timebox.total_min * 60)} of active time · orchestrator ${d.goal.adapter.model}/${d.goal.adapter.effort} · pausing or stopping never loses verified work.</p>
+  </section>`;
+}
+
 function GoalDetail({ id }) {
   const s = useStore();
   useEffect(() => {
@@ -717,7 +746,14 @@ function GoalDetail({ id }) {
   }, [id]);
   const d = s.detail;
   if (!d || d.id !== id) return html`<a class="back" href="#/">← All goals</a><p class="empty">Loading…</p>`;
-  if (d.error) return html`<a class="back" href="#/">← All goals</a><div class="panel"><h2>${d.id}</h2><p>${d.error}</p></div>`;
+  if (d.error) {
+    return html`<a class="back" href="#/">← All goals</a>
+      <div class="panel empty-state">
+        <h2>${d.missing ? 'Goal not found' : `Can't read ${d.id}`}</h2>
+        <p>${d.missing ? html`No registered goal is called <b>${d.id}</b>. It may have been removed from the registry.` : d.error}</p>
+        ${!d.missing && html`<p class="muted">Fix the file, then check it with <span class="mono">epoptes run ${d.id} --dry-run</span>. This page updates by itself.</p>`}
+      </div>`;
+  }
   return html`<a class="back" href="#/">← All goals</a>
     <div class="detail-head">
       <div class="title"><h1>${d.name}</h1><${StatePill} state=${d.state} />${d.mode && html`<span class="chip ${d.mode}">${d.mode}</span>`}<span class="muted">run ${d.run ?? '–'} · cycle ${d.cycle || '–'}${d.round ? ` · round ${d.round}` : ''}</span></div>
@@ -726,6 +762,7 @@ function GoalDetail({ id }) {
       <${Controls} d=${d} />
       <${Banners} d=${d} />
     </div>
+    ${d.cycles === 0 && !d.live && html`<${FirstRun} d=${d} />`}
     <${Stats} d=${d} />
     <div class="grid">
       <div class="stack">

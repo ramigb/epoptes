@@ -3,14 +3,18 @@
   "version": "0.1.0",
   "description": "Create, run, watch and steer long-running Claude Code harnesses",
   "type": "module",
-  "license": "UNLICENSED",
-  "private": true,
+  "license": "MIT",
   "bin": {
-    "epoptes": "dist/cli.js"
+    "epoptes": "bin/epoptes.mjs"
   },
   "files": [
+    "bin",
     "dist",
-    "docs/schemas"
+    "docs/schemas",
+    "ui",
+    "plugin",
+    "README.md",
+    "LICENSE"
   ],
   "engines": {
     "node": ">=22.18"
@@ -19,7 +23,8 @@
     "epoptes": "node src/cli.ts",
     "test": "node --test test/*.test.ts",
     "typecheck": "tsc --noEmit",
-    "build": "tsc"
+    "build": "tsc",
+    "prepack": "npm run build"
   },
   "dependencies": {
     "ajv": "^8.20.0",
@@ -29,5 +34,14 @@
   "devDependencies": {
     "@types/node": "^22.20.4",
     "typescript": "^5.9.3"
-  }
+  },
+  "keywords": [
+    "claude",
+    "claude-code",
+    "agents",
+    "harness",
+    "autonomous",
+    "long-running",
+    "dashboard"
+  ]
 }

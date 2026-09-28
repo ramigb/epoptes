@@ -135,6 +135,14 @@ main { max-width: 1320px; margin: 0 auto; padding: 24px; }
 @media (prefers-color-scheme: dark) { .badge { color: #1a1206; } }
 @keyframes pop { from { transform: scale(0.4); } 70% { transform: scale(1.15); } to { transform: scale(1); } }
 
+.state.changed { animation: statein 0.6s ease-out; }
+@keyframes statein { from { transform: scale(0.85); filter: brightness(1.3); } 60% { transform: scale(1.06); } }
+.card.flash { animation: cardflash 2.4s ease-out; }
+@keyframes cardflash { 0%, 30% { box-shadow: 0 0 0 3px var(--done), var(--shadow); } }
+.empty-state ol, .first-run ol { margin: 0 0 10px; padding-left: 20px; display: grid; gap: 6px; }
+.first-run { margin-bottom: 16px; border-color: color-mix(in srgb, var(--accent) 35%, var(--line)); }
+.banner a { color: inherit; }
+
 /* ---------- panels ---------- */
 .panel {
   background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
@@ -193,6 +201,7 @@ main { max-width: 1320px; margin: 0 auto; padding: 24px; }
   transition: background-color 0.15s, border-color 0.15s, opacity 0.2s;
 }
 .btn:hover:not(:disabled) { border-color: var(--muted); }
+a.btn { text-decoration: none; color: inherit; }
 .btn:disabled { opacity: 0.45; cursor: default; }
 .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 @media (prefers-color-scheme: dark) { .btn.primary { color: #1a1206; } }

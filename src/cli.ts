@@ -150,6 +150,7 @@ async function main(argv: string[]) {
       out: { type: 'string' },
       goal: { type: 'string', short: 'g' },
       help: { type: 'boolean', short: 'h' },
+      version: { type: 'boolean', short: 'v' },
       all: { type: 'boolean' },
       port: { type: 'string' },
       lan: { type: 'boolean' },
@@ -158,6 +159,10 @@ async function main(argv: string[]) {
   const [cmd, ...rest] = positionals;
   const goalArg = (i = 0) => values.goal ?? rest[i];
 
+  if (values.version) {
+    const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+    return console.log(`epoptes ${pkg.version}`);
+  }
   switch (cmd) {
     case undefined:
     case 'help':
@@ -349,7 +354,12 @@ async function main(argv: string[]) {
       const port = Number(values.port ?? cfg.port ?? 4747);
       const lan = Boolean(values.lan ?? cfg.lan);
       const { serve } = await import('./ui/server.ts');
-      await serve({ port, lan });
+      try {
+        await serve({ port, lan });
+      } catch (e) {
+        if ((e as NodeJS.ErrnoException).code === 'EADDRINUSE') throw new Error(`port ${port} is in use. Is the dashboard already running? Open http://127.0.0.1:${port}, or pick another port with --port.`);
+        throw e;
+      }
       if (lan) {
         console.warn('WARNING: --lan serves the dashboard to your whole network with no login. Anyone who can reach this');
         console.warn('machine can start and stop runs and add feedback, which goes into the agents\' prompts.');

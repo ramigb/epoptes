@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import { readClock, runFinished, writeClock } from './clock.ts';
 import { emit, readEvents } from './events.ts';
 import { exists, nowIso, rm, writeJson } from './fsx.ts';
+import { adapters } from './adapters/claude-code.ts';
 import { loadGoal } from './goal.ts';
 import { goalPaths, type GoalPaths } from './paths.ts';
 import { LIVE_STATES, readStatus, reconcile, writeStatus, type Status } from './status.ts';
@@ -17,9 +18,12 @@ const isLive = (s: Status) => LIVE_STATES.includes(s.state);
  */
 export async function start(project: string, { newRun = false } = {}): Promise<Status> {
   const p = goalPaths(project);
-  loadGoal(p); // fail fast on an invalid goal
+  const goal = loadGoal(p); // fail fast on an invalid goal
   const s = reconcile(p);
   if (isLive(s)) throw new Error(`already ${s.state} (pid ${s.pid})`);
+  // Without this, a missing CLI shows up as six failed cycles.
+  const check = await adapters[goal.adapter.type].check();
+  if (!check.ok) throw new Error(check.problem);
   const finished = runFinished(p);
   if (finished && !newRun) {
     throw new Error(

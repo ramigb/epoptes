@@ -6,3 +6,4 @@ dist/
 .epoptes/run/
 .epoptes/cycles/
 .epoptes/snapshots.git/
+*.tgz

@@ -47,3 +47,8 @@ Append-only. Each entry: date · decision · why. To change one, add a new entry
 - **Active time in reports is rebuilt from events** (runner spans minus rate-limit waits), not read from `clock.json`. Why: a new run replaces the clock, so past runs would lose their active time.
 - **HTML reports are self-contained and script-free** (inline CSS + SVG chart, native `<title>` tooltips, a table next to the chart). Why: they must open from disk, print, and be safe to pass around; the dashboard serves them under a CSP with no scripts.
 - **The run.sh importer writes into the project's own `.epoptes/`** and refuses to overwrite records. Why: goal = directory, so git history, tags and paths just work. Checked on a clone of dress2impress: 19 cycles, ≈ $186.09, 273 turns and per-model costs match the raw logs exactly.
+
+## 2026-09-28 · M5 polish
+- **`bin/epoptes.mjs` launcher runs `src/` in a checkout and `dist/` in a package,** and checks Node ≥ 22.18. Why: `npm link` works for daily use with no build step, while the published package ships only compiled JS (Node won't strip types inside `node_modules`). Checked by installing the packed tarball into a clean folder and running a full (fake) run through it.
+- **`epoptes start` checks that `claude` runs before spawning a runner.** Why: otherwise a missing CLI shows up as six failed cycles and a "failed" goal.
+- **License: MIT.** Why: a permissive licence for a personal side project meant to help colleagues and anyone getting into long-horizon agent work; it contains no employer code or IP.
