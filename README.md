@@ -21,7 +21,7 @@ It grew out of a 12-hour autonomous game build. Its rules for keeping long runs 
 Epoptes isn't on npm yet, so install it from a checkout:
 
 ```sh
-git clone <this repo> epoptes && cd epoptes
+git clone https://github.com/ramigb/epoptes.git && cd epoptes
 npm install
 npm link            # puts `epoptes` on your PATH; runs the source directly, so no build step
 epoptes --version

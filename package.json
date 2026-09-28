@@ -43,5 +43,13 @@
     "autonomous",
     "long-running",
     "dashboard"
-  ]
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ramigb/epoptes.git"
+  },
+  "homepage": "https://github.com/ramigb/epoptes#readme",
+  "bugs": {
+    "url": "https://github.com/ramigb/epoptes/issues"
+  }
 }
