@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "Read", "Edit", "Write", "Glob", "Grep",
+      "Bash(ls *)", "Bash(cat *)", "Bash(head *)", "Bash(tail *)", "Bash(grep *)", "Bash(sed -n *)",
+      "Bash(wc *)", "Bash(sort *)", "Bash(diff *)", "Bash(find *)", "Bash(test *)", "Bash(echo *)",
+      "Bash(mkdir *)", "Bash(cp *)", "Bash(mv *)", "Bash(date *)", "Bash(pgrep *)", "Bash(kill *)"
+    ],
+    "deny": [
+      "Bash(sudo *)",
+      "Bash(git push *)", "Bash(git push)",
+      "Bash(git reset --hard *)", "Bash(git rebase *)", "Bash(git filter-branch *)", "Bash(git filter-repo *)",
+      "Bash(git commit --amend *)", "Bash(git clean -fdx *)", "Bash(git clean -xfd *)", "Bash(git clean -x *)",
+      "Bash(git stash -a *)", "Bash(git stash --all *)", "Bash(git checkout -- .)", "Bash(git branch -D *)",
+      "Bash(pkill *)", "Bash(rm -rf /*)", "Bash(rm -rf ~*)", "Bash(chmod -R *)",
+      "Bash(curl * | sh)", "Bash(curl * | bash)", "Bash(env)", "Bash(printenv *)", "Bash(printenv)",
+      "Read(./.env)", "Read(./.env.*)", "Read(~/.ssh/**)", "Read(~/.aws/**)", "Read(~/.config/gcloud/**)", "Read(~/.netrc)"
+    ]
+  }
+}

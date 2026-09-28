@@ -124,3 +124,17 @@ test('backlog markers', () => {
   fs.writeFileSync(path.join(p.state, 'backlog.md'), '**Current milestone: M2**\n- [x] A\n- [ ] B\n- [~] C\n- [blocked: needs key] D\n- [cut] E\n  - [X] F\n');
   assert.deepEqual(backlogCounts(p), { todo: 1, doing: 1, done: 2, blocked: 1, cut: 1, milestone: 'M2' });
 });
+
+test('skill templates: goal.json validates once filled in, and every template file is lint-clean after adaptation', () => {
+  const tpl = new URL('../plugin/skills/epoptes/templates/', import.meta.url);
+  const raw = fs.readFileSync(new URL('goal.json', tpl), 'utf8');
+  const filled = JSON.parse(raw.replace('{{goal-id}}', 'sample').replace(/\{\{[^}]*\}\}/g, 'sample text'));
+  assert.deepEqual(validate('goal', filled), []);
+  const settings = JSON.parse(fs.readFileSync(new URL('settings.json', tpl), 'utf8'));
+  for (const d of ['Bash(git push *)', 'Bash(git reset --hard *)', 'Bash(git clean -fdx *)', 'Read(./.env)']) assert.ok(settings.permissions.deny.includes(d), d);
+  const skill = fs.readFileSync(new URL('../plugin/skills/epoptes/SKILL.md', import.meta.url), 'utf8');
+  const { data } = parseFrontmatter(skill);
+  assert.equal(data.name, 'epoptes');
+  assert.ok(data.description.length > 50);
+  for (const ref of skill.matchAll(/\]\(([^)#]+)\)/g)) assert.ok(fs.existsSync(new URL(`../plugin/skills/epoptes/${ref[1]}`, import.meta.url)), `SKILL.md links to missing ${ref[1]}`);
+});

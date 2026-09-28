@@ -209,14 +209,22 @@ A local web server (`src/ui/`) plus static files (`ui/`, Preact via `htm`'s stan
 epoptes add [dir]                      validate .epoptes/goal.json and register it
 epoptes list
 epoptes status [goal]                  one screen: state, mode, clock, cycle, backlog, handoff head, open feedback
+epoptes clock [goal]                   one line for orchestrators: CYCLE RUN MODE ACTIVE TO_WRAPUP TO_END TO_HARD_STOP CYCLE_ELAPSED
 epoptes start | pause | stop [goal]
 epoptes extend [goal] <dur>            e.g. 2h, 30m
 epoptes reset-clock [goal]
-epoptes run [goal] --dry-run           check claude + files, print the next cycle's command; never starts the clock
+epoptes run [goal] --dry-run           check claude + files + guardrails (lint), print the next cycle's command; never starts the clock
 epoptes feedback [goal] "<text>"
+epoptes feedback [goal] [--open]       list (--open: new, seen, in progress, blocked)
 epoptes feedback <F-n> <status> ["note"]
 epoptes event <milestone|blocked|note|artifact|round|wrapup|done> "<text>"
 epoptes report [goal | --all] [--md | --html]
 epoptes ui [--port N] [--lan]
+epoptes skill install | path           link plugin/skills/epoptes into ~/.claude/skills
 ```
+
+## Skill (`plugin/`)
+A Claude Code plugin (`plugin/.claude-plugin/plugin.json`) with one skill, `plugin/skills/epoptes/`: `SKILL.md` (process + CLI reference), `reference/{interview,design,guardrails}.md`, and `templates/` (`goal.json`, `loop.md`, `settings.json`, `FEEDBACK.md`, `agents/{worker,checker,reviewer}.md`, `state/*.md`). Templates use `{{placeholders}}` and `<!-- template: … -->` notes; the dry-run lint rejects any that are left. Load it with `claude --plugin-dir plugin` (shows as `epoptes:epoptes`) or `epoptes skill install` (a symlink, so it tracks the repo).
+
+**Dry-run lint** (`src/lint.ts`): problems (exit 1) for template leftovers and role files without a description; warnings for credential-looking strings (reported by file, never printed), a deny list missing `git push` / `reset --hard` / `clean -fdx`, broad allows (`Bash(*)`), a loop that never runs `epoptes event done` or reads `epoptes feedback`, roles without a model, state files over their caps, an empty approval list, and all-manual done checks.
 The npm package is `@ramigb/epoptes`; the binary is `epoptes`.

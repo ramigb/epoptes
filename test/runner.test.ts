@@ -17,12 +17,13 @@ function setup(extra: Record<string, unknown> = {}) {
   const project = path.join(base, 'project');
   const root = path.join(project, '.epoptes');
   fs.mkdirSync(path.join(root, 'agents'), { recursive: true });
-  fs.writeFileSync(path.join(root, 'loop.md'), 'Do one small thing, then exit.\n');
+  fs.writeFileSync(path.join(root, 'loop.md'), 'Read `epoptes feedback --open`, do one small thing, then `epoptes event done` when finished.\n');
   fs.writeFileSync(path.join(root, 'agents', 'scribe.md'), '---\nname: scribe\ndescription: Writes files\nmodel: haiku\n---\nWrite the file.\n');
-  fs.writeFileSync(path.join(root, 'settings.json'), JSON.stringify({ permissions: { allow: ['Read'], deny: ['Bash(git push *)'] } }));
+  fs.writeFileSync(path.join(root, 'settings.json'), JSON.stringify({ permissions: { allow: ['Read'], deny: ['Bash(git push *)', 'Bash(git reset --hard *)', 'Bash(git clean -fdx *)'] } }));
   const goal = {
     version: 1, id: `e2e-${path.basename(base).slice(-6).toLowerCase()}`, name: 'E2E', kind: 'other', objective: 'test',
-    done: [{ id: 'D1', check: 'done', verify: { type: 'manual' } }],
+    done: [{ id: 'D1', check: 'done', verify: { type: 'file', path: 'out.txt' } }],
+    approval_required: ['spending money'],
     timebox: { total_min: 15, wrapup_min: 3, grace_min: 2 },
     adapter: { type: 'claude-code', model: 'haiku', effort: 'low' },
     cycle: { pause_between_s: 0 },
@@ -69,7 +70,7 @@ test('runs cycles until the orchestrator marks DONE', async () => {
     assert.deepEqual(validate('cycle-result', r), []);
     const argv = g.read(`${dir}/fake-argv.json`);
     assert.equal(argv.settings.permissions.defaultMode, 'auto', 'settings file carries the permission mode');
-    assert.deepEqual(argv.settings.permissions.deny, ['Bash(git push *)']);
+    assert.deepEqual(argv.settings.permissions.deny, ['Bash(git push *)', 'Bash(git reset --hard *)', 'Bash(git clean -fdx *)']);
     assert.deepEqual(argv.settings.permissions.allow, ['Read', 'Bash(epoptes *)']);
     assert.equal(argv.agents.scribe.model, 'haiku');
     assert.equal(argv.env.bg, '0');
@@ -160,5 +161,21 @@ test('dry run checks the setup and never starts the clock', () => {
   assert.match(out, /clock: not started/);
   assert.match(out, /--permission-mode auto/);
   assert.match(out, /\nok\n$/);
+  assert.match(g.run(['clock', g.project]), /MODE=none/);
+
+  // Template leftovers are problems; secrets and missing guardrails are warnings.
+  fs.writeFileSync(path.join(g.root, 'state', 'notes.md'), 'token = abcdefghijklmnopqrstuvwx\n{{fill me}}\n');
+  fs.writeFileSync(path.join(g.root, 'settings.json'), JSON.stringify({ permissions: { allow: ['Bash(*)'] } }));
+  let failed = '';
+  try {
+    g.run(['run', g.project, '--dry-run']);
+  } catch (e) {
+    failed = (e as { stdout: string }).stdout;
+  }
+  assert.match(failed, /state\/notes\.md still has \{\{placeholders\}\}/);
+  assert.match(failed, /state\/notes\.md looks like it contains a password assignment/);
+  assert.doesNotMatch(failed, /abcdefghijklmnop/, 'never prints the secret itself');
+  assert.match(failed, /deny list is missing Bash\(git push \*\)/);
+  assert.match(failed, /allows Bash\(\*\)/);
   assert.equal(fs.existsSync(path.join(g.root, 'run', 'clock.json')), false);
 });

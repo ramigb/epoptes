@@ -35,3 +35,10 @@ Append-only. Each entry: date · decision · why. To change one, add a new entry
 - **Local-only guards: Host allow-list, custom header + JSON for writes, Origin check, strict CSP.** Why: binding to 127.0.0.1 alone doesn't stop other websites (CSRF, DNS rebinding) from posting feedback, and feedback goes straight into agents' prompts.
 - **The dashboard shows a pause request as soon as `control.json` exists.** Why: the runner only notices it on its 15 s heartbeat, and a short cycle can end first.
 - **Starting a finished goal needs `--new-run` (dashboard: "Start new run…" + confirm).** Why: in the first real dashboard test, pressing Start on a DONE goal twice silently began runs r2 and r3, each spending a cycle to rediscover it was done, and the log called them "resume".
+
+## 2026-09-28 · M3 skill
+- **The skill ships as a Claude Code plugin in `plugin/`** (skill `epoptes:epoptes`); `epoptes skill install` symlinks it into `~/.claude/skills` for daily use. Why: `--plugin-dir` lets us test it without touching the user's config, and a symlink keeps it in step with the repo.
+- **Claude copies and adapts templates; there is no `epoptes init` scaffolder.** Why: every file needs goal-specific judgement anyway; the dry-run lint catches leftovers deterministically.
+- **Guardrails are checked, not just written down:** the dry-run lint (template leftovers, deny list, broad allows, secret-looking strings, loop wiring, caps).
+- **Orchestrators use `epoptes clock` and `epoptes feedback --open`.** Why: one line and only-open items keep orient steps small; `status` is for humans.
+- **Secrets point to a secret manager (e.g. the 1Password CLI or MCP).** The baseline deny list blocks `.env`, `~/.ssh`, `~/.aws`, `printenv`.

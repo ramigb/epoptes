@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "id": "{{goal-id}}",
+  "name": "{{Goal name}}",
+  "kind": "other",
+  "objective": "{{One or two sentences: what exists at the end, for whom.}}",
+  "done": [
+    { "id": "D1", "check": "{{check that a machine can run}}", "verify": { "type": "command", "run": "{{shell command that exits 0 when true}}" } },
+    { "id": "D2", "check": "{{check judged against the rubric}}", "verify": { "type": "agent" } }
+  ],
+  "non_goals": ["{{non-goal}}"],
+  "approval_required": ["spending money or adding paid services", "sending anything outside this machine", "deleting user data outside the deliverable"],
+  "timebox": { "total_min": 120, "wrapup_min": 15, "grace_min": 10, "pause_on_rate_limit": true },
+  "checkpoints": "shadow",
+  "adapter": { "type": "claude-code", "model": "sonnet", "effort": "medium", "permission_mode": "auto" },
+  "cycle": { "timeout_min": 60, "pause_between_s": 15, "max_budget_usd": null },
+  "failures": { "cooldown_after": 3, "cooldown_min": 10, "give_up_after": 6 },
+  "rate_limit": { "backoff_s": 300, "backoff_max_s": 1800 },
+  "state_caps": { "handoff.md": 25, "lessons.md": 30, "progress.md": 80 },
+  "notify": ["milestone", "blocked", "done"]
+}

@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 // epoptes: a thin CLI over the goal files, used by you and by orchestrators inside cycles.
+import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { adapters, agentsFromDir } from './adapters/claude-code.ts';
 import { readClock, readClockState } from './clock.ts';
@@ -10,6 +12,7 @@ import { emit } from './events.ts';
 import { addFeedback, ingestInbox, noteFeedback, readFeedback, setFeedbackStatus, STATUSES, type FeedbackStatus } from './feedback.ts';
 import { exists, hm, parseDuration, readJson, touch } from './fsx.ts';
 import { loadGoal } from './goal.ts';
+import { lintGoal } from './lint.ts';
 import { epoptesHome, goalPaths } from './paths.ts';
 import { addGoal, readRegistry, resolveGoal } from './registry.ts';
 import { runGoal } from './runner.ts';
@@ -22,6 +25,7 @@ Goals
   add [dir]                       validate <dir>/.epoptes/goal.json and register it
   list                            all registered goals
   status [goal]                   state, clock, cycle, backlog, feedback, handoff
+  clock [goal]                    one line for orchestrators: CYCLE MODE ACTIVE TO_WRAPUP TO_END …
 
 Runs
   start [goal] [--new-run]        resume, or start (spawns a detached runner); --new-run after DONE / time box over
@@ -33,11 +37,16 @@ Runs
 
 Steering
   feedback [goal] "<text>"        add a feedback item (F-<n>)
+  feedback [goal] [--open]        list feedback (--open: only items that still need attention)
   feedback <F-n> <status> [note]  set status: ${STATUSES.join(', ')}
   feedback <F-n> note "<text>"    comment on an item
   event <type> "<text>"           milestone | blocked | note | artifact | round | wrapup | done
 
 Later
+Skill
+  skill install                   link the epoptes skill into ~/.claude/skills (for Claude Code)
+  skill path                      print where the skill lives
+
 Dashboard
   ui [--port N] [--lan]           live dashboard on http://127.0.0.1:4747 (--lan: whole network, no auth)
 
@@ -114,10 +123,13 @@ async function dryRun(project: string) {
   console.log(cs ? `clock: mode ${cs.mode}, ${hm(cs.active)} active (unchanged)` : 'clock: not started (a dry run never starts it)');
   console.log(`next cycle runs in ${tilde(p.project)}:\n  ${cmd.bin} ${cmd.args.map((a) => (/[\s<>*]/.test(a) ? JSON.stringify(a) : a)).join(' ')}`);
   console.log(`generated files: ${tilde(dir)}/{agents,settings}.json`);
+  const lint = lintGoal(p, goal);
+  problems.push(...lint.problems);
+  if (lint.warnings.length) console.log(`\nwarnings:\n  ${lint.warnings.join('\n  ')}`);
   if (problems.length) {
     console.log(`\nproblems:\n  ${problems.join('\n  ')}`);
     process.exitCode = 1;
-  } else console.log('\nok');
+  } else console.log(lint.warnings.length ? '\nok with warnings' : '\nok');
 }
 
 async function main(argv: string[]) {
@@ -127,6 +139,7 @@ async function main(argv: string[]) {
     options: {
       'dry-run': { type: 'boolean' },
       'new-run': { type: 'boolean' },
+      open: { type: 'boolean' },
       goal: { type: 'string', short: 'g' },
       help: { type: 'boolean', short: 'h' },
       all: { type: 'boolean' },
@@ -168,6 +181,34 @@ async function main(argv: string[]) {
     case 'status':
       console.log(statusText(resolveGoal(goalArg())));
       return;
+    case 'clock': {
+      const p = goalPaths(resolveGoal(goalArg()));
+      const c = readClock(p);
+      const cs = readClockState(p);
+      const s = reconcile(p);
+      if (!c || !cs) return console.log(`CYCLE=${s.cycle} MODE=none (clock not started)`);
+      const elapsed = s.cycle_started_at ? ` CYCLE_ELAPSED=${hm((Date.now() - Date.parse(s.cycle_started_at)) / 1000)}` : '';
+      console.log(`CYCLE=${envCycle() ?? s.cycle} RUN=${c.run} MODE=${cs.mode} ACTIVE=${hm(cs.active)} TO_WRAPUP=${hm(cs.toWrapup)} TO_END=${hm(cs.toEnd)} TO_HARD_STOP=${hm(cs.toHard)}${elapsed}`);
+      return;
+    }
+    case 'skill': {
+      const src = fileURLToPath(new URL('../plugin/skills/epoptes', import.meta.url));
+      if (rest[0] === 'path') return console.log(src);
+      if (rest[0] !== 'install') throw new Error('usage: epoptes skill install | epoptes skill path');
+      const dest = path.join(os.homedir(), '.claude', 'skills', 'epoptes');
+      let current: string | null = null;
+      try {
+        current = fs.readlinkSync(dest);
+      } catch (e) {
+        if ((e as NodeJS.ErrnoException).code === 'EINVAL') throw new Error(`${dest} exists and is not a link; move it away first`);
+      }
+      if (current === src) return console.log(`already installed: ${tilde(dest)} → ${src}`);
+      if (current) fs.rmSync(dest);
+      fs.mkdirSync(path.dirname(dest), { recursive: true });
+      fs.symlinkSync(src, dest, 'dir');
+      console.log(`installed: ${tilde(dest)} → ${src}\nIn Claude Code: "use the epoptes skill to build a harness for <goal>"`);
+      return;
+    }
     case 'start': {
       const s = await control.start(resolveGoal(goalArg()), { newRun: Boolean(values['new-run']) });
       console.log(`started: run ${s.run}, runner pid ${s.pid}`);
@@ -224,7 +265,9 @@ async function main(argv: string[]) {
       if (!text) {
         const p = goalPaths(resolveGoal(ref));
         ingestInbox(p);
-        for (const f of readFeedback(p).values()) console.log(`${f.id.padEnd(6)} ${f.status.padEnd(12)} ${f.text}`);
+        const items = [...readFeedback(p).values()].filter((f) => !values.open || !['done', 'wont_do'].includes(f.status));
+        if (!items.length) console.log(values.open ? 'no open feedback' : 'no feedback yet');
+        for (const f of items) console.log(`${f.id.padEnd(6)} ${f.status.padEnd(12)} ${f.text}`);
         return;
       }
       const id = addFeedback(goalPaths(resolveGoal(ref)), text, 'cli');

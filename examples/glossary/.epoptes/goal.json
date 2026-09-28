@@ -10,7 +10,7 @@
     { "id": "D2", "check": "every entry has an 'Example:' line", "verify": { "type": "agent" } }
   ],
   "non_goals": ["code", "web research"],
-  "approval_required": [],
+  "approval_required": ["publishing or sending anything outside this machine"],
   "timebox": { "total_min": 15, "wrapup_min": 4, "grace_min": 3, "pause_on_rate_limit": true },
   "checkpoints": "shadow",
   "adapter": { "type": "claude-code", "model": "sonnet", "effort": "low", "permission_mode": "auto" },

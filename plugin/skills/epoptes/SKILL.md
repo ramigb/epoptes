@@ -1,0 +1,92 @@
+---
+name: epoptes
+description: Design, generate and register a long-running, time-boxed autonomous harness that the Epoptes runner executes as fresh-context Claude Code cycles, for any goal (code, research, content, data). Use when the user wants to build or set up a harness, an overnight or multi-hour autonomous run, or mentions Epoptes. Also use to check on or steer existing Epoptes goals (status, start, pause, stop, feedback, events, reports).
+---
+
+# Epoptes: harnesses for long-running goals
+
+Epoptes runs a goal as a series of **cycles**. Each cycle is a fresh `claude -p` orchestrator that reads the goal's files, does one slice of work through subagents, verifies it, records state and exits. All memory lives in files under `<project>/.epoptes/`. The runner, CLI and dashboard only read and write those files.
+
+You do one of two jobs:
+- **Check on or steer a goal:** use the CLI (reference at the bottom). Read `epoptes status <goal>` before anything else. Don't open `cycles/` transcripts unless the user asks.
+- **Build a harness:** follow the process below. Do every step, in order.
+
+## Building a harness
+
+### 1. Interview
+Work through [reference/interview.md](reference/interview.md) until every item has an answer the user agreed to. Ask in small batches (2–4 questions). Use AskUserQuestion when there are clear options, and always put your recommended default first. Look at the project directory yourself first, so you ask only what you can't find out.
+
+Keep asking until you agree. Never fill a gap with a silent assumption; propose a default and get a yes.
+
+### 2. Design
+Use [reference/design.md](reference/design.md) to pick:
+- the roles (and their models and effort)
+- the cycle size and budgets
+- the state files and their caps
+- how each done check is verified
+- the backlog's first milestones
+
+Adapt the roles to the goal. Don't copy a software team onto a research goal.
+
+### 3. Sign-off
+Show the one-screen summary from interview.md. Wait for an explicit yes. If the user changes anything, update the summary and ask again.
+
+### 4. Generate
+1. Copy [templates/](templates/) into `<project>/.epoptes/`: `goal.json`, `loop.md`, `settings.json`, `FEEDBACK.md`, `agents/*.md` and `state/*.md`.
+2. Adapt **every** file to this goal:
+   - Replace every `{{…}}` placeholder.
+   - Delete the template notes (lines starting with `<!-- template:`).
+   - Rename, add or remove role files to match the design.
+   - Seed `state/backlog.md` with the first milestones and tasks, and `state/decisions.md` with what the interview settled.
+3. Apply [reference/guardrails.md](reference/guardrails.md): the permissions for this goal kind, no git push or history rewrites, and secrets kept out of every file.
+4. For a new directory without git: set `checkpoints` to `shadow`, not `git`, unless the user wants a repo.
+
+### 5. Check
+Run `epoptes run --dry-run <project>`. Fix every problem **and** every warning it prints, then run it again until it prints `ok`. It never starts the clock.
+
+### 6. Register
+Run `epoptes add <project>`. Then tell the user:
+- the goal id
+- how to start it (`epoptes start <id>`, or Start in the dashboard, `epoptes ui` → http://127.0.0.1:4747)
+- how to give feedback while it runs
+
+Offer to start it; don't start it without a yes.
+
+## Rules every generated harness follows
+- **Fresh context every cycle.** All memory is in `state/`, and each state file has a cap in `goal.json` `state_caps`.
+- **Targeted reads.** The orchestrator reads headers and slices (`grep -n`, `sed -n`), never whole large files or transcripts.
+- **Cheap models for mechanical roles.** Checkers run on Haiku with low effort; judgement and creative work run on Sonnet or Opus.
+- **Reuse workers.** Send fixes back to the same worker with SendMessage instead of briefing a new one.
+- **Caps per cycle:** at most 3 rounds, a soft time limit (usually 45–60 min), and optionally `cycle.max_budget_usd`.
+- **Parallel tasks own separate files.** Two workers never write the same file in one round.
+- **Guardrails:**
+  - a permissions allow/deny list
+  - no `git push`, no history rewrites, no destructive cleans
+  - secrets never in goal files (point to the user's secret manager, e.g. the 1Password CLI or MCP)
+- **Anything in the goal's approval list is never done autonomously.** The orchestrator marks the task `[blocked: needs approval]`, runs `epoptes event blocked "…"` and moves on.
+- **Semantic events go through the CLI:** `epoptes event milestone|blocked|done …` (plus PushNotification when it's available).
+
+## CLI reference
+Inside a cycle, the runner sets `EPOPTES_GOAL_DIR`, `EPOPTES_RUN`, `EPOPTES_CYCLE` and `EPOPTES_MODE`, so the goal argument can be left out. `[goal]` is a registered id or a path.
+
+| command | what it does |
+|---|---|
+| `epoptes add [dir]` | validate `<dir>/.epoptes/goal.json` and register the goal |
+| `epoptes list` | all goals with state, cycle, mode and active time |
+| `epoptes status [goal]` | one screen: state, clock, cycle, backlog, feedback, usage, last cycle, handoff |
+| `epoptes clock` | one line for orchestrators: `CYCLE= RUN= MODE= ACTIVE= TO_WRAPUP= TO_END= TO_HARD_STOP= CYCLE_ELAPSED=` |
+| `epoptes run [goal] --dry-run` | check the setup and guardrails, print the next cycle's command; never starts the clock |
+| `epoptes start [goal]` | resume, or start a detached run; `--new-run` after DONE or when the time box is over |
+| `epoptes pause [goal]` | pause after the current cycle (the clock pauses too) |
+| `epoptes stop [goal]` | stop now; the next cycle recovers interrupted work |
+| `epoptes extend [goal] <dur>` | lengthen the time box, e.g. `2h`, `30m` |
+| `epoptes reset-clock [goal]` | clear the clock; the next start is a new run |
+| `epoptes feedback [goal] "<text>"` | add a feedback item (`F-<n>`) |
+| `epoptes feedback [goal] [--open]` | list feedback (`--open`: only new, seen, in progress, blocked) |
+| `epoptes feedback F-<n> <status> ["note"]` | set a status: `new`, `seen`, `in_progress`, `done`, `blocked`, `wont_do` |
+| `epoptes feedback F-<n> note "<text>"` | comment on an item |
+| `epoptes event milestone\|blocked\|note\|artifact\|round\|wrapup\|done "<text>"` | record a semantic event; `wrapup` and `done` also set the run markers |
+| `epoptes report [goal]` | report (arrives in M4) |
+| `epoptes ui` | the local dashboard on http://127.0.0.1:4747 |
+
+When the user asks how a goal is doing, run `epoptes status <goal>` and summarise it in a few lines: state, time left, progress and anything blocked. When they give feedback in chat, add it with `epoptes feedback <goal> "<their words>"` rather than editing files.
