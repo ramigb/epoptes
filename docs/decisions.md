@@ -28,3 +28,9 @@ Append-only. Each entry: date · decision · why. To change one, add a new entry
 - **The runner writes `run/bin/epoptes`, a shim for the exact CLI that started it, first on the cycle's PATH;** the adapter always allows `Bash(epoptes *)`. Why: orchestrators must be able to report without a global install, and always to the same version.
 - **Runner tests use a fake `claude` (`test/fake-claude.mjs`, via `EPOPTES_CLAUDE_BIN`).** Why: start/stop/pause/fail paths get tested end to end without spending tokens.
 - **`epoptes start` confirms on the runner's `run.start` event, not on a live status.** Why: a short run can finish before the first poll.
+
+## 2026-09-28 · M2 dashboard
+- **Preact through `htm/preact/standalone.module.js`, served from `node_modules`; plain JS modules in `ui/`; no bundler.** Why: keyed diffing keeps inputs focused and lets only new items animate, in a 13 KB file with no build step and no CDN (no external calls).
+- **Polling (1 s) + incremental JSONL tails + SSE, not fs.watch.** Why: inotify doesn't fire on WSL's `/mnt` drives; a stat per file per second is cheap.
+- **Local-only guards: Host allow-list, custom header + JSON for writes, Origin check, strict CSP.** Why: binding to 127.0.0.1 alone doesn't stop other websites (CSRF, DNS rebinding) from posting feedback, and feedback goes straight into agents' prompts.
+- **The dashboard shows a pause request as soon as `control.json` exists.** Why: the runner only notices it on its 15 s heartbeat, and a short cycle can end first.

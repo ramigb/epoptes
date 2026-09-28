@@ -39,6 +39,30 @@ export function backlogCounts(p: GoalPaths): BacklogCounts | null {
   return c;
 }
 
+export interface BacklogItem {
+  mark: 'todo' | 'doing' | 'done' | 'blocked' | 'cut';
+  text: string;
+}
+
+/** Task lines of state/backlog.md, in file order. */
+export function backlogItems(p: GoalPaths): BacklogItem[] {
+  let text: string;
+  try {
+    text = fs.readFileSync(path.join(p.state, 'backlog.md'), 'utf8');
+  } catch {
+    return [];
+  }
+  const out: BacklogItem[] = [];
+  for (const line of text.split('\n')) {
+    const m = /^\s*[-*]\s+\[([^\]]*)\]\s*(.*)$/.exec(line);
+    if (!m) continue;
+    const mark = m[1].trim().toLowerCase();
+    const kind = mark === '' ? 'todo' : mark === '~' ? 'doing' : mark === 'x' ? 'done' : mark.startsWith('blocked') ? 'blocked' : mark === 'cut' ? 'cut' : null;
+    if (kind) out.push({ mark: kind, text: kind === 'blocked' && m[1].includes(':') ? `${m[2]} (${m[1].split(':').slice(1).join(':').trim()})` : m[2] });
+  }
+  return out;
+}
+
 export function lastResult(p: GoalPaths): (CycleResult & { cycle: number; run: string }) | null {
   let dirs: string[] = [];
   try {

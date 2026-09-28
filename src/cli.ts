@@ -8,9 +8,9 @@ import { readClock, readClockState } from './clock.ts';
 import * as control from './control.ts';
 import { emit } from './events.ts';
 import { addFeedback, ingestInbox, noteFeedback, readFeedback, setFeedbackStatus, STATUSES, type FeedbackStatus } from './feedback.ts';
-import { exists, hm, parseDuration, touch } from './fsx.ts';
+import { exists, hm, parseDuration, readJson, touch } from './fsx.ts';
 import { loadGoal } from './goal.ts';
-import { goalPaths } from './paths.ts';
+import { epoptesHome, goalPaths } from './paths.ts';
 import { addGoal, readRegistry, resolveGoal } from './registry.ts';
 import { runGoal } from './runner.ts';
 import { reconcile } from './status.ts';
@@ -38,8 +38,11 @@ Steering
   event <type> "<text>"           milestone | blocked | note | artifact | round | wrapup | done
 
 Later
+Dashboard
+  ui [--port N] [--lan]           live dashboard on http://127.0.0.1:4747 (--lan: whole network, no auth)
+
+Later
   report [goal|--all]             (M4)
-  ui                              (M2)
 
 [goal] is a registered id or a path. Without it: $EPOPTES_GOAL_DIR, then the nearest .epoptes/ above the cwd.`;
 
@@ -121,7 +124,14 @@ async function main(argv: string[]) {
   const { values, positionals } = parseArgs({
     args: argv,
     allowPositionals: true,
-    options: { 'dry-run': { type: 'boolean' }, goal: { type: 'string', short: 'g' }, help: { type: 'boolean', short: 'h' }, all: { type: 'boolean' } },
+    options: {
+      'dry-run': { type: 'boolean' },
+      goal: { type: 'string', short: 'g' },
+      help: { type: 'boolean', short: 'h' },
+      all: { type: 'boolean' },
+      port: { type: 'string' },
+      lan: { type: 'boolean' },
+    },
   });
   const [cmd, ...rest] = positionals;
   const goalArg = (i = 0) => values.goal ?? rest[i];
@@ -241,8 +251,19 @@ async function main(argv: string[]) {
     }
     case 'report':
       throw new Error('reports arrive in M4');
-    case 'ui':
-      throw new Error('the dashboard arrives in M2');
+    case 'ui': {
+      const cfg = readJson<{ port?: number; lan?: boolean }>(path.join(epoptesHome(), 'config.json')) ?? {};
+      const port = Number(values.port ?? cfg.port ?? 4747);
+      const lan = Boolean(values.lan ?? cfg.lan);
+      const { serve } = await import('./ui/server.ts');
+      await serve({ port, lan });
+      if (lan) {
+        console.warn('WARNING: --lan serves the dashboard to your whole network with no login. Anyone who can reach this');
+        console.warn('machine can start and stop runs and add feedback, which goes into the agents\' prompts.');
+        console.log(`epoptes dashboard on http://0.0.0.0:${port}`);
+      } else console.log(`epoptes dashboard on http://127.0.0.1:${port}  (Ctrl-C to quit; runs keep going)`);
+      return;
+    }
     default:
       throw new Error(`unknown command "${cmd}"\n\n${HELP}`);
   }

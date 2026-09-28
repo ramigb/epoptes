@@ -195,6 +195,15 @@ The runner owns timeouts: it calls `interrupt()` at the cycle timeout (capped by
 - Stream facts (2.1.283): subagent messages carry `parent_tool_use_id`, `subagent_type` and `task_description`; `system/task_started` and `system/task_notification` bracket each subagent (with `task_id`, `usage`). Agent calls start in the background by default; the print session then runs extra turns and emits one `result` event per turn (`result_index`), each with cumulative totals, so the **last** `result` is the cycle result. `rate_limit_event` carries the account's `status`, `resetsAt` and per-window utilization.
 - Rate limits: a `rate_limit_event` whose status isn't `allowed`/`allowed_warning` gives an exact `resets_at`, and the runner waits until then. Otherwise it falls back to the text match from `run.sh` (`rate limit`, `usage limit`, `overloaded`, `429`, `529`) with exponential backoff.
 
+## Dashboard (`epoptes ui`)
+A local web server (`src/ui/`) plus static files (`ui/`, Preact via `htm`'s standalone build, no build step). It only reads and writes the goal files, and it calls the same control code as the CLI.
+- **Binding:** `127.0.0.1:4747` by default (`--port`, or `port` in `~/.epoptes/config.json`). `--lan` binds `0.0.0.0` after a warning; there is no login in v1.
+- **Guards:** requests must carry `Host: 127.0.0.1|localhost|[::1]:<port>` (DNS-rebinding guard; skipped with `--lan`). Every write needs `X-Epoptes: 1` and a JSON body, and a present `Origin` must match; that forces a CORS preflight the server never answers, so other sites can't post feedback (which ends up in prompts) or start runs. A strict CSP allows only `'self'`.
+- **Updates:** the server polls each goal every second (inotify doesn't work on WSL's `/mnt` drives), tails the JSONL files incrementally, and pushes `update` events over SSE (`/api/stream`): `{id, parts, events, feedback, activity, cycle}`. After a write it polls that goal at once.
+- **API:** `GET /api/state` (all goal summaries + newest `limits`), `GET /api/goals/<id>` (detail), `GET /api/goals/<id>/cycles/<n>` (one cycle's result and activity), `POST /api/goals/<id>/control {action: start|pause|stop|extend|reset, seconds?}`, `POST /api/goals/<id>/feedback {text}`, `POST /api/goals/<id>/feedback/<F-n> {status?, note?}`, `POST /api/goals/<id>/seen`.
+- **Unread badges:** feedback updates by the orchestrator and `milestone | blocked | done | warn | run.end` events newer than the goal's cursor in `~/.epoptes/ui.json`. Opening a goal moves the cursor; a goal seen for the first time starts at "now".
+- **Notifications:** toasts and the activity feed for the same events plus rate-limit waits and failed cycles; desktop notifications (browser Notification API, opt-in button) for the types in `goal.notify`. Milestones and DONE get a small confetti burst, skipped under `prefers-reduced-motion`, which also turns off every animation.
+
 ## CLI
 ```
 epoptes add [dir]                      validate .epoptes/goal.json and register it

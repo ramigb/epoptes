@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Stands in for `claude -p` in runner tests (set EPOPTES_CLAUDE_BIN to this file). Costs no tokens.
-// FAKE_CLAUDE = ok (default) | slow | error | ratelimit. FAKE_DONE_AT = cycle number that marks the goal DONE.
+// FAKE_CLAUDE = ok (default) | slow | error | ratelimit | trickle (slow stream, for watching the dashboard). FAKE_DONE_AT = cycle number that marks the goal DONE.
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -35,6 +35,16 @@ if (mode === 'ratelimit') {
   out({ type: 'rate_limit_event', rate_limit_info: { status: 'rejected', resetsAt: Math.floor(Date.now() / 1000) - 10, unifiedWindows: { five_hour: { utilization: 1, resetsAt: 0 } } } });
   out({ type: 'result', subtype: 'error_during_execution', is_error: true, num_turns: 1, result: "You've hit your usage limit", total_cost_usd: 0, modelUsage: {} });
   process.exit(1);
+}
+if (mode === 'trickle') {
+  const delay = Number(process.env.FAKE_DELAY_MS ?? 900);
+  for (const [i, line] of fixture.entries()) {
+    out(line);
+    if (i === Math.floor(fixture.length / 2) && cycle % 2 === 0) execFileSync('epoptes', ['event', 'milestone', `halfway through cycle ${cycle}`]);
+    await new Promise((r) => setTimeout(r, delay));
+  }
+  if (Number(process.env.FAKE_DONE_AT) === cycle) execFileSync('epoptes', ['event', 'done', 'demo finished']);
+  process.exit(0);
 }
 if (mode === 'slow') {
   out(fixture[0]);
