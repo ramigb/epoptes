@@ -20,16 +20,19 @@ It grew out of a 12-hour autonomous game build. Its rules for keeping long runs 
 - **Linux, macOS or WSL2**
 
 ## Install
-Epoptes isn't on npm yet, so install it from a checkout:
+```sh
+npm install -g @ramigbcom/epoptes
+epoptes --version
+```
+Or run it without installing: `npx @ramigbcom/epoptes <command>`.
 
+**From a checkout** (to hack on it):
 ```sh
 git clone https://github.com/ramigb/epoptes.git && cd epoptes
 npm install
 npm link            # puts `epoptes` on your PATH; runs the source directly, so no build step
-epoptes --version
 ```
-
-On WSL2, keep the checkout on the Linux side (`~/…`), not under `/mnt/c` or `/mnt/d`, if you can. Loading `node_modules` from Windows drives is slow. Once it's published, `npm install -g @ramigb/epoptes` (or `npx @ramigb/epoptes …`) will work too.
+On WSL2, keep the checkout on the Linux side (`~/…`), not under `/mnt/c` or `/mnt/d`, if you can. Loading `node_modules` from Windows drives is slow.
 
 ## Quick start
 1. **Give Claude Code the skill:**

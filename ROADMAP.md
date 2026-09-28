@@ -4,7 +4,6 @@ Short and current. New notes land in `NOTES.md` and get triaged here at the star
 
 ## Now
 - **Try the skill interactively** (`epoptes skill install`, then in Claude Code: "use the epoptes skill to build a harness for …") and note what the interview gets wrong in NOTES.md.
-- **Publish** when ready: `npm publish --access public` (MIT; `npm pack` builds `dist/`).
 
 ## Later / ideas
 - The FAQ run did 5 task rows in one cycle against the 3-round cap (harmless on a 20 min goal); watch whether longer goals respect it.
