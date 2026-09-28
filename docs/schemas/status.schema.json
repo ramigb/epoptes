@@ -3,24 +3,146 @@
   "$id": "status.schema.json",
   "title": "Runner status (.epoptes/run/status.json)",
   "type": "object",
-  "required": ["version", "state", "pid", "run", "cycle", "mode", "heartbeat_at", "updated_at"],
+  "required": [
+    "version",
+    "state",
+    "pid",
+    "run",
+    "cycle",
+    "mode",
+    "heartbeat_at",
+    "updated_at"
+  ],
   "additionalProperties": false,
   "properties": {
-    "version": { "const": 1 },
-    "state": {
-      "enum": ["idle", "running", "waiting", "rate_limited", "cooldown", "pausing", "paused",
-               "stopped", "crashed", "failed", "done", "timeboxed"]
+    "version": {
+      "const": 1
     },
-    "pid": { "type": ["integer", "null"] },
-    "run": { "type": ["string", "null"], "pattern": "^r[0-9]+$" },
-    "cycle": { "type": "integer", "minimum": 0, "description": "last started cycle; 0 = none yet" },
-    "mode": { "enum": ["build", "wrapup", "overtime", "stop", null] },
-    "cycle_started_at": { "type": ["string", "null"], "format": "date-time" },
-    "heartbeat_at": { "type": ["string", "null"], "format": "date-time" },
-    "waiting_until": { "type": ["string", "null"], "format": "date-time" },
-    "wait_reason": { "enum": ["rate_limit", "cooldown", "between_cycles", null] },
-    "pause_requested": { "type": "boolean", "default": false },
-    "fails_in_row": { "type": "integer", "minimum": 0, "default": 0 },
-    "updated_at": { "type": "string", "format": "date-time" }
+    "state": {
+      "enum": [
+        "idle",
+        "running",
+        "waiting",
+        "rate_limited",
+        "cooldown",
+        "pausing",
+        "paused",
+        "stopped",
+        "crashed",
+        "failed",
+        "done",
+        "timeboxed"
+      ]
+    },
+    "pid": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "run": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^r[0-9]+$"
+    },
+    "cycle": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "last started cycle; 0 = none yet"
+    },
+    "mode": {
+      "enum": [
+        "build",
+        "wrapup",
+        "overtime",
+        "stop",
+        null
+      ]
+    },
+    "cycle_started_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "heartbeat_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "waiting_until": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "wait_reason": {
+      "enum": [
+        "rate_limit",
+        "cooldown",
+        "between_cycles",
+        null
+      ]
+    },
+    "pause_requested": {
+      "type": "boolean",
+      "default": false
+    },
+    "fails_in_row": {
+      "type": "integer",
+      "minimum": 0,
+      "default": 0
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "limits": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "description": "latest account usage report from the adapter",
+      "properties": {
+        "status": {
+          "type": "string"
+        },
+        "resets_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "windows": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "utilization": {
+                "type": "number"
+              },
+              "resets_at": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              }
+            }
+          }
+        },
+        "at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    }
   }
 }

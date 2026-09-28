@@ -1,0 +1,6 @@
+{
+  "permissions": {
+    "allow": ["Read", "Edit", "Write", "Bash(cat *)", "Bash(grep *)", "Bash(echo *)", "Bash(ls *)"],
+    "deny": ["Bash(git push *)", "Bash(rm -rf *)", "Bash(sudo *)", "WebFetch", "WebSearch"]
+  }
+}

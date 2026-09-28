@@ -15,3 +15,16 @@ Append-only. Each entry: date · decision · why. To change one, add a new entry
 - **Cost is labelled `estimate` unless the cycle ran with an API key.** The UI shows "≈ $x (estimate)" with a tooltip "API-equivalent estimate, not billed". Phase 1 has no API key, so it's always an estimate. The runner checks that a key is present and never reads or stores it.
 - **Non-code checkpoints use a shadow git repo** (`.epoptes/snapshots.git`, committed by the runner after each cycle). Why: diffable, cheap, no tokens, and it never touches the user's own repo.
 - **Package `@ramigb/epoptes`, binary `epoptes`.** Why: scoped name; an unrelated Debian `epoptes` binary is an acceptable clash.
+
+## 2026-09-28 · M1 probe findings (claude 2.1.283)
+- **The cycle settings file always sets `permissions.defaultMode`.** Why: a `--settings` file without it silently overrides `--permission-mode auto` back to `default`. The runner also warns when the init event reports a different mode.
+- **Cost basis comes from the init event's `apiKeySource`,** not from inspecting the environment. Why: the adapter knows what `claude` actually used, and Epoptes never has to look at env vars that might hold keys.
+- **Rate-limit state comes from `rate_limit_event` in the stream** (exact reset time, per-window utilization), with the `run.sh` text match as a fallback. Why: precise waits instead of blind backoff, and a shared usage view for zero tokens.
+- **The last `result` event is the cycle result.** Why: background subagents make the print session run extra turns, each ending in a `result` with cumulative totals.
+
+## 2026-09-28 · M1 build
+- **Source runs directly on Node ≥ 22.18 (type stripping); `tsc` only builds `dist/` for npm.** Tests use `node --test`. Why: no dev build step and no test framework dependency; `ajv` is the only runtime dependency.
+- **`ajv` loads lazily.** Why: requiring it from `node_modules` on WSL's `/mnt/d` takes ~5 s (57 ms on ext4), and the commands orchestrators call inside cycles never validate.
+- **The runner writes `run/bin/epoptes`, a shim for the exact CLI that started it, first on the cycle's PATH;** the adapter always allows `Bash(epoptes *)`. Why: orchestrators must be able to report without a global install, and always to the same version.
+- **Runner tests use a fake `claude` (`test/fake-claude.mjs`, via `EPOPTES_CLAUDE_BIN`).** Why: start/stop/pause/fail paths get tested end to end without spending tokens.
+- **`epoptes start` confirms on the runner's `run.start` event, not on a live status.** Why: a short run can finish before the first poll.

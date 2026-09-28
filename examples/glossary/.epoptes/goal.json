@@ -1,0 +1,20 @@
+{
+  "$schema": "../../../docs/schemas/goal.schema.json",
+  "version": 1,
+  "id": "glossary",
+  "name": "Harness glossary (test goal)",
+  "kind": "content",
+  "objective": "Write glossary.md: six plain-language entries about long-running agent harnesses, each with an example line.",
+  "done": [
+    { "id": "D1", "check": "glossary.md has six bold terms", "verify": { "type": "command", "run": "test $(grep -c '^\\*\\*' glossary.md) -ge 6" } },
+    { "id": "D2", "check": "every entry has an 'Example:' line", "verify": { "type": "agent" } }
+  ],
+  "non_goals": ["code", "web research"],
+  "approval_required": [],
+  "timebox": { "total_min": 15, "wrapup_min": 4, "grace_min": 3, "pause_on_rate_limit": true },
+  "checkpoints": "shadow",
+  "adapter": { "type": "claude-code", "model": "sonnet", "effort": "low", "permission_mode": "auto" },
+  "cycle": { "timeout_min": 20, "pause_between_s": 5, "max_budget_usd": 1 },
+  "state_caps": { "handoff.md": 10, "progress.md": 20 },
+  "notify": ["milestone", "blocked", "done"]
+}

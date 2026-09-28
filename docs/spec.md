@@ -22,7 +22,7 @@ The file format is the contract: the runner, CLI, dashboard and skill only read 
     events.jsonl           event log                     append-only, anyone        committed
     snapshots.git/         shadow checkpoints            runner (checkpoints=shadow) ignored
     run/                   live runner state             runner (+ CLI for control) ignored
-      status.json  clock.json  control.json  DONE  WRAPUP  runner.log
+      status.json  clock.json  control.json  runner.lock  DONE  WRAPUP  runner.log  bin/epoptes
     cycles/<NNNNNN>/       per-cycle records             runner                     ignored
       result.json  activity.jsonl  stream.jsonl  stderr.log
     .gitignore             run/ cycles/ snapshots.git/ *.tmp .feedback.lock
@@ -81,7 +81,9 @@ There is no daemon. `epoptes start` spawns one detached runner per goal (`setsid
 - `run --dry-run` never creates or changes the clock.
 
 ## run/status.json — `status.schema.json`
-`{version, state, pid, run, cycle, mode, cycle_started_at, heartbeat_at, waiting_until, wait_reason, pause_requested, fails_in_row, updated_at}`
+`{version, state, pid, run, cycle, mode, cycle_started_at, heartbeat_at, waiting_until, wait_reason, pause_requested, fails_in_row, limits, updated_at}`
+
+`limits` is the latest account usage report from the adapter (`{status, resets_at, windows: {five_hour: {utilization, resets_at}, …}, at}`). Every goal runs on the same account, so the dashboard shows the newest `limits` across goals as the shared rate-limit state. It costs no tokens: claude-code emits it in the stream.
 
 ## run/control.json — `control.schema.json`
 `{version, pause_after_cycle, requested_at, by}`. The runner clears it when it acts on it.
@@ -91,8 +93,8 @@ Envelope: `{ts, run, cycle, src: runner | orchestrator | user, type, ...payload}
 
 | src | type | payload |
 |---|---|---|
-| runner | `run.start` | `timebox_s` |
-| runner | `run.end` | `reason: done \| timebox \| paused \| stopped \| failed \| crashed` |
+| runner | `run.start` | `timebox_s`, `resumed` (true when continuing a paused/stopped/crashed run) |
+| runner | `run.end` | `reason: done \| timebox \| paused \| stopped \| failed \| crashed`. `run.start`/`run.end` bracket one runner process; a run id can span several |
 | runner | `cycle.start` | `mode, model, effort, timeout_s` |
 | runner | `cycle.end` | `exit, duration_s, cost_usd, turns` (full detail in `cycles/N/result.json`) |
 | runner | `wait` | `reason: rate_limit \| cooldown \| between_cycles, seconds` |
@@ -117,7 +119,7 @@ An append-only log of operations; the current state of each item is the fold of 
 - Statuses: `new → seen → in_progress → done | blocked | wont_do`. Any transition is allowed and recorded; you reopen an item by setting it to `new`.
 - `src` on add: `dashboard | cli | file`. `by` on status/note: `orchestrator | user`.
 - Ids are `F-<n>`, next free number. Adds take `.epoptes/.feedback.lock` (created with O_EXCL, stale after 10 s) so two writers can't pick the same id.
-- **Inbox.** Before each cycle (and when the dashboard sees it change) the runner ingests new bullets from `.epoptes/FEEDBACK.md` as `add` with `src: file` and appends ` → F-<n>` to each bullet. No model tokens are spent on intake.
+- **Inbox.** Before each cycle, and whenever `epoptes status`, `epoptes feedback` or the dashboard reads feedback, Epoptes ingests new bullets from `.epoptes/FEEDBACK.md` as `add` with `src: file` and appends ` → F-<n>` to each bullet. No model tokens are spent on intake.
 
 ## cycles/NNNNNN/result.json — `cycle-result.schema.json`
 Normalised by the adapter; the dashboard and reports use only this, never the raw stream.
@@ -128,7 +130,8 @@ Normalised by the adapter; the dashboard and reports use only this, never the ra
  models: { "<model id>": {input, output, cache_read, cache_write, cost_usd} },
  rate_limit: {retry_after_s} | null, error: string | null}
 ```
-- `cost_basis` is `billed` only when the cycle ran with an API key in its environment (the runner checks presence only; it never reads, logs or stores the key). Otherwise it's `estimate`, and every UI and report shows the cost as "≈ $x (estimate)" with a tooltip "API-equivalent estimate, not billed". Phase 1 is always `estimate`.
+- `cost_basis` is `billed` only when the adapter reports the cycle ran on an API key (claude-code: `apiKeySource` in the init event is not `"none"`; the key itself is never read, logged or stored). Otherwise it's `estimate`, and every UI and report shows the cost as "≈ $x (estimate)" with a tooltip "API-equivalent estimate, not billed". Phase 1 is always `estimate`.
+- `rate_limit` is the last limit report the adapter saw: `{status, resets_at, windows: {"<name>": {utilization, resets_at}}}`, or null.
 - Cache-read share = `cache_read / (input + cache_read + cache_write)`, computed by readers.
 
 ## cycles/NNNNNN/activity.jsonl — `activity.schema.json`
@@ -156,6 +159,7 @@ The skill generates these with caps in `goal.json.state_caps`. The dashboard rea
 ## Cycle environment
 The runner starts each cycle in `<project>/` with:
 - `EPOPTES_GOAL_DIR`, `EPOPTES_RUN`, `EPOPTES_CYCLE`, `EPOPTES_MODE`, so `epoptes event …` and `epoptes feedback …` need no arguments inside a cycle.
+- `PATH` starting with `run/bin/`, which holds an `epoptes` shim for the exact CLI that started the runner (works without a global install). The adapter always adds `Bash(epoptes *)` to the cycle's allow list.
 - `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0`: in dress2impress, background subagents were killed 600 s after the orchestrator's turn ended. The cycle timeout still bounds the cycle.
 
 ## Adapter interface
@@ -163,22 +167,33 @@ The runner starts each cycle in `<project>/` with:
 interface Adapter {
   id: string;                                   // "claude-code"
   check(): Promise<{ ok: boolean; version?: string; problem?: string }>;
-  command(spec: CycleSpec): { bin: string; args: string[]; env: Record<string, string> }; // --dry-run
-  start(spec: CycleSpec): Cycle;
+  command(spec: CycleSpec): { bin: string; args: string[]; env: Record<string, string> }; // also --dry-run
+  start(spec: CycleSpec, hooks: CycleHooks): Cycle;
 }
 interface CycleSpec {
   cwd: string; goalDir: string; cycleDir: string;
   prompt: string; model: string; effort: string; permissionMode: string; args: string[];
-  timeoutS: number; budgetUsd: number | null;
-  agentsDir: string; settingsFile: string | null; env: Record<string, string>;
+  budgetUsd: number | null; agentsDir: string; settingsFile: string | null; env: Record<string, string | undefined>;
+}
+interface CycleHooks {
+  activity(a: Activity): void;                  // the runner appends it to activity.jsonl
+  limits(l: Limits): void;                      // the runner stores it in status.json
+  warn(text: string): void;                     // the runner emits a warn event
 }
 interface Cycle {
-  activity: AsyncIterable<Activity>;            // also appended to activity.jsonl by the runner
-  interrupt(): void;                            // SIGINT; the runner escalates to kill after 120 s
-  done: Promise<CycleResult>;                   // result.json minus cycle/run, which the runner adds
+  pid: number | undefined;
+  interrupt(): void;                            // SIGINT; the runner escalates to kill() after 120 s
+  kill(): void;                                 // SIGKILL to the cycle's process group
+  done: Promise<CycleResult>;                   // result.json minus version/cycle/run, which the runner adds
 }
 ```
-**claude-code (v1):** `claude -p <loop.md> --model --effort --permission-mode --permission-prompts none --output-format stream-json --verbose --settings .epoptes/settings.json --agents <generated json> [--max-budget-usd]`. Role files in `.epoptes/agents/*.md` use Claude Code's agent frontmatter; the adapter converts them to the `--agents` JSON file in the cycle dir. Rate limits are detected from the result/error text (`rate limit`, `usage limit`, `overloaded`, `429`, `529`), as in `run.sh`.
+The runner owns timeouts: it calls `interrupt()` at the cycle timeout (capped by the hard stop) and on `stop`, and `kill()` 120 s later.
+**claude-code (v1):** `claude -p <loop.md> --model --effort --permission-mode --permission-prompts none --output-format stream-json --verbose --settings <cycle>/settings.json --agents <cycle>/agents.json [--max-budget-usd] < /dev/null`.
+- Role files in `.epoptes/agents/*.md` use Claude Code's agent frontmatter; the adapter converts them to `agents.json` in the cycle dir (the body becomes `prompt`).
+- The adapter copies `.epoptes/settings.json` to the cycle dir with `permissions.defaultMode` set to `adapter.permission_mode`. **A `--settings` file without `defaultMode` silently overrides `--permission-mode` back to `default`** (verified on 2.1.283), and with `--permission-prompts none` that denies every tool outside the allow list. The runner also compares `permissionMode` in the init event with the requested one and emits a `warn` if they differ.
+- stdin is `/dev/null`; otherwise `claude -p` waits 3 s for stdin every cycle.
+- Stream facts (2.1.283): subagent messages carry `parent_tool_use_id`, `subagent_type` and `task_description`; `system/task_started` and `system/task_notification` bracket each subagent (with `task_id`, `usage`). Agent calls start in the background by default; the print session then runs extra turns and emits one `result` event per turn (`result_index`), each with cumulative totals, so the **last** `result` is the cycle result. `rate_limit_event` carries the account's `status`, `resetsAt` and per-window utilization.
+- Rate limits: a `rate_limit_event` whose status isn't `allowed`/`allowed_warning` gives an exact `resets_at`, and the runner waits until then. Otherwise it falls back to the text match from `run.sh` (`rate limit`, `usage limit`, `overloaded`, `429`, `529`) with exponential backoff.
 
 ## CLI
 ```

@@ -3,50 +3,324 @@
   "$id": "event.schema.json",
   "title": "One line of .epoptes/events.jsonl",
   "type": "object",
-  "required": ["ts", "run", "cycle", "src", "type"],
+  "required": [
+    "ts",
+    "run",
+    "cycle",
+    "src",
+    "type"
+  ],
   "properties": {
-    "ts": { "type": "string", "format": "date-time" },
-    "run": { "type": ["string", "null"] },
-    "cycle": { "type": ["integer", "null"] },
-    "src": { "enum": ["runner", "orchestrator", "user"] },
+    "ts": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "run": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "cycle": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "src": {
+      "enum": [
+        "runner",
+        "orchestrator",
+        "user"
+      ]
+    },
     "type": {
-      "enum": ["run.start", "run.end", "cycle.start", "cycle.end", "wait", "mode", "control", "warn",
-               "milestone", "blocked", "note", "artifact", "round", "wrapup", "done"]
+      "enum": [
+        "run.start",
+        "run.end",
+        "cycle.start",
+        "cycle.end",
+        "wait",
+        "mode",
+        "control",
+        "warn",
+        "milestone",
+        "blocked",
+        "note",
+        "artifact",
+        "round",
+        "wrapup",
+        "done"
+      ]
     }
   },
   "allOf": [
-    { "if": { "properties": { "type": { "const": "run.start" } } },
-      "then": { "required": ["timebox_s"], "properties": { "timebox_s": { "type": "integer" } } } },
-    { "if": { "properties": { "type": { "const": "run.end" } } },
-      "then": { "required": ["reason"],
-                "properties": { "reason": { "enum": ["done", "timebox", "paused", "stopped", "failed", "crashed"] } } } },
-    { "if": { "properties": { "type": { "const": "cycle.start" } } },
-      "then": { "required": ["mode", "model", "effort", "timeout_s"],
-                "properties": { "mode": { "enum": ["build", "wrapup", "overtime", "stop"] },
-                                "model": { "type": "string" }, "effort": { "type": "string" },
-                                "timeout_s": { "type": "integer" } } } },
-    { "if": { "properties": { "type": { "const": "cycle.end" } } },
-      "then": { "required": ["exit", "duration_s"],
-                "properties": { "exit": { "enum": ["ok", "error", "timeout", "interrupted", "rate_limited"] },
-                                "duration_s": { "type": "integer" },
-                                "cost_usd": { "type": ["number", "null"] },
-                                "turns": { "type": ["integer", "null"] } } } },
-    { "if": { "properties": { "type": { "const": "wait" } } },
-      "then": { "required": ["reason", "seconds"],
-                "properties": { "reason": { "enum": ["rate_limit", "cooldown", "between_cycles"] },
-                                "seconds": { "type": "integer" } } } },
-    { "if": { "properties": { "type": { "const": "mode" } } },
-      "then": { "required": ["from", "to"] } },
-    { "if": { "properties": { "type": { "const": "control" } } },
-      "then": { "required": ["action"],
-                "properties": { "action": { "enum": ["start", "resume", "pause", "stop", "extend", "reset"] },
-                                "seconds": { "type": "integer" } } } },
-    { "if": { "properties": { "type": { "enum": ["warn", "milestone", "blocked", "note", "wrapup", "done"] } } },
-      "then": { "required": ["text"],
-                "properties": { "text": { "type": "string" }, "ref": { "type": "string" } } } },
-    { "if": { "properties": { "type": { "const": "artifact" } } },
-      "then": { "required": ["path"], "properties": { "path": { "type": "string" }, "text": { "type": "string" } } } },
-    { "if": { "properties": { "type": { "const": "round" } } },
-      "then": { "required": ["n"], "properties": { "n": { "type": "integer", "minimum": 1 } } } }
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "run.start"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "timebox_s"
+        ],
+        "properties": {
+          "timebox_s": {
+            "type": "integer"
+          },
+          "resumed": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "run.end"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "reason"
+        ],
+        "properties": {
+          "reason": {
+            "enum": [
+              "done",
+              "timebox",
+              "paused",
+              "stopped",
+              "failed",
+              "crashed"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "cycle.start"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "mode",
+          "model",
+          "effort",
+          "timeout_s"
+        ],
+        "properties": {
+          "mode": {
+            "enum": [
+              "build",
+              "wrapup",
+              "overtime",
+              "stop"
+            ]
+          },
+          "model": {
+            "type": "string"
+          },
+          "effort": {
+            "type": "string"
+          },
+          "timeout_s": {
+            "type": "integer"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "cycle.end"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "exit",
+          "duration_s"
+        ],
+        "properties": {
+          "exit": {
+            "enum": [
+              "ok",
+              "error",
+              "timeout",
+              "interrupted",
+              "rate_limited"
+            ]
+          },
+          "duration_s": {
+            "type": "integer"
+          },
+          "cost_usd": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "turns": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "wait"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "reason",
+          "seconds"
+        ],
+        "properties": {
+          "reason": {
+            "enum": [
+              "rate_limit",
+              "cooldown",
+              "between_cycles"
+            ]
+          },
+          "seconds": {
+            "type": "integer"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "mode"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "from",
+          "to"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "control"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "action"
+        ],
+        "properties": {
+          "action": {
+            "enum": [
+              "start",
+              "resume",
+              "pause",
+              "stop",
+              "extend",
+              "reset"
+            ]
+          },
+          "seconds": {
+            "type": "integer"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "enum": [
+              "warn",
+              "milestone",
+              "blocked",
+              "note",
+              "wrapup",
+              "done"
+            ]
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "text"
+        ],
+        "properties": {
+          "text": {
+            "type": "string"
+          },
+          "ref": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "artifact"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "path"
+        ],
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "round"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "n"
+        ],
+        "properties": {
+          "n": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      }
+    }
   ]
 }

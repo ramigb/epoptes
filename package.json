@@ -1,0 +1,32 @@
+{
+  "name": "@ramigb/epoptes",
+  "version": "0.1.0",
+  "description": "Create, run, watch and steer long-running Claude Code harnesses",
+  "type": "module",
+  "license": "UNLICENSED",
+  "private": true,
+  "bin": {
+    "epoptes": "dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "docs/schemas"
+  ],
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "epoptes": "node src/cli.ts",
+    "test": "node --test test/*.test.ts",
+    "typecheck": "tsc --noEmit",
+    "build": "tsc"
+  },
+  "dependencies": {
+    "ajv": "^8.20.0",
+    "ajv-formats": "^3.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.4",
+    "typescript": "^5.9.3"
+  }
+}
