@@ -24,7 +24,7 @@ Goals
   status [goal]                   state, clock, cycle, backlog, feedback, handoff
 
 Runs
-  start [goal]                    start or resume (spawns a detached runner)
+  start [goal] [--new-run]        resume, or start (spawns a detached runner); --new-run after DONE / time box over
   pause [goal]                    pause after the current cycle (the clock pauses too)
   stop [goal]                     stop now; the next cycle recovers interrupted work
   extend [goal] <dur>             lengthen the time box, e.g. 2h, 30m, 1h30m
@@ -126,6 +126,7 @@ async function main(argv: string[]) {
     allowPositionals: true,
     options: {
       'dry-run': { type: 'boolean' },
+      'new-run': { type: 'boolean' },
       goal: { type: 'string', short: 'g' },
       help: { type: 'boolean', short: 'h' },
       all: { type: 'boolean' },
@@ -168,7 +169,7 @@ async function main(argv: string[]) {
       console.log(statusText(resolveGoal(goalArg())));
       return;
     case 'start': {
-      const s = await control.start(resolveGoal(goalArg()));
+      const s = await control.start(resolveGoal(goalArg()), { newRun: Boolean(values['new-run']) });
       console.log(`started: run ${s.run}, runner pid ${s.pid}`);
       return;
     }

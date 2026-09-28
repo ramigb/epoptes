@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { CycleResult } from '../adapters/types.ts';
-import { clockState, readClock } from '../clock.ts';
+import { clockState, readClock, runFinished } from '../clock.ts';
 import { fold } from '../feedback.ts';
 import { exists, nowIso, readJson, readJsonl, writeJson } from '../fsx.ts';
 import { loadGoal, type Goal } from '../goal.ts';
@@ -135,6 +135,7 @@ export function summary(w: GoalWatch) {
     heartbeat_at: s?.heartbeat_at ?? null,
     limits: s?.limits ?? null,
     done_marker: exists(p.done),
+    run_finished: runFinished(p),
     wrapup_marker: exists(p.wrapup),
     clock: c && cs ? { active: cs.active, timebox_s: c.timebox_s, wrapup_s: c.wrapup_s, grace_s: c.grace_s, to_end: cs.toEnd, paused: Boolean(c.paused_at), clock_mode: cs.mode } : null,
     backlog: backlogCounts(p),

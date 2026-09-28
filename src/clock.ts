@@ -73,3 +73,9 @@ export const readClockState = (p: GoalPaths) => {
   const c = readClock(p);
   return c ? clockState(c, { wrapupMarker: exists(p.wrapup) }) : null;
 };
+
+/** Whether the current run is over (DONE marker, or past the hard stop), so the next start begins a new one. */
+export function runFinished(p: GoalPaths): boolean {
+  const c = readClock(p);
+  return Boolean(c && (exists(p.done) || clockState(c).mode === 'stop'));
+}

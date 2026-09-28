@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { adapters } from './adapters/claude-code.ts';
 import type { Activity, Cycle, CycleExit } from './adapters/types.ts';
-import { clockState, newClock, pauseClock, readClock, resumeClock, writeClock, type Clock, type Mode } from './clock.ts';
+import { clockState, newClock, runFinished, pauseClock, readClock, resumeClock, writeClock, type Clock, type Mode } from './clock.ts';
 import { emit } from './events.ts';
 import { ingestInbox } from './feedback.ts';
 import { appendJsonl, exists, nowIso, readJson, rm, writeJson } from './fsx.ts';
@@ -95,7 +95,7 @@ export async function runGoal(project: string) {
   const prev = readStatus(p) ?? idleStatus();
   let clock = readClock(p);
   let resumed = true;
-  if (!clock || exists(p.done) || clockState(clock).mode === 'stop') {
+  if (!clock || runFinished(p)) {
     rm(p.done);
     rm(p.wrapup);
     clock = newClock(nextRunId(clock?.run ?? prev.run), goal.timebox);

@@ -88,10 +88,12 @@ test('runs cycles until the orchestrator marks DONE', async () => {
   assert.deepEqual(notes.map((e) => [e.src, e.cycle, e.run, e.text]), [['orchestrator', 1, 'r1', 'fake cycle 1 ran'], ['orchestrator', 2, 'r1', 'fake cycle 2 ran']]);
   assert.match(g.run(['status', g.project]), /state done .* cycle 2/);
 
-  // A new start after DONE begins a new run; cycle numbers keep counting.
-  g.run(['start', g.project], { FAKE_DONE_AT: '3' });
+  // After DONE, a plain start refuses (it would spend tokens on a finished goal); --new-run begins a new run.
+  assert.throws(() => g.run(['start', g.project]), /this goal is done/);
+  g.run(['start', g.project, '--new-run'], { FAKE_DONE_AT: '3' });
   await until(() => g.read('run/status.json').state === 'done' && g.read('run/status.json').cycle === 3);
   assert.equal(g.read('cycles/000003/result.json').run, 'r2');
+  assert.deepEqual(g.events().filter((e) => e.type === 'control').map((e) => e.action), ['start', 'start']);
 });
 
 test('stop interrupts the cycle; start resumes the same run', async () => {
@@ -107,6 +109,7 @@ test('stop interrupts the cycle; start resumes the same run', async () => {
   await until(() => g.read('run/status.json').state === 'done');
   assert.equal(g.read('cycles/000002/result.json').run, 'r1', 'resumed, not a new run');
   assert.equal(g.events().filter((e) => e.type === 'run.start')[1].resumed, true);
+  assert.deepEqual(g.events().filter((e) => e.type === 'control').map((e) => e.action), ['start', 'stop', 'resume']);
 });
 
 test('pause after this cycle, extend, feedback and events from the CLI', async () => {

@@ -345,9 +345,13 @@ function Controls({ d }) {
       });
   };
   const live = d.live;
-  const resumable = ['paused', 'stopped', 'crashed', 'failed'].includes(d.state) && d.clock;
+  const finished = d.run_finished;
+  const newRunText = d.done_marker
+    ? 'This goal is done. Start a new run?\n\nA new run gets a fresh time box and spends tokens. The orchestrator only finds work if you added feedback or backlog tasks since.'
+    : 'The time box is over. Start a new run with a fresh time box?\n\nTo continue this run instead, cancel and use +30m / +1h / +2h.';
+  const start = () => (finished ? act('start', { new_run: true }, newRunText) : act('start'));
   return html`<div class="controls">
-    ${!live && html`<button class="btn primary" disabled=${busy} onClick=${() => act('start')}>▶ ${resumable ? 'Resume' : 'Start'}</button>`}
+    ${!live && html`<button class=${`btn ${finished ? '' : 'primary'}`} disabled=${busy} onClick=${start}>▶ ${finished ? 'Start new run…' : d.clock ? 'Resume' : 'Start'}</button>`}
     ${live && html`<button class="btn" disabled=${busy || d.pause_requested} onClick=${() => act('pause')} title="Finish the current cycle, then pause (the clock pauses too)">‖ ${d.pause_requested ? 'Pausing after cycle' : 'Pause after cycle'}</button>`}
     ${live && html`<button class="btn danger" disabled=${busy} onClick=${() => act('stop', {}, 'Stop now? The current cycle is interrupted; the next start recovers its work.')}>■ Stop now</button>`}
     ${d.clock &&

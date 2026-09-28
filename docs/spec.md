@@ -63,7 +63,7 @@ There is no daemon. `epoptes start` spawns one detached runner per goal (`setsid
 ### Controls
 | control | mechanism |
 |---|---|
-| start / resume | CLI spawns the runner; the clock resumes |
+| start / resume | CLI spawns the runner; the clock resumes. If the run is over (DONE, or past the hard stop), `start` refuses unless given `--new-run` (dashboard: "Start new run…" with a confirm), because a new run spends tokens and only finds work if feedback or tasks were added. The `control` event says `start` for a new run and `resume` for a continuation |
 | pause after this cycle | CLI writes `control.json {pause_after_cycle: true}`; runner finishes the cycle, pauses the clock, sets `paused`, exits |
 | stop now | CLI sends SIGINT to the runner pid; the runner SIGINTs the adapter, kills it after 120 s, records the cycle as `interrupted`, pauses the clock, sets `stopped`, exits. The next cycle recovers interrupted work (loop.md orient step) |
 | extend `<dur>` | CLI adds to `clock.json.timebox_s` (wrap-up and hard stop move with it) |

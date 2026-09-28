@@ -151,7 +151,7 @@ export function serve({ port, lan, pollMs = 1000 }: ServeOptions) {
         if (sub === 'control') {
           switch (body.action) {
             case 'start':
-              await control.start(project);
+              await control.start(project, { newRun: body.new_run === true });
               break;
             case 'pause':
               control.pause(project);

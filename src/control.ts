@@ -1,21 +1,34 @@
 // Controls shared by the CLI and (later) the dashboard. They only touch files, signals and the runner process.
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
-import { readClock, writeClock } from './clock.ts';
+import { readClock, runFinished, writeClock } from './clock.ts';
 import { emit, readEvents } from './events.ts';
-import { nowIso, rm, writeJson } from './fsx.ts';
+import { exists, nowIso, rm, writeJson } from './fsx.ts';
 import { loadGoal } from './goal.ts';
 import { goalPaths, type GoalPaths } from './paths.ts';
 import { LIVE_STATES, readStatus, reconcile, writeStatus, type Status } from './status.ts';
 
 const isLive = (s: Status) => LIVE_STATES.includes(s.state);
 
-/** Spawns a detached runner for the goal and waits until it reports in. */
-export async function start(project: string): Promise<Status> {
+/**
+ * Spawns a detached runner for the goal and waits until it reports in. Resumes the current run; a goal whose
+ * run is over (DONE, or past its hard stop) only starts again with newRun, because a new run spends tokens
+ * and finds work only if feedback or backlog tasks were added since.
+ */
+export async function start(project: string, { newRun = false } = {}): Promise<Status> {
   const p = goalPaths(project);
   loadGoal(p); // fail fast on an invalid goal
   const s = reconcile(p);
   if (isLive(s)) throw new Error(`already ${s.state} (pid ${s.pid})`);
+  const finished = runFinished(p);
+  if (finished && !newRun) {
+    throw new Error(
+      exists(p.done)
+        ? 'this goal is done. Starting again begins a new run with a fresh time box, and the orchestrator only finds work if you added feedback or backlog tasks. Use `epoptes start --new-run` to do it anyway.'
+        : 'the time box is over. Use `epoptes extend <dur>` to continue this run, or `epoptes start --new-run` to begin a new one.',
+    );
+  }
+  const action = finished || !readClock(p) ? 'start' : 'resume';
   fs.mkdirSync(p.run, { recursive: true });
   const out = fs.openSync(p.runnerLog, 'a');
   const child = spawn(process.execPath, [...process.execArgv, process.argv[1], '_run', p.project], {
@@ -26,7 +39,7 @@ export async function start(project: string): Promise<Status> {
   });
   child.unref();
   fs.closeSync(out);
-  emit(p, { src: 'user', type: 'control', run: s.run, action: s.state === 'idle' ? 'start' : 'resume' });
+  emit(p, { src: 'user', type: 'control', run: s.run, action });
 
   // Confirm with the runner's run.start event: a short run can already be over by the first poll.
   const spawnedAt = Date.now() - 1000;

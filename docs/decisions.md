@@ -34,3 +34,4 @@ Append-only. Each entry: date · decision · why. To change one, add a new entry
 - **Polling (1 s) + incremental JSONL tails + SSE, not fs.watch.** Why: inotify doesn't fire on WSL's `/mnt` drives; a stat per file per second is cheap.
 - **Local-only guards: Host allow-list, custom header + JSON for writes, Origin check, strict CSP.** Why: binding to 127.0.0.1 alone doesn't stop other websites (CSRF, DNS rebinding) from posting feedback, and feedback goes straight into agents' prompts.
 - **The dashboard shows a pause request as soon as `control.json` exists.** Why: the runner only notices it on its 15 s heartbeat, and a short cycle can end first.
+- **Starting a finished goal needs `--new-run` (dashboard: "Start new run…" + confirm).** Why: in the first real dashboard test, pressing Start on a DONE goal twice silently began runs r2 and r3, each spending a cycle to rediscover it was done, and the log called them "resume".
