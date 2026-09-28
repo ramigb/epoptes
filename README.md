@@ -1,5 +1,10 @@
 <p align="center"><img src="docs/assets/epoptes-logo.png" alt="epoptes: autonomous work, under watch" width="600"></p>
 
+<p align="center">
+  <a href="https://www.npmjs.com/package/@ramigbcom/epoptes"><img src="https://img.shields.io/npm/v/@ramigbcom/epoptes?color=e8a23a&label=npm" alt="npm version"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/npm/l/@ramigbcom/epoptes?color=101114" alt="MIT license"></a>
+</p>
+
 # Epoptes
 
 *Epoptes (Greek ἐπόπτης, "the overseer") was a title for Zeus and Helios, who watch over everything.*
@@ -24,7 +29,7 @@ It grew out of a 12-hour autonomous game build. Its rules for keeping long runs 
 npm install -g @ramigbcom/epoptes
 epoptes --version
 ```
-Or run it without installing: `npx @ramigbcom/epoptes <command>`.
+The package is on npm as [`@ramigbcom/epoptes`](https://www.npmjs.com/package/@ramigbcom/epoptes). You can also try single commands without installing: `npx @ramigbcom/epoptes <command>`.
 
 **From a checkout** (to hack on it):
 ```sh
@@ -39,7 +44,7 @@ On WSL2, keep the checkout on the Linux side (`~/…`), not under `/mnt/c` or `/
    ```sh
    epoptes skill install     # links the skill into ~/.claude/skills (all projects)
    ```
-   Or try it for one session only: `claude --plugin-dir /path/to/epoptes/plugin`.
+   Run this from a global install (or a checkout), not through `npx`: `npx` runs from npm's temporary cache, and the link would break when that cache is cleared. To try the skill for one session only: `claude --plugin-dir "$(epoptes skill path)/../.."`.
 2. **Describe the goal.** In Claude Code, in the folder the work should happen in:
    > use the epoptes skill to build a harness for *writing a 20-page field guide to our internal APIs*
    
