@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "feedback.schema.json",
+  "title": "One line of .epoptes/feedback.jsonl",
+  "type": "object",
+  "required": ["ts", "op", "id"],
+  "properties": {
+    "ts": { "type": "string", "format": "date-time" },
+    "op": { "enum": ["add", "status", "note"] },
+    "id": { "type": "string", "pattern": "^F-[0-9]+$" }
+  },
+  "allOf": [
+    { "if": { "properties": { "op": { "const": "add" } } },
+      "then": { "required": ["text", "src"],
+                "properties": { "text": { "type": "string", "minLength": 1 },
+                                "src": { "enum": ["dashboard", "cli", "file"] } } } },
+    { "if": { "properties": { "op": { "const": "status" } } },
+      "then": { "required": ["status", "by"],
+                "properties": { "status": { "enum": ["new", "seen", "in_progress", "done", "blocked", "wont_do"] },
+                                "by": { "enum": ["orchestrator", "user"] },
+                                "cycle": { "type": ["integer", "null"] },
+                                "note": { "type": "string" } } } },
+    { "if": { "properties": { "op": { "const": "note" } } },
+      "then": { "required": ["text", "by"],
+                "properties": { "text": { "type": "string", "minLength": 1 },
+                                "by": { "enum": ["orchestrator", "user"] },
+                                "cycle": { "type": ["integer", "null"] } } } }
+  ]
+}

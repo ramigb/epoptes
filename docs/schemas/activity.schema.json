@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "activity.schema.json",
+  "title": "One line of .epoptes/cycles/<NNNNNN>/activity.jsonl",
+  "type": "object",
+  "required": ["ts", "agent", "kind", "summary"],
+  "additionalProperties": false,
+  "properties": {
+    "ts": { "type": "string", "format": "date-time" },
+    "agent": { "type": "string", "description": "orchestrator, or <subagent type>#<short id>" },
+    "kind": { "enum": ["init", "tool", "agent.start", "agent.end", "text", "result"] },
+    "tool": { "type": "string" },
+    "path": { "type": "string" },
+    "summary": { "type": "string", "maxLength": 120 }
+  }
+}

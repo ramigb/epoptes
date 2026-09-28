@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "cycle-result.schema.json",
+  "title": "Cycle result (.epoptes/cycles/<NNNNNN>/result.json)",
+  "type": "object",
+  "required": ["version", "cycle", "run", "adapter", "started_at", "ended_at", "duration_s", "exit",
+               "cost_basis", "models", "error"],
+  "additionalProperties": false,
+  "properties": {
+    "version": { "const": 1 },
+    "cycle": { "type": "integer", "minimum": 1 },
+    "run": { "type": "string", "pattern": "^r[0-9]+$" },
+    "adapter": { "type": "string" },
+    "started_at": { "type": "string", "format": "date-time" },
+    "ended_at": { "type": "string", "format": "date-time" },
+    "duration_s": { "type": "integer", "minimum": 0 },
+    "exit": { "enum": ["ok", "error", "timeout", "interrupted", "rate_limited"] },
+    "turns": { "type": ["integer", "null"] },
+    "session_id": { "type": ["string", "null"] },
+    "cost_usd": { "type": ["number", "null"] },
+    "cost_basis": { "enum": ["billed", "estimate"] },
+    "models": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["input", "output", "cache_read", "cache_write"],
+        "additionalProperties": false,
+        "properties": {
+          "input": { "type": "integer", "minimum": 0 },
+          "output": { "type": "integer", "minimum": 0 },
+          "cache_read": { "type": "integer", "minimum": 0 },
+          "cache_write": { "type": "integer", "minimum": 0 },
+          "cost_usd": { "type": ["number", "null"] }
+        }
+      }
+    },
+    "rate_limit": {
+      "type": ["object", "null"],
+      "properties": { "retry_after_s": { "type": ["integer", "null"] } }
+    },
+    "error": { "type": ["string", "null"] }
+  }
+}

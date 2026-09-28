@@ -1,0 +1,8 @@
+node_modules/
+dist/
+*.tmp
+.env*
+# local harness runs of Epoptes' own test goals
+.epoptes/run/
+.epoptes/cycles/
+.epoptes/snapshots.git/

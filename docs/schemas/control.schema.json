@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "control.schema.json",
+  "title": "Runner control request (.epoptes/run/control.json)",
+  "type": "object",
+  "required": ["version", "pause_after_cycle", "requested_at", "by"],
+  "additionalProperties": false,
+  "properties": {
+    "version": { "const": 1 },
+    "pause_after_cycle": { "type": "boolean" },
+    "requested_at": { "type": "string", "format": "date-time" },
+    "by": { "enum": ["user", "orchestrator"] }
+  }
+}

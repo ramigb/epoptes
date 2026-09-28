@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "registry.schema.json",
+  "title": "Goal registry (~/.epoptes/registry.json)",
+  "type": "object",
+  "required": ["version", "goals"],
+  "additionalProperties": false,
+  "properties": {
+    "version": { "const": 1 },
+    "goals": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "path", "added_at"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,62}$" },
+          "path": { "type": "string", "description": "absolute project directory (parent of .epoptes/)" },
+          "added_at": { "type": "string", "format": "date-time" }
+        }
+      }
+    }
+  }
+}

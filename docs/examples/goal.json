@@ -1,0 +1,23 @@
+{
+  "$schema": "../schemas/goal.schema.json",
+  "version": 1,
+  "id": "dress2impress",
+  "name": "Dress 2 Impress",
+  "kind": "code",
+  "objective": "A family 3D dress-up game a 6-year-old can play on an Android tablet without help.",
+  "done": [
+    { "id": "D1", "check": "npm run verify passes", "verify": { "type": "command", "run": "npm run verify" } },
+    { "id": "D2", "check": "every critic score is at least 8 and all gates pass", "verify": { "type": "agent" } },
+    { "id": "D3", "check": "README and PLAYTEST are written for the parent", "verify": { "type": "file", "path": "PLAYTEST.md" } }
+  ],
+  "non_goals": ["voice or TTS", "ranking players"],
+  "approval_required": ["adding a paid or online service", "deleting saved family data"],
+  "timebox": { "total_min": 720, "wrapup_min": 60, "grace_min": 45, "pause_on_rate_limit": true },
+  "checkpoints": "git",
+  "adapter": { "type": "claude-code", "model": "opus", "effort": "high", "permission_mode": "auto" },
+  "cycle": { "timeout_min": 120, "pause_between_s": 15, "max_budget_usd": null },
+  "failures": { "cooldown_after": 3, "cooldown_min": 10, "give_up_after": 6 },
+  "rate_limit": { "backoff_s": 300, "backoff_max_s": 1800 },
+  "state_caps": { "handoff.md": 25, "lessons.md": 30 },
+  "notify": ["milestone", "blocked", "done"]
+}
