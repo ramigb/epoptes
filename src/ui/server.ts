@@ -20,6 +20,7 @@ const STATIC: Record<string, [string, string]> = {
   '/': [path.join(UI_DIR, 'index.html'), 'text/html; charset=utf-8'],
   '/app.js': [path.join(UI_DIR, 'app.js'), 'text/javascript; charset=utf-8'],
   '/style.css': [path.join(UI_DIR, 'style.css'), 'text/css; charset=utf-8'],
+  '/mark.svg': [path.join(UI_DIR, 'mark.svg'), 'image/svg+xml'],
   '/vendor/preact.js': [VENDOR, 'text/javascript; charset=utf-8'],
 };
 
@@ -46,7 +47,15 @@ export function serve({ port, lan, pollMs = 1000 }: ServeOptions) {
     for (const id of watches.keys()) if (!reg.goals.some((g) => g.id === id)) watches.delete(id);
   };
   syncRegistry();
-  for (const w of watches.values()) w.poll(); // warm the caches
+  // Warm the caches and the schema validator (slow to load from WSL's /mnt drives) before the first request.
+  for (const w of watches.values()) {
+    w.poll();
+    try {
+      summary(w);
+    } catch {
+      // shown as an error card later
+    }
+  }
 
   const broadcast = (u: GoalUpdate) => {
     const msg = `event: update\ndata: ${JSON.stringify(u)}\n\n`;

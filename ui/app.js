@@ -235,7 +235,17 @@ function announce(u) {
 
 // ---------------------------------------------------------------- shared bits
 
-const Logo = () => html`<svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="6.5" fill="currentColor" /><g stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M16 2.5v4M16 25.5v4M2.5 16h4M25.5 16h4M6.5 6.5l2.8 2.8M22.7 22.7l2.8 2.8M6.5 25.5l2.8-2.8M22.7 9.3l2.8-2.8" /></g></svg>`;
+// The Epoptes mark (docs/assets/epoptes-mark.svg): dark parts follow the text colour, so it works in both themes.
+const Logo = () => html`<svg viewBox="0 0 410 410" aria-hidden="true">
+  <g fill="none" stroke-linecap="round">
+    <path d="M200 22 A178 178 0 0 1 354 111" stroke="currentColor" stroke-width="30" />
+    <path d="M377 162 A178 178 0 0 1 305 347" stroke="currentColor" stroke-width="30" />
+    <path d="M247 373 A178 178 0 0 1 44 238" stroke="currentColor" stroke-width="30" />
+    <path d="M108 107 C165 55 261 57 318 119" stroke="#E8A23A" stroke-width="22" />
+    <path d="M321 255 C292 327 199 352 126 312" stroke="#E8A23A" stroke-width="22" />
+  </g>
+  <circle cx="205" cy="205" r="61" fill="currentColor" /><circle cx="205" cy="205" r="25" fill="var(--bg)" /><circle cx="205" cy="205" r="9" fill="#E8A23A" />
+</svg>`;
 
 function StatePill({ state }) {
   return html`<span key=${state} class="state ${state} changed"><span class="dot"></span>${STATE_LABEL[state] ?? state}</span>`;
@@ -279,7 +289,7 @@ function Topbar() {
   const windows = limits ? Object.entries(limits.windows) : [];
   const hot = windows.some(([, w]) => w.utilization >= 0.8) || (limits && !['allowed', 'allowed_warning'].includes(limits.status));
   return html`<header class="topbar">
-    <a class="brand" href="#/"><${Logo} />Epoptes</a>
+    <a class="brand" href="#/" aria-label="Epoptes: all goals"><${Logo} />epoptes</a>
     ${s.state?.lan && html`<span class="pill bad" title="Anyone on your network can control runs">LAN mode</span>`}
     <span class="spacer"></span>
     ${limited && html`<span class="pill warn">rate-limited</span>`}
@@ -815,4 +825,5 @@ function App() {
 }
 
 render(html`<${App} />`, document.getElementById('app'));
+loadState(); // don't wait for the stream's first message
 connect();

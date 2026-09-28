@@ -1,3 +1,5 @@
+<p align="center"><img src="docs/assets/epoptes-logo.png" alt="epoptes: autonomous work, under watch" width="600"></p>
+
 # Epoptes
 
 *Epoptes (Greek ἐπόπτης, "the overseer") was a title for Zeus and Helios, who watch over everything.*
