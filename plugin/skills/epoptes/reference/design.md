@@ -2,6 +2,9 @@
 
 These rules come from a 12 h autonomous build (dress2impress) and the first Epoptes test runs. They keep long runs cheap and on track.
 
+## Adapter
+Confirm whether the harness runs Claude Code or Codex. The table below is for Claude Code. Codex uses its selected CLI model and effort; role files are instructions only, not registered subagents. Adapt loop.md so the cycle performs tasks, checks and reviews sequentially and reads role bodies as needed. Remove Claude-specific tool names and frontmatter claims. Only use native Codex subagents if the user has configured them separately.
+
 ## Team by goal kind
 Name roles after the work. Each role file sets `model`, `effort`, `maxTurns` and `tools`, and caps its report length.
 
@@ -20,7 +23,7 @@ Name roles after the work. Each role file sets `model`, `effort`, `maxTurns` and
 - **A round** is 1–3 tasks of about 20–60 min of agent work in total. **A cycle** is at most 3 rounds, with a soft cap of about 45–60 min (`CYCLE_ELAPSED` from `epoptes clock`).
 - `cycle.timeout_min` is the hard kill: 1.5–2 × the soft cap, at least 20. The runner caps it at the hard stop.
 - Short goals (≤ 1 h) do better with 1 round per cycle and a 20–30 min soft cap.
-- `cycle.max_budget_usd`: offer it for API-key users, and for anyone worried about runaway cycles.
+- `cycle.max_budget_usd`: Claude Code only; offer it for API-key users, and for anyone worried about runaway cycles.
 
 ## Tasks and the backlog
 - **Split the work into milestones,** each ending in something checkable. Give each a target time so the orchestrator can cut scope when it's behind.

@@ -33,6 +33,18 @@ The file format is the contract: the runner, CLI, dashboard and skill only read 
 ```
 `cycles/` and `run/runner.log` may hold confidential code and transcripts; they never leave the machine. `stream.jsonl` is the raw adapter output, kept for debugging; deleting it loses nothing the dashboard or reports need.
 
+## Codex adapter
+
+Set `adapter.type` to `codex`. Its defaults are `model: ""` (use the CLI's configured model), `effort: "high"`, `permission_mode: "workspace-write"`, `prompt: "loop.md"` and `args: []`. Supported permission modes are `read-only`, `workspace-write` and `danger-full-access`; `cycle.max_budget_usd` must be `null`. Existing Claude defaults remain unchanged.
+
+The adapter launches `codex exec --json --skip-git-repo-check --sandbox <mode> -c 'approval_policy="never"'`, optionally with `--model` and `model_reasoning_effort`, then extra arguments and `-`. The prompt goes on stdin. Every cycle starts a new thread; it never resumes another Codex conversation. It uses the installed CLI's authentication, user configuration, project instructions and rules. `EPOPTES_CODEX_BIN` overrides the executable for tests.
+
+`thread.started`, `turn.completed`, `turn.failed`, `error` and `item.*` events feed the existing activity/result files. Commands, file changes, MCP calls, web searches and agent messages appear in the ticker. A zero process exit requires a completed turn and no error to count as success. Cached input is subtracted from Codex's total input before storing `models[].input`, so cache share is not double-counted. Unknown dollar costs remain `null` through report/dashboard totals; rate limits use text detection and the runner's backoff because reset timestamps are unavailable. Usage with no explicit model is labelled `codex-configured`.
+
+Claude `.epoptes/settings.json` and agent frontmatter are not native Codex configuration. Codex harnesses omit settings.json and adapt loop.md for sequential work using role bodies as guidance. Native Codex subagents must be configured separately; Epoptes does not translate Claude tools, model aliases or maxTurns. The shared skill installs into `~/.agents/skills/epoptes` with `epoptes skill install --agent codex`; the default installation remains `~/.claude/skills/epoptes`.
+
+References: official [non-interactive mode](https://developers.openai.com/codex/noninteractive), [configuration reference](https://developers.openai.com/codex/config-reference), and [skills](https://developers.openai.com/codex/skills). Command flags also checked against local `codex-cli 0.159.2` help; runtime tests use a fake CLI and make no inference calls.
+
 ## goal.json — schema `goal.schema.json`
 Written by the skill, edited by you. The runner re-reads it before every cycle, so changes apply from the next cycle. The time box is copied into `run/clock.json` when a run starts; `extend` and `reset-clock` act on the clock, not on goal.json.
 
@@ -44,7 +56,7 @@ Written by the skill, edited by you. The runner re-reads it before every cycle, 
 | `non_goals[]`, `approval_required[]` | plain strings; the skill writes them into loop.md too |
 | `timebox` | `total_min`, `wrapup_min`, `grace_min`, `pause_on_rate_limit` |
 | `checkpoints` | `git` (orchestrator commits), `shadow` (runner commits the workspace to `.epoptes/snapshots.git` after each cycle, no tokens, never touches your repo), `none` |
-| `adapter` | `type` (`claude-code`), `prompt` (default `loop.md`), `model`, `effort`, `permission_mode`, `args[]` |
+| `adapter` | `type` (`claude-code` or `codex`), `prompt` (default `loop.md`), `model`, `effort`, `permission_mode`, `args[]` |
 | `cycle` | `timeout_min` (clamped 20–180), `pause_between_s`, `max_budget_usd` (null = none) |
 | `failures` | `cooldown_after`, `cooldown_min`, `give_up_after` (consecutive failed cycles) |
 | `rate_limit` | `backoff_s`, `backoff_max_s` (doubles per consecutive hit) |
@@ -159,15 +171,15 @@ The skill generates these with caps in `goal.json.state_caps`. The dashboard rea
 ## Cycle environment
 The runner starts each cycle in `<project>/` with:
 - `EPOPTES_GOAL_DIR`, `EPOPTES_RUN`, `EPOPTES_CYCLE`, `EPOPTES_MODE`, so `epoptes event …` and `epoptes feedback …` need no arguments inside a cycle.
-- `PATH` starting with `run/bin/`, which holds an `epoptes` shim for the exact CLI that started the runner (works without a global install). The adapter always adds `Bash(epoptes *)` to the cycle's allow list.
+- `PATH` starting with `run/bin/`, which holds an `epoptes` shim for the exact CLI that started the runner (works without a global install). The Claude Code adapter always adds `Bash(epoptes *)` to the cycle's allow list.
 - `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0`: in dress2impress, background subagents were killed 600 s after the orchestrator's turn ended. The cycle timeout still bounds the cycle.
 
 ## Adapter interface
 ```ts
 interface Adapter {
-  id: string;                                   // "claude-code"
+  id: string;                                   // "claude-code" or "codex"
   check(): Promise<{ ok: boolean; version?: string; problem?: string }>;
-  command(spec: CycleSpec): { bin: string; args: string[]; env: Record<string, string> }; // also --dry-run
+  command(spec: CycleSpec): { bin: string; args: string[]; env: Record<string, string>; stdin?: string }; // also --dry-run
   start(spec: CycleSpec, hooks: CycleHooks): Cycle;
 }
 interface CycleSpec {

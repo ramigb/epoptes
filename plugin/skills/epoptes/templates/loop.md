@@ -1,4 +1,4 @@
-<!-- template: Adapt every section to the goal, replace every {{…}}, then delete all "template:" comments. Keep the phase order and the caps. -->
+<!-- template: For Codex, have the cycle do the work, checks and reviews sequentially using role instructions as guidance. Replace Claude Agent/SendMessage/ToolSearch references; role frontmatter is not native configuration. Do not depend on delegation unless native Codex subagents are separately configured. Adapt every section to the goal, replace every {{…}}, then delete all "template:" comments. Keep the phase order and the caps. -->
 # {{GOAL_NAME}}: orchestrator instructions (one cycle)
 
 You are the **orchestrator** of an autonomous, time-boxed goal: {{OBJECTIVE}}

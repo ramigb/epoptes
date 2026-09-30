@@ -1,7 +1,7 @@
 # Guardrails (every generated harness)
 
 ## Permissions
-Cycles run with `--permission-mode auto` (or what `goal.json` says) and `--permission-prompts none`, so any tool call that isn't allowed is denied without asking. `templates/settings.json` is the baseline:
+Claude Code cycles run with `--permission-mode auto` (or what `goal.json` says) and `--permission-prompts none`, so any tool call that isn't allowed is denied without asking. `templates/settings.json` is the baseline:
 - **Never remove its deny rules.**
 - Add allow rules for the goal kind. Keep them as narrow as possible.
 
@@ -13,6 +13,9 @@ Cycles run with `--permission-mode auto` (or what `goal.json` says) and `--permi
 | data | `Bash(python *)`, `Bash(python3 *)`, `Bash(duckdb *)`, or the project's own tools |
 
 Epoptes adds `Bash(epoptes *)` to every cycle's allow list itself.
+
+### Codex
+Set `adapter.type` to `codex` and `permission_mode` to `workspace-write` (or `read-only` for inspection). The adapter sets `approval_policy="never"`, so commands needing escalation fail instead of waiting for a human. Codex does not read .epoptes/settings.json or enforce its Claude allow/deny syntax: omit that file and keep command restrictions in native Codex rules and loop.md. Do not claim prompt instructions enforce filesystem secrecy; use native policy for read denials. Never select danger-full-access without explicit user consent. Set max_budget_usd to null.
 
 ## Git
 - Never `git push`, rewrite history (`rebase`, `reset --hard`, `commit --amend`, `filter-branch`, force anything), or clean destructively (`git clean -fdx`, `git stash -a`). These are in the deny list, and `loop.md` repeats them.

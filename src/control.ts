@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import { readClock, runFinished, writeClock } from './clock.ts';
 import { emit, readEvents } from './events.ts';
 import { exists, nowIso, rm, writeJson } from './fsx.ts';
-import { adapters } from './adapters/claude-code.ts';
+import { adapters } from './adapters/index.ts';
 import { loadGoal } from './goal.ts';
 import { goalPaths, type GoalPaths } from './paths.ts';
 import { LIVE_STATES, readStatus, reconcile, writeStatus, type Status } from './status.ts';

@@ -3,7 +3,7 @@
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
-import { adapters } from './adapters/claude-code.ts';
+import { adapters } from './adapters/index.ts';
 import type { Activity, Cycle, CycleExit } from './adapters/types.ts';
 import { clockState, newClock, runFinished, pauseClock, readClock, resumeClock, writeClock, type Clock, type Mode } from './clock.ts';
 import { emit } from './events.ts';
@@ -273,7 +273,7 @@ export async function runGoal(project: string) {
       else if (timedOut) exit = 'timeout';
       writeJson(path.join(cycleDir, 'result.json'), { version: 1, cycle: n, run, ...result, exit });
       emit(p, { src: 'runner', type: 'cycle.end', run, cycle: n, exit, duration_s: result.duration_s, cost_usd: result.cost_usd, turns: result.turns });
-      log(`cycle ${n} end: ${exit} ${result.duration_s}s turns=${result.turns ?? '?'} cost≈$${(result.cost_usd ?? 0).toFixed(2)}${result.error ? ` error=${result.error}` : ''}`);
+      log(`cycle ${n} end: ${exit} ${result.duration_s}s turns=${result.turns ?? '?'} ${result.cost_usd == null ? 'cost=unknown' : `cost≈$${result.cost_usd.toFixed(2)}`}${result.error ? ` error=${result.error}` : ''}`);
 
       if (goal.checkpoints === 'shadow') {
         try {

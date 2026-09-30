@@ -5,7 +5,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
-import { adapters, agentsFromDir } from './adapters/claude-code.ts';
+import { adapters } from './adapters/index.ts';
+import { agentsFromDir } from './adapters/claude-code.ts';
 import { readClock, readClockState } from './clock.ts';
 import * as control from './control.ts';
 import { emit } from './events.ts';
@@ -19,7 +20,7 @@ import { runGoal } from './runner.ts';
 import { reconcile } from './status.ts';
 import { backlogCounts, lastResult, money, readHead } from './summary.ts';
 
-const HELP = `epoptes: create, run, watch and steer long-running Claude Code harnesses
+const HELP = `epoptes: create, run, watch and steer long-running Claude Code or Codex harnesses
 
 Goals
   add [dir]                       validate <dir>/.epoptes/goal.json and register it
@@ -44,7 +45,7 @@ Steering
 
 Later
 Skill
-  skill install                   link the epoptes skill into ~/.claude/skills (for Claude Code)
+  skill install [--agent codex]    link the skill for Claude Code (default) or Codex
   skill path                      print where the skill lives
 
 Dashboard
@@ -126,7 +127,8 @@ async function dryRun(project: string) {
   const cs = readClockState(p);
   console.log(cs ? `clock: mode ${cs.mode}, ${hm(cs.active)} active (unchanged)` : 'clock: not started (a dry run never starts it)');
   console.log(`next cycle runs in ${tilde(p.project)}:\n  ${cmd.bin} ${cmd.args.map((a) => (/[\s<>*]/.test(a) ? JSON.stringify(a) : a)).join(' ')}`);
-  console.log(`generated files: ${tilde(dir)}/{agents,settings}.json`);
+  if (adapter.id === 'claude-code') console.log(`generated files: ${tilde(dir)}/{agents,settings}.json`);
+  else console.log('prompt: sent on stdin; roles in agents/*.md are guidance, not native agent configuration');
   const lint = lintGoal(p, goal);
   problems.push(...lint.problems);
   if (lint.warnings.length) console.log(`\nwarnings:\n  ${lint.warnings.join('\n  ')}`);
@@ -154,6 +156,7 @@ async function main(argv: string[]) {
       all: { type: 'boolean' },
       port: { type: 'string' },
       lan: { type: 'boolean' },
+      agent: { type: 'string' },
     },
   });
   const [cmd, ...rest] = positionals;
@@ -207,19 +210,21 @@ async function main(argv: string[]) {
     case 'skill': {
       const src = fileURLToPath(new URL('../plugin/skills/epoptes', import.meta.url));
       if (rest[0] === 'path') return console.log(src);
-      if (rest[0] !== 'install') throw new Error('usage: epoptes skill install | epoptes skill path');
-      const dest = path.join(os.homedir(), '.claude', 'skills', 'epoptes');
+      if (rest[0] !== 'install') throw new Error('usage: epoptes skill install [--agent claude-code|codex] | epoptes skill path');
+      const agent = values.agent ?? 'claude-code';
+      if (!['claude-code', 'codex'].includes(agent)) throw new Error('--agent must be claude-code or codex');
+      const dest = path.join(os.homedir(), agent === 'codex' ? '.agents' : '.claude', 'skills', 'epoptes');
       let current: string | null = null;
       try {
         current = fs.readlinkSync(dest);
       } catch (e) {
-        if ((e as NodeJS.ErrnoException).code === 'EINVAL') throw new Error(`${dest} exists and is not a link; move it away first`);
+        if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw new Error(`${dest} cannot be read as a link; move it away first (${(e as Error).message})`);
       }
       if (current === src) return console.log(`already installed: ${tilde(dest)} → ${src}`);
       if (current) fs.rmSync(dest);
       fs.mkdirSync(path.dirname(dest), { recursive: true });
-      fs.symlinkSync(src, dest, 'dir');
-      console.log(`installed: ${tilde(dest)} → ${src}\nIn Claude Code: "use the epoptes skill to build a harness for <goal>"`);
+      fs.symlinkSync(src, dest, process.platform === 'win32' ? 'junction' : 'dir');
+      console.log(`installed: ${tilde(dest)} → ${src}\nIn ${agent === 'codex' ? 'Codex' : 'Claude Code'}: "use the epoptes skill to build a harness for <goal>"`);
       return;
     }
     case 'start': {

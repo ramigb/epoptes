@@ -1,6 +1,6 @@
 # Interview checklist
 
-Before asking anything, look at the project directory yourself: `ls`, the README, `package.json` or similar, `git status`, any existing `.epoptes/`. Ask only what you can't find out. Ask in batches of 2–4 questions. Where there are options, use AskUserQuestion with your recommended default first.
+Before asking anything, look at the project directory yourself: `ls`, the README, `package.json` or similar, `git status`, any existing `.epoptes/`. Ask only what you can't find out. Ask in batches of 2–4 questions. Where there are options, use the host's user-question tool with your recommended default first.
 
 Every item below needs an answer the user agreed to. "Sensible default, confirmed" counts; silence doesn't.
 
@@ -28,12 +28,12 @@ What should it explicitly **not** do or touch? Examples: other folders, producti
 - Early finish: should the run end as soon as every check passes? (Usually yes.)
 
 ## 5. Roles, models and effort
-Propose a team from design.md for this goal kind, then confirm or adjust:
+Confirm the runtime (Claude Code or Codex). Propose a team from design.md for this goal kind, then confirm or adjust:
 - **orchestrator:** the model and effort for the per-cycle planner.
 - **workers:** 1–3 doer roles named for the work (builder, researcher, writer, analyst…).
-- **checker:** a mechanical role on Haiku/low that runs checks and reports facts.
+- **checker:** a mechanical role that runs checks and reports facts (Haiku/low for Claude Code; the cycle model for Codex).
 - **reviewer (optional):** a read-only role that scores against the rubric.
-- Any per-cycle budget cap (`--max-budget-usd`)? Mention that on a subscription, costs are API-equivalent estimates, not bills.
+- Claude Code only: any per-cycle budget cap (`--max-budget-usd`)? Codex reports tokens but no dollar costs or dollar caps. Mention that on a subscription, costs are API-equivalent estimates, not bills.
 
 ## 6. Checkpoints
 - **Code in a git repo:** the orchestrator commits each verified task (`git`). Never push.
@@ -49,7 +49,7 @@ The actions the harness must never take on its own. Suggest the common ones and 
 - adding dependencies with licences the user hasn't approved
 
 ## 8. Feedback cadence
-- Will the user check in? How often, and how: the dashboard, `epoptes feedback`, `.epoptes/FEEDBACK.md`, or a chat with Claude.
+- Will the user check in? How often, and how: the dashboard, `epoptes feedback`, `.epoptes/FEEDBACK.md`, or a chat with Claude Code or Codex.
 - What should reach them right away (milestone, blocked, done)? This sets `notify` and when the orchestrator sends PushNotification.
 - Is there a checkpoint where the run should **pause for review** (e.g. after the first milestone)? If so, the orchestrator runs `epoptes pause` at that point.
 
@@ -63,7 +63,7 @@ DONE WHEN D1 <check> [command|file|agent|manual]
           D2 …
 NOT       <non-goals, comma-separated>
 TIME      <total> active · wrap-up <x> · grace <y> · early finish <yes/no>
-TEAM      orchestrator <model>/<effort> · <role> <model>/<effort> · … · checker haiku/low
+TEAM      orchestrator <model>/<effort> · <role> <model>/<effort> · … · checker <model>/<effort>
 CYCLE     ≤ <n> rounds, ~<m> min soft cap, timeout <t> min, budget <$ or none>
 SAVES     <git commits | shadow snapshots | none>
 ASK FIRST <approval list>

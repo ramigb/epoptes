@@ -1,11 +1,11 @@
 ---
 name: epoptes
-description: Design, generate and register a long-running, time-boxed autonomous harness that the Epoptes runner executes as fresh-context Claude Code cycles, for any goal (code, research, content, data). Use when the user wants to build or set up a harness, an overnight or multi-hour autonomous run, or mentions Epoptes. Also use to check on or steer existing Epoptes goals (status, start, pause, stop, feedback, events, reports).
+description: Design, generate and register a long-running, time-boxed autonomous harness that the Epoptes runner executes as fresh-context Claude Code or Codex cycles, for any goal (code, research, content, data). Use when the user wants to build or set up a harness, an overnight or multi-hour autonomous run, or mentions Epoptes. Also use to check on or steer existing Epoptes goals (status, start, pause, stop, feedback, events, reports).
 ---
 
 # Epoptes: harnesses for long-running goals
 
-Epoptes runs a goal as a series of **cycles**. Each cycle is a fresh `claude -p` orchestrator that reads the goal's files, does one slice of work through subagents, verifies it, records state and exits. All memory lives in files under `<project>/.epoptes/`. The runner, CLI and dashboard only read and write those files.
+Epoptes runs a goal as a series of **cycles**. Each cycle is a fresh `claude -p` or `codex exec` orchestrator that reads the goal's files, does one slice of work (using subagents when configured), verifies it, records state and exits. All memory lives in files under `<project>/.epoptes/`. The runner, CLI and dashboard only read and write those files.
 
 You do one of two jobs:
 - **Check on or steer a goal:** use the CLI (reference at the bottom). Read `epoptes status <goal>` before anything else. Don't open `cycles/` transcripts unless the user asks.
@@ -14,7 +14,7 @@ You do one of two jobs:
 ## Building a harness
 
 ### 1. Interview
-Work through [reference/interview.md](reference/interview.md) until every item has an answer the user agreed to. Ask in small batches (2–4 questions). Use AskUserQuestion when there are clear options, and always put your recommended default first. Look at the project directory yourself first, so you ask only what you can't find out.
+Work through [reference/interview.md](reference/interview.md) until every item has an answer the user agreed to. Ask in small batches (2–4 questions). Use the host's user-question tool when there are clear options, and always put your recommended default first. Look at the project directory yourself first, so you ask only what you can't find out.
 
 Keep asking until you agree. Never fill a gap with a silent assumption; propose a default and get a yes.
 
@@ -33,10 +33,12 @@ Show the one-screen summary from interview.md. Wait for an explicit yes. If the 
 
 ### 4. Generate
 1. Copy [templates/](templates/) into `<project>/.epoptes/`: `goal.json`, `loop.md`, `settings.json`, `FEEDBACK.md`, `agents/*.md` and `state/*.md`.
-2. Adapt **every** file to this goal:
+2. Adapt **every** file to this goal and the selected adapter (Claude Code or Codex):
    - Replace every `{{…}}` placeholder.
    - Delete the template notes (lines starting with `<!-- template:`).
-   - Rename, add or remove role files to match the design.
+   - For Claude Code, keep `adapter.type: "claude-code"` and its model aliases, role frontmatter and settings.json.
+   - For Codex, set `adapter.type: "codex"`, `permission_mode: "workspace-write"`, and `cycle.max_budget_usd: null`. Use a Codex model id confirmed with the user, or `model: ""` to use their CLI configuration. Remove settings.json: Codex uses its own sandbox and native rules.
+   - Rename, add or remove role files to match the design. Codex role files are guidance only: adapt loop.md to perform work and checks sequentially, reading role instructions when needed. Do not rely on Claude Agent, SendMessage, per-role models, tools or maxTurns. Native Codex subagents require separate user-configured Codex agents; Epoptes does not translate role frontmatter.
    - Seed `state/backlog.md` with the first milestones and tasks, and `state/decisions.md` with what the interview settled.
 3. Apply [reference/guardrails.md](reference/guardrails.md): the permissions for this goal kind, no git push or history rewrites, and secrets kept out of every file.
 4. For a new directory without git: set `checkpoints` to `shadow`, not `git`, unless the user wants a repo.
@@ -55,12 +57,12 @@ Offer to start it; don't start it without a yes.
 ## Rules every generated harness follows
 - **Fresh context every cycle.** All memory is in `state/`, and each state file has a cap in `goal.json` `state_caps`.
 - **Targeted reads.** The orchestrator reads headers and slices (`grep -n`, `sed -n`), never whole large files or transcripts.
-- **Cheap models for mechanical roles.** Checkers run on Haiku with low effort; judgement and creative work run on Sonnet or Opus.
-- **Reuse workers.** Send fixes back to the same worker with SendMessage instead of briefing a new one.
-- **Caps per cycle:** at most 3 rounds, a soft time limit (usually 45–60 min), and optionally `cycle.max_budget_usd`.
+- **Use provider-appropriate models.** Claude Code checkers can use Haiku/low; judgement uses Sonnet or Opus. Codex uses the selected CLI model and effort for the cycle.
+- **Reuse workers when available.** Use the host's follow-up tool; Codex without configured subagents does the work sequentially.
+- **Caps per cycle:** at most 3 rounds, a soft time limit (usually 45–60 min), and optionally `cycle.max_budget_usd` for Claude Code only.
 - **Parallel tasks own separate files.** Two workers never write the same file in one round.
 - **Guardrails:**
-  - a permissions allow/deny list
+  - Claude Code: a permissions allow/deny list; Codex: a workspace-write sandbox and native rules
   - no `git push`, no history rewrites, no destructive cleans
   - secrets never in goal files (point to the user's secret manager, e.g. the 1Password CLI or MCP)
 - **Anything in the goal's approval list is never done autonomously.** The orchestrator marks the task `[blocked: needs approval]`, runs `epoptes event blocked "…"` and moves on.

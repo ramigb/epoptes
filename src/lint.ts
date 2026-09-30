@@ -59,15 +59,20 @@ export function lintGoal(p: GoalPaths, goal: Goal): LintResult {
     }
   }
 
-  const settings = readJson<{ permissions?: { allow?: string[]; deny?: string[] } }>(p.settings);
-  if (!settings) warnings.push('no .epoptes/settings.json: cycles run without an allow/deny list');
-  else {
-    const deny = settings.permissions?.deny ?? [];
-    const missing = REQUIRED_DENY.filter((d) => !deny.includes(d));
-    if (missing.length) warnings.push(`settings.json deny list is missing ${missing.join(', ')}`);
-    const allow = settings.permissions?.allow ?? [];
-    const risky = allow.filter((a) => a === 'Bash' || a === 'Bash(*)' || /^Bash\((git push|sudo|rm -rf)/.test(a));
-    if (risky.length) warnings.push(`settings.json allows ${risky.join(', ')}; allow narrow commands instead`);
+  if (goal.adapter.type === 'claude-code') {
+    const settings = readJson<{ permissions?: { allow?: string[]; deny?: string[] } }>(p.settings);
+    if (!settings) warnings.push('no .epoptes/settings.json: cycles run without an allow/deny list');
+    else {
+      const deny = settings.permissions?.deny ?? [];
+      const missing = REQUIRED_DENY.filter((d) => !deny.includes(d));
+      if (missing.length) warnings.push(`settings.json deny list is missing ${missing.join(', ')}`);
+      const allow = settings.permissions?.allow ?? [];
+      const risky = allow.filter((a) => a === 'Bash' || a === 'Bash(*)' || /^Bash\((git push|sudo|rm -rf)/.test(a));
+      if (risky.length) warnings.push(`settings.json allows ${risky.join(', ')}; allow narrow commands instead`);
+    }
+  } else {
+    if (fs.existsSync(p.settings)) warnings.push('Codex ignores .epoptes/settings.json; configure permissions with its sandbox and native Codex rules');
+    if (goal.adapter.permission_mode === 'danger-full-access') warnings.push('Codex danger-full-access disables sandbox protection; prefer workspace-write');
   }
 
   try {
@@ -79,7 +84,7 @@ export function lintGoal(p: GoalPaths, goal: Goal): LintResult {
   }
 
   try {
-    for (const f of fs.readdirSync(p.agents).filter((x) => x.endsWith('.md'))) {
+    for (const f of fs.readdirSync(p.agents).filter((x) => x.endsWith('.md') && goal.adapter.type === 'claude-code')) {
       const { data } = parseFrontmatter(fs.readFileSync(path.join(p.agents, f), 'utf8'));
       if (!data.description) problems.push(`agents/${f} has no description (the orchestrator picks roles by it)`);
       if (!data.model) warnings.push(`agents/${f} sets no model; it will inherit the orchestrator's`);

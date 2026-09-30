@@ -7,7 +7,7 @@ import { test } from 'node:test';
 import { appendJsonl, writeJson } from '../src/fsx.ts';
 import { importRunSh, parseWatchdog } from '../src/importers/runsh.ts';
 import { goalPaths } from '../src/paths.ts';
-import { buildReport, renderHtml, renderMarkdown } from '../src/report.ts';
+import { buildReport, renderAllHtml, renderAllMarkdown, renderHtml, renderMarkdown } from '../src/report.ts';
 import { validate } from '../src/schema.ts';
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'epoptes-report-'));
@@ -64,6 +64,25 @@ test('rendered reports label estimates and escape recorded text', () => {
   assert.match(html, /Report &lt;test&gt;/);
   assert.match(html, /title="API-equivalent estimate, not billed"/);
   assert.match(html, /<svg viewBox/);
+});
+
+test('unknown Codex costs stay unknown in reports and combined totals', () => {
+  const p = goalWithHistory();
+  const file = path.join(p.cycleDir(4), 'result.json');
+  const result = JSON.parse(fs.readFileSync(file, 'utf8'));
+  result.adapter = 'codex';
+  result.cost_usd = null;
+  result.models = { 'test-codex': { input: 20, output: 10, cache_read: 80, cache_write: 0, cost_usd: null } };
+  writeJson(file, result);
+  const report = buildReport(p);
+  assert.equal(report.totals.cost_usd, null);
+  assert.equal(report.runs[0].cost_usd, null);
+  assert.equal(report.totals.models['test-codex'].cost_usd, null);
+  assert.match(renderMarkdown(report), /\| Cost \| –/);
+  assert.match(renderHtml(report), /<div class="k">Cost<\/div><div class="v">.*?–/);
+  assert.match(renderAllMarkdown([report]), /\*\*–\*\*/);
+  assert.match(renderAllHtml([report]), /<div class="k">Cost<\/div><div class="v">.*?–/);
+  assert.doesNotMatch(renderAllMarkdown([report]), /test-codex[^\n]*\$0\.00/);
 });
 
 test('run.sh importer: two runs become one monotonic cycle sequence', () => {

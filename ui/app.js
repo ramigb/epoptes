@@ -519,7 +519,7 @@ function Timeline({ d }) {
       })}
     </div>
     <div class="legend">
-      <span>width = duration · height = cost</span>
+      <span>width = duration · height = cost${results.some((r) => r.cost_usd == null) ? ' (unknown costs use minimum height)' : ''}</span>
       <span><i style=${{ background: 'var(--ok)' }}></i>ok</span>
       <span><i style=${{ background: 'var(--bad)' }}></i>error / timeout</span>
       <span><i style=${{ background: 'var(--idle)' }}></i>interrupted</span>

@@ -9,7 +9,7 @@
 
 *Epoptes (Greek ἐπόπτης, "the overseer") was a title for Zeus and Helios, who watch over everything.*
 
-Epoptes runs **long, autonomous Claude Code sessions** (an overnight build, a research sweep, a stack of documents, a data clean-up) and lets you watch and steer them. You describe the goal in a Claude Code chat, and Claude interviews you and writes the harness. Epoptes then runs it as a series of fresh-context cycles until the goal is done or its time box ends, with a live dashboard, feedback while it runs, and a report at the end.
+Epoptes runs **long, autonomous Claude Code or Codex sessions** (an overnight build, a research sweep, a stack of documents, a data clean-up) and lets you watch and steer them. You describe the goal in a chat, and the agent interviews you and writes the harness. Epoptes then runs it as a series of fresh-context cycles until the goal is done or its time box ends, with a live dashboard, feedback while it runs, and a report at the end.
 
 It grew out of a 12-hour autonomous game build. Its rules for keeping long runs cheap and on track are built in:
 - a fresh context every cycle
@@ -21,7 +21,7 @@ It grew out of a 12-hour autonomous game build. Its rules for keeping long runs 
 
 ## What you need
 - **Node.js 22.18 or newer**
-- **[Claude Code](https://docs.claude.com/claude-code), installed and logged in.** Epoptes runs your own `claude` CLI and never handles logins or keys.
+- **[Claude Code](https://docs.claude.com/claude-code) or [Codex CLI](https://developers.openai.com/codex/cli), installed and logged in.** Epoptes runs your own CLI and never handles logins or keys.
 - **Linux, macOS or WSL2**
 
 ## Install
@@ -68,17 +68,40 @@ To try Epoptes before building your own goal, a 15-minute example writes a small
 cp -r examples/glossary /tmp/glossary && epoptes add /tmp/glossary && epoptes start glossary
 ```
 
+### Using Codex
+
+Install the same skill for Codex:
+```sh
+epoptes skill install --agent codex    # links into ~/.agents/skills
+```
+Then, in Codex, ask: "use the epoptes skill to build a Codex harness for <goal>". Use a global install or checkout for the skill link, as with Claude Code. Run Epoptes and the Codex CLI in Linux, macOS or WSL2; native Windows runners are not supported.
+
+In `.epoptes/goal.json`, use:
+```json
+"adapter": {
+  "type": "codex",
+  "model": "",
+  "effort": "high",
+  "permission_mode": "workspace-write"
+}
+```
+An empty model uses your Codex CLI configuration; you can also specify a Codex model id. Each cycle runs a fresh `codex exec --json`, sends `loop.md` on stdin, and uses saved CLI authentication. Approval prompts are disabled; commands requiring escalation fail. Non-git directories work too.
+
+Codex uses its native sandbox, configuration and rules. `.epoptes/settings.json` is Claude-only: omit it for Codex goals. The skill adapts `loop.md` to do work and checks sequentially; role files are guidance, and their Claude models, tool lists and turn caps are not translated into native Codex subagents. Adapt an existing Claude loop before changing its adapter.
+
+The dashboard and reports show Codex commands, file changes, messages and token usage. Codex JSONL provides no dollar costs or reset timestamps: costs display as unknown, rate limits use the configured backoff, and `cycle.max_budget_usd` must be `null`. With an empty model, token usage is labelled `codex-configured` because the stream doesn't identify the actual model. See the official [non-interactive mode documentation](https://developers.openai.com/codex/noninteractive) and [skill locations](https://developers.openai.com/codex/skills).
+
 ## How it works
 - **A goal is a directory.** Everything lives in `<project>/.epoptes/`: `goal.json` (objective, done checks, time box, models), `loop.md` (the orchestrator's per-cycle instructions), role files in `agents/`, and memory in `state/`. It also holds the logs of events, feedback and cycles. The file format is the contract: the CLI, runner, dashboard and skill only read and write these files ([docs/spec.md](docs/spec.md)).
-- **A run is a detached process,** one per goal. It starts `claude -p` with `loop.md`, cycle after cycle:
-  - Each cycle orients from the state files, dispatches work to subagents, verifies it, records it and exits.
+- **A run is a detached process,** one per goal. It starts `claude -p` or `codex exec` with `loop.md`, cycle after cycle:
+  - Each cycle orients from the state files, does a slice of work (through subagents when configured), verifies it, records it and exits.
   - Between cycles, the runner checks the time box, your controls, rate limits and failures.
   - Closing the dashboard or the terminal never stops a run.
 - **The clock counts active time.** It doesn't count pauses, stops or (by default) rate-limit waits. Near the end the goal switches to *wrap-up* (feature freeze), then *overtime*, then stops. A goal can also finish early once its checks pass.
-- **Observability costs no tokens.** The live ticker comes from Claude Code's `stream-json` output: which agent is doing what, and which files it touched. Orchestrators add a few semantic events through the CLI (milestones, blocks, done).
+- **Observability costs no tokens.** The live ticker comes from the CLI's JSON stream: which tools ran and which files changed (plus agent activity for Claude Code). Orchestrators add a few semantic events through the CLI (milestones, blocks, done).
 
 ## Everyday use
-| you want to… | dashboard | CLI (also usable from a Claude Code chat) |
+| you want to… | dashboard | CLI (also usable from a Claude Code or Codex chat) |
 |---|---|---|
 | see how it's going | goal card or page | `epoptes status <goal>` |
 | start or resume | **Start** / **Resume** | `epoptes start <goal>` |
@@ -109,7 +132,8 @@ epoptes clock                          one line with the time left (used by orch
 epoptes report [goal] [--all]          Markdown + HTML report
 epoptes import-runsh <project>         import an older run.sh harness (dress2impress style)
 epoptes ui [--port N] [--lan]          the dashboard
-epoptes skill install | path           the Claude Code skill
+epoptes skill install [--agent codex]   install the skill (Claude Code by default)
+epoptes skill path                     print the shared skill directory
 ```
 `[goal]` is a registered id or a path. Leave it out inside a goal's folder.
 
@@ -117,14 +141,14 @@ epoptes skill install | path           the Claude Code skill
 - The dashboard and reports show **tokens by model, cache-read share and cost per cycle**, and flag cycles that cost more than twice the median.
 - On a Claude subscription, costs are **API-equivalent estimates, not bills**, and are always shown with `≈`.
 - You're responsible for your account and its usage limits. When Claude Code reports a rate limit, Epoptes waits until the limit resets (and pauses the clock), then continues. It never works around limits or switches accounts.
-- For hard caps per cycle, set `cycle.max_budget_usd` in `goal.json`.
+- For Claude Code hard caps per cycle, set `cycle.max_budget_usd` in `goal.json`. Codex requires `null` and reports token usage without dollar estimates.
 
 ## Safety and privacy
 - **Local only.** The dashboard binds to `127.0.0.1`. It rejects other hosts (DNS rebinding) and cross-site writes (CSRF), because feedback ends up in agents' prompts. `--lan` is an explicit opt-in with a warning and no login.
-- **No telemetry,** no accounts, no keys. Epoptes runs the `claude` you're already logged into.
+- **No telemetry,** no accounts, no keys handled by Epoptes. It runs the `claude` or `codex` you're already logged into; the CLI's own data settings still apply.
 - **Transcripts and logs stay on your machine,** gitignored under `.epoptes/cycles/` and `.epoptes/run/`.
 - **Guardrails in every generated harness:**
-  - a permissions allow/deny list
+  - Claude Code's permissions allow/deny list, or Codex's native sandbox and rules
   - no `git push`, no history rewrites, no destructive cleans
   - secrets never in goal files (use your secret manager, e.g. the 1Password CLI)
   - an approval list the orchestrator must never act on by itself
@@ -133,13 +157,13 @@ epoptes skill install | path           the Claude Code skill
 
 ## Development
 ```sh
-npm test            # node --test: unit tests, end-to-end runner tests with a fake `claude`, server and report tests
+npm test            # node --test: unit tests, runner tests with fake Claude/Codex CLIs, server and report tests
 npm run typecheck
 npm run build       # dist/ for the npm package (the checkout runs src/ directly)
 ```
-- `src/`: the CLI, runner, adapter (`adapters/claude-code.ts`), dashboard server (`ui/`), reports and the importer.
+- `src/`: the CLI, runner, adapters (`adapters/`), dashboard server (`ui/`), reports and the importer.
 - `ui/`: the dashboard (Preact via `htm`, no build step).
-- `plugin/`: the Claude Code skill and templates.
+- `plugin/`: the shared Claude Code/Codex skill and templates.
 - `docs/`: the spec, JSON Schemas and decisions.
 
 Usage notes go in [NOTES.md](NOTES.md), and are triaged into [ROADMAP.md](ROADMAP.md).

@@ -88,3 +88,7 @@ export function readHead(file: string, lines: number): string[] {
 /** "≈ $4.66 (estimate)" or "$4.66". */
 export const money = (usd: number | null | undefined, basis: 'billed' | 'estimate' = 'estimate') =>
   usd == null ? '–' : basis === 'estimate' ? `≈ $${usd.toFixed(2)} (estimate)` : `$${usd.toFixed(2)}`;
+
+/** An unknown cost makes the total unknown, rather than looking like free usage. */
+export const totalCost = (items: { cost_usd: number | null }[]): number | null =>
+  items.some((x) => x.cost_usd == null) ? null : items.reduce((sum, x) => sum + x.cost_usd!, 0);

@@ -9,7 +9,7 @@ import { exists, nowIso, readJson, readJsonl, writeJson } from '../fsx.ts';
 import { loadGoal, type Goal } from '../goal.ts';
 import { epoptesHome } from '../paths.ts';
 import { LIVE_STATES } from '../status.ts';
-import { backlogCounts, backlogItems } from '../summary.ts';
+import { totalCost, backlogCounts, backlogItems } from '../summary.ts';
 import type { GoalWatch } from './watch.ts';
 
 type Result = CycleResult & { version: 1; cycle: number; run: string };
@@ -140,7 +140,7 @@ export function summary(w: GoalWatch) {
     clock: c && cs ? { active: cs.active, timebox_s: c.timebox_s, wrapup_s: c.wrapup_s, grace_s: c.grace_s, to_end: cs.toEnd, paused: Boolean(c.paused_at), clock_mode: cs.mode } : null,
     backlog: backlogCounts(p),
     cycles: results.length,
-    cost_usd: results.reduce((a, r) => a + (r.cost_usd ?? 0), 0),
+    cost_usd: totalCost(results),
     cost_basis: results.some((r) => r.cost_basis === 'estimate') || !results.length ? 'estimate' : 'billed',
     last_exit: results.at(-1)?.exit ?? null,
     notify: goal.notify,

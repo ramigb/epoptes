@@ -1,4 +1,4 @@
-// The runner adapter interface. v1 ships only claude-code; other providers implement the same shape.
+// The shared runner interface for installed coding CLIs.
 import type { Limits } from '../status.ts';
 
 export interface Activity {
@@ -69,6 +69,6 @@ export interface Adapter {
   id: string;
   check(): Promise<{ ok: boolean; version?: string; problem?: string }>;
   /** The command a cycle would run; writes its generated config files into spec.cycleDir. */
-  command(spec: CycleSpec): { bin: string; args: string[]; env: Record<string, string> };
+  command(spec: CycleSpec): { bin: string; args: string[]; env: Record<string, string>; stdin?: string };
   start(spec: CycleSpec, hooks: CycleHooks): Cycle;
 }

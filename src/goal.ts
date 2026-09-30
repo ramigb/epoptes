@@ -13,7 +13,7 @@ export interface Goal {
   approval_required: string[];
   timebox: { total_min: number; wrapup_min: number; grace_min: number; pause_on_rate_limit: boolean };
   checkpoints: 'git' | 'shadow' | 'none';
-  adapter: { type: 'claude-code'; prompt: string; model: string; effort: string; permission_mode: string; args: string[] };
+  adapter: { type: 'claude-code' | 'codex'; prompt: string; model: string; effort: string; permission_mode: string; args: string[] };
   cycle: { timeout_min: number; pause_between_s: number; max_budget_usd: number | null };
   failures: { cooldown_after: number; cooldown_min: number; give_up_after: number };
   rate_limit: { backoff_s: number; backoff_max_s: number };

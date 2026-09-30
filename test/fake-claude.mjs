@@ -15,6 +15,30 @@ if (argv[0] === '--version') {
   process.exit(0);
 }
 
+// The same executable also stands in for `codex exec --json` in adapter tests.
+if (argv[0] === 'exec') {
+  let prompt = '';
+  for await (const chunk of process.stdin) prompt += chunk;
+  fs.writeFileSync(path.join(process.env.EPOPTES_GOAL_DIR, 'cycles', String(cycle).padStart(6, '0'), 'fake-argv.json'), JSON.stringify({ argv, prompt }));
+  const out = (m) => console.log(JSON.stringify(m));
+  out({ type: 'thread.started', thread_id: `codex-${cycle}` });
+  out({ type: 'turn.started' });
+  if (mode === 'slow') {
+    process.on('SIGINT', () => process.exit(130));
+    await new Promise((r) => setTimeout(r, 60000));
+  } else if (mode === 'error' || mode === 'ratelimit') {
+    out({ type: 'turn.failed', error: { message: mode === 'ratelimit' ? 'You have hit your usage limit' : 'something broke' } });
+    process.exit(1);
+  }
+  out({ type: 'item.started', item: { type: 'command_execution', command: 'epoptes event note' } });
+  execFileSync('epoptes', ['event', 'note', `fake codex cycle ${cycle} ran`]);
+  out({ type: 'item.completed', item: { type: 'file_change', changes: [{ path: 'out.txt', kind: 'add' }] } });
+  out({ type: 'item.completed', item: { type: 'agent_message', text: 'Completed the work.' } });
+  out({ type: 'turn.completed', usage: { input_tokens: 100, cached_input_tokens: 80, output_tokens: 10 } });
+  if (Number(process.env.FAKE_DONE_AT) === cycle) execFileSync('epoptes', ['event', 'done', 'fake codex finished']);
+  process.exit(0);
+}
+
 // Record what we were started with, so tests can check flags and generated files.
 const settings = JSON.parse(fs.readFileSync(arg('--settings'), 'utf8'));
 const agents = JSON.parse(fs.readFileSync(arg('--agents'), 'utf8'));

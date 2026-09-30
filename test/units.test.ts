@@ -4,15 +4,50 @@ import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { agentsFromDir, parseFrontmatter, StreamParser } from '../src/adapters/claude-code.ts';
-import { activeS, clockState, newClock, pauseClock, resumeClock } from '../src/clock.ts';
+import { activeS, clockState, newClock, pauseClock, resumeClock, readClock, writeClock } from '../src/clock.ts';
 import { addFeedback, ingestInbox, readFeedback, setFeedbackStatus } from '../src/feedback.ts';
 import { hm, parseDuration } from '../src/fsx.ts';
 import { goalPaths } from '../src/paths.ts';
 import { validate } from '../src/schema.ts';
 import { backlogCounts } from '../src/summary.ts';
+import { idleStatus, reconcile, writeStatus } from '../src/status.ts';
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'epoptes-test-'));
 const iso = (s: number) => new Date(s * 1000).toISOString();
+
+test('own-cycle readers do not crash a runner hidden by a sandbox PID namespace', (t) => {
+  const p = goalPaths(tmp());
+  const context = { EPOPTES_GOAL_DIR: p.root, EPOPTES_RUN: 'r1', EPOPTES_CYCLE: '1' };
+  const previous = Object.fromEntries(Object.keys(context).map((key) => [key, process.env[key]]));
+  t.after(() => {
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  });
+  const status = { ...idleStatus(), state: 'running' as const, pid: 2147483647, run: 'r1', cycle: 1, heartbeat_at: iso(1800000000) };
+  const clock = newClock('r1', { total_min: 15, wrapup_min: 2, grace_min: 0, pause_on_rate_limit: true });
+  const seed = () => {
+    writeStatus(p, status);
+    writeClock(p, clock);
+    fs.writeFileSync(p.lock, String(status.pid));
+  };
+  Object.assign(process.env, context);
+  seed();
+  assert.equal(reconcile(p).state, 'running');
+  assert.equal(readClock(p)!.paused_at, null);
+  assert.ok(fs.existsSync(p.lock));
+  assert.ok(!fs.existsSync(p.events), 'no false crash event');
+
+  for (const key of Object.keys(context)) {
+    Object.assign(process.env, context);
+    process.env[key] = 'different';
+    seed();
+    assert.equal(reconcile(p).state, 'crashed', `${key} must match this goal and cycle`);
+    assert.equal(readClock(p)!.paused_at, status.heartbeat_at);
+    assert.ok(!fs.existsSync(p.lock), 'external readers still repair a dead runner');
+  }
+});
 
 test('clock modes follow active time, and pauses do not count', () => {
   const t0 = 1_800_000_000;

@@ -61,7 +61,11 @@ export function isAlive(pid: number | null | undefined): boolean {
  */
 export function reconcile(p: GoalPaths): Status {
   const s = readStatus(p) ?? idleStatus();
-  if (!LIVE_STATES.includes(s.state) || isAlive(s.pid)) return s;
+  // A cycle's sandbox can hide the runner PID. Only readers outside that cycle reconcile it.
+  const ownCycle = process.env.EPOPTES_GOAL_DIR === p.root
+    && process.env.EPOPTES_RUN === s.run
+    && process.env.EPOPTES_CYCLE === String(s.cycle);
+  if (!LIVE_STATES.includes(s.state) || ownCycle || isAlive(s.pid)) return s;
   const at = s.heartbeat_at ?? s.updated_at;
   const c = readClock(p);
   if (c) writeClock(p, pauseClock(c, at));

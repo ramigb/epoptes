@@ -9,7 +9,7 @@ import { exists, hm, nowIso, readJson, readJsonl } from './fsx.ts';
 import { loadGoal, type Goal } from './goal.ts';
 import type { GoalPaths } from './paths.ts';
 import { readStatus } from './status.ts';
-import { backlogItems } from './summary.ts';
+import { backlogItems, totalCost } from './summary.ts';
 
 type Result = CycleResult & { cycle: number; run: string };
 
@@ -23,15 +23,15 @@ export interface GoalReport {
     active_s: number;
     cycles: number;
     turns: number;
-    cost_usd: number;
+    cost_usd: number | null;
     cache_share: number | null;
     rate_limit_wait_s: number;
     failed_cycles: number;
     models: Record<string, ModelUsage>;
   };
-  runs: { run: string; started_at: string; ended_at: string | null; end_reason: string | null; wall_s: number; active_s: number; cycles: number; cost_usd: number; exits: Record<string, number> }[];
+  runs: { run: string; started_at: string; ended_at: string | null; end_reason: string | null; wall_s: number; active_s: number; cycles: number; cost_usd: number | null; exits: Record<string, number> }[];
   cycles: { cycle: number; run: string; started_at: string; duration_s: number; exit: string; turns: number | null; cost_usd: number | null; cache_share: number | null; flagged: boolean; models: Record<string, ModelUsage> }[];
-  median_cost: number;
+  median_cost: number | null;
   milestones: { ts: string; run: string | null; cycle: number | null; type: string; text: string }[];
   tasks: { done: string[]; blocked: string[]; cut: string[]; open: number };
   commits: { hash: string; at: string; subject: string }[];
@@ -129,7 +129,7 @@ export function buildReport(p: GoalPaths, now = Date.now()): GoalReport {
   const status = readStatus(p);
 
   const costs = results.map((r) => r.cost_usd ?? 0).filter((c) => c > 0);
-  const med = median(costs);
+  const med = costs.length ? median(costs) : null;
   const models: Record<string, ModelUsage> = {};
   for (const r of results) {
     for (const [m, u] of Object.entries(r.models)) {
@@ -138,7 +138,7 @@ export function buildReport(p: GoalPaths, now = Date.now()): GoalReport {
       t.output += u.output;
       t.cache_read += u.cache_read;
       t.cache_write += u.cache_write;
-      t.cost_usd = (t.cost_usd ?? 0) + (u.cost_usd ?? 0);
+      t.cost_usd = totalCost([t, u]);
     }
   }
 
@@ -148,7 +148,7 @@ export function buildReport(p: GoalPaths, now = Date.now()): GoalReport {
     const exits: Record<string, number> = {};
     for (const r of rs) exits[r.exit] = (exits[r.exit] ?? 0) + 1;
     const end = s.ended_at ? Date.parse(s.ended_at) : now;
-    return { run, started_at: s.started_at, ended_at: s.ended_at, end_reason: s.end_reason, wall_s: Math.round((end - Date.parse(s.started_at)) / 1000), active_s: Math.max(0, Math.round(s.active_ms / 1000)), cycles: rs.length, cost_usd: rs.reduce((a, r) => a + (r.cost_usd ?? 0), 0), exits };
+    return { run, started_at: s.started_at, ended_at: s.ended_at, end_reason: s.end_reason, wall_s: Math.round((end - Date.parse(s.started_at)) / 1000), active_s: Math.max(0, Math.round(s.active_ms / 1000)), cycles: rs.length, cost_usd: totalCost(rs), exits };
   });
 
   const first = runs[0]?.started_at ?? results[0]?.started_at;
@@ -181,20 +181,20 @@ export function buildReport(p: GoalPaths, now = Date.now()): GoalReport {
     generated_at: nowIso(now),
     goal: { id: goal.id, name: goal.name, kind: goal.kind, objective: goal.objective, done: goal.done, checkpoints: goal.checkpoints, path: p.project },
     state: status?.state ?? 'idle',
-    estimate: results.some((r) => r.cost_basis === 'estimate') || !results.length,
+    estimate: results.some((r) => r.cost_usd != null && r.cost_basis === 'estimate') || !results.length,
     totals: {
       wall_s: first ? Math.round((lastEnd - Date.parse(first)) / 1000) : 0,
       active_s: runs.reduce((a, r) => a + r.active_s, 0),
       cycles: results.length,
       turns: results.reduce((a, r) => a + (r.turns ?? 0), 0),
-      cost_usd: results.reduce((a, r) => a + (r.cost_usd ?? 0), 0),
+      cost_usd: totalCost(results),
       cache_share: cacheShare(models),
       rate_limit_wait_s: events.filter((e) => e.type === 'wait' && e.reason === 'rate_limit').reduce((a, e) => a + Number(e.seconds ?? 0), 0),
       failed_cycles: results.filter((r) => r.exit === 'error' || r.exit === 'timeout').length,
       models,
     },
     runs,
-    cycles: results.map((r) => ({ cycle: r.cycle, run: r.run, started_at: r.started_at, duration_s: r.duration_s, exit: r.exit, turns: r.turns, cost_usd: r.cost_usd, cache_share: cacheShare(r.models), flagged: results.length >= 3 && med > 0 && (r.cost_usd ?? 0) > 2 * med, models: r.models })),
+    cycles: results.map((r) => ({ cycle: r.cycle, run: r.run, started_at: r.started_at, duration_s: r.duration_s, exit: r.exit, turns: r.turns, cost_usd: r.cost_usd, cache_share: cacheShare(r.models), flagged: results.length >= 3 && med != null && med > 0 && (r.cost_usd ?? 0) > 2 * med, models: r.models })),
     median_cost: med,
     milestones: events.filter((e) => ['milestone', 'wrapup', 'done'].includes(e.type)).map((e) => ({ ts: e.ts, run: e.run, cycle: e.cycle, type: e.type, text: String(e.text ?? '') })),
     tasks: {
@@ -330,6 +330,7 @@ footer{margin-top:40px;color:var(--muted);font-size:12px}
 function costChart(r: GoalReport): string {
   const cs = r.cycles;
   if (!cs.length) return '<p class="meta">No cycles yet.</p>';
+  if (cs.every((c) => c.cost_usd == null)) return '<p class="meta">Dollar costs are unavailable for these cycles.</p>';
   const W = 960;
   const H = 220;
   const pad = { l: 48, r: 8, t: 18, b: 26 };
@@ -349,7 +350,11 @@ function costChart(r: GoalReport): string {
       out.push(`<text class="axis" x="${x + 2}" y="${pad.t - 6}">${esc(c.run)}</text>`);
       lastRun = c.run;
     }
-    const v = c.cost_usd ?? 0;
+    if (c.cost_usd == null) {
+      out.push(`<text class="axis" x="${x + bw / 2}" y="${H - pad.b - 4}" text-anchor="middle"><title>Cycle ${c.cycle}: cost unavailable</title>?</text>`);
+      return;
+    }
+    const v = c.cost_usd;
     const top = y(v);
     const h = Math.max(1, H - pad.b - top);
     const rr = Math.min(4, bw / 2, h);
@@ -441,12 +446,12 @@ export function renderAllMarkdown(reports: GoalReport[]): string {
   const est = reports.some((r) => r.estimate);
   const L = ['# All goals: report', '', `Generated ${day(nowIso())}${est ? ` · ${ESTIMATE_HEADER}` : ''}`, '', '| goal | state | runs | cycles | active | tasks done | feedback done | cost |', '|---|---|---:|---:|---:|---:|---:|---:|'];
   for (const r of reports) L.push(`| ${mdCell(r.goal.name)} (\`${r.goal.id}\`) | ${r.state} | ${r.runs.length} | ${r.totals.cycles} | ${hm(r.totals.active_s)} | ${r.tasks.done.length} | ${r.feedback.filter((f) => f.status === 'done').length}/${r.feedback.length} | ${usd(r.totals.cost_usd, r.estimate)} |`);
-  const total = reports.reduce((a, r) => a + r.totals.cost_usd, 0);
+  const total = totalCost(reports.map((r) => r.totals));
   L.push(`| **total** | | ${reports.reduce((a, r) => a + r.runs.length, 0)} | ${reports.reduce((a, r) => a + r.totals.cycles, 0)} | ${hm(reports.reduce((a, r) => a + r.totals.active_s, 0))} | | | **${usd(total, est)}** |`, '');
   const models: Record<string, ModelUsage> = {};
   for (const r of reports) for (const [m, u] of Object.entries(r.totals.models)) {
     const t = (models[m] ??= { input: 0, output: 0, cache_read: 0, cache_write: 0, cost_usd: 0 });
-    t.input += u.input; t.output += u.output; t.cache_read += u.cache_read; t.cache_write += u.cache_write; t.cost_usd = (t.cost_usd ?? 0) + (u.cost_usd ?? 0);
+    t.input += u.input; t.output += u.output; t.cache_read += u.cache_read; t.cache_write += u.cache_write; t.cost_usd = totalCost([t, u]);
   }
   L.push('## Tokens and cost by model', '', '| model | input | output | cache read | cache write | cost |', '|---|---:|---:|---:|---:|---:|');
   for (const [m, u] of Object.entries(models)) L.push(`| ${short(m)} | ${tok(u.input)} | ${tok(u.output)} | ${tok(u.cache_read)} | ${tok(u.cache_write)} | ${usd(u.cost_usd, est)} |`);
@@ -456,9 +461,9 @@ export function renderAllMarkdown(reports: GoalReport[]): string {
 
 export function renderAllHtml(reports: GoalReport[]): string {
   const est = reports.some((r) => r.estimate);
-  const money = (x: number) => (est ? `<span class="est" title="${ESTIMATE_NOTE}">${usd(x, true)}</span>` : usd(x, false));
+  const money = (x: number | null) => (est ? `<span class="est" title="${ESTIMATE_NOTE}">${usd(x, true)}</span>` : usd(x, false));
   const rows = reports.map((r) => `<tr><td>${esc(r.goal.name)} <span class="meta">${esc(r.goal.id)}</span></td><td>${esc(r.state)}</td><td class="r">${r.runs.length}</td><td class="r">${r.totals.cycles}</td><td class="r">${hm(r.totals.active_s)}</td><td class="r">${r.tasks.done.length}</td><td class="r">${r.feedback.filter((f) => f.status === 'done').length}/${r.feedback.length}</td><td class="r">${money(r.totals.cost_usd)}</td></tr>`).join('');
-  const total = reports.reduce((a, r) => a + r.totals.cost_usd, 0);
+  const total = totalCost(reports.map((r) => r.totals));
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="light dark"><title>All goals · Epoptes report</title><style>${CSS}</style></head><body><main>
 <h1>All goals</h1><p class="meta">Generated ${day(nowIso())}${est ? ` · ${ESTIMATE_HEADER}` : ''}</p>
 <div class="tiles"><div class="tile"><div class="k">Goals</div><div class="v">${reports.length}</div></div><div class="tile"><div class="k">Cycles</div><div class="v">${reports.reduce((a, r) => a + r.totals.cycles, 0)}</div></div><div class="tile"><div class="k">Active time</div><div class="v">${hm(reports.reduce((a, r) => a + r.totals.active_s, 0))}</div></div><div class="tile"><div class="k">Cost</div><div class="v">${money(total)}</div></div></div>

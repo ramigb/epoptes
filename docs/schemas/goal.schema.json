@@ -145,23 +145,24 @@
       "additionalProperties": false,
       "properties": {
         "type": {
-          "const": "claude-code"
+          "enum": [
+            "claude-code",
+            "codex"
+          ]
         },
         "prompt": {
           "type": "string",
           "default": "loop.md"
         },
         "model": {
-          "type": "string",
-          "default": "opus"
+          "type": "string"
         },
         "effort": {
           "type": "string",
           "default": "high"
         },
         "permission_mode": {
-          "type": "string",
-          "default": "auto"
+          "type": "string"
         },
         "args": {
           "type": "array",
@@ -170,7 +171,43 @@
           },
           "default": []
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "codex"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "model": {
+                "default": ""
+              },
+              "permission_mode": {
+                "enum": [
+                  "read-only",
+                  "workspace-write",
+                  "danger-full-access"
+                ],
+                "default": "workspace-write"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "model": {
+                "default": "opus"
+              },
+              "permission_mode": {
+                "default": "auto"
+              }
+            }
+          }
+        }
+      ]
     },
     "cycle": {
       "type": "object",
@@ -266,5 +303,32 @@
         "done"
       ]
     }
-  }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "adapter": {
+            "properties": {
+              "type": {
+                "const": "codex"
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "cycle": {
+            "properties": {
+              "max_budget_usd": {
+                "type": "null",
+                "description": "Codex exec has no dollar budget cap; use null."
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
 }

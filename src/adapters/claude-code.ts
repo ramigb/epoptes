@@ -1,10 +1,10 @@
 // Adapter for the user's own installed and logged-in Claude Code CLI (`claude -p`, stream-json).
 // Stream facts this relies on are recorded in docs/spec.md (verified on claude 2.1.283).
-import { execFile, spawn } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
-import readline from 'node:readline';
 import { nowIso, readJson, writeJson } from '../fsx.ts';
+import { startCli } from './process.ts';
 import type { Limits } from '../status.ts';
 import type { Activity, Adapter, Cycle, CycleHooks, CycleResult, CycleSpec, ModelUsage } from './types.ts';
 
@@ -250,63 +250,6 @@ export const claudeCode: Adapter = {
 
   start(spec: CycleSpec, hooks: CycleHooks): Cycle {
     const { bin, args, env } = commandFor(spec);
-    const startedAt = nowIso();
-    const raw = fs.createWriteStream(path.join(spec.cycleDir, 'stream.jsonl'));
-    const errFile = fs.createWriteStream(path.join(spec.cycleDir, 'stderr.log'));
-    // Own process group, so kill() takes claude's children (tools, subagents) down too.
-    const child = spawn(bin, args, { cwd: spec.cwd, env, stdio: ['ignore', 'pipe', 'pipe'], detached: true });
-    const parser = new StreamParser(spec.cwd, spec.permissionMode);
-    let stderrTail = '';
-
-    const rl = readline.createInterface({ input: child.stdout! });
-    rl.on('line', (line) => {
-      raw.write(line + '\n');
-      let m: unknown;
-      try {
-        m = JSON.parse(line);
-      } catch {
-        return;
-      }
-      const { activity, warn, limits } = parser.feed(m);
-      for (const a of activity) hooks.activity(a);
-      for (const w of warn) hooks.warn(w);
-      if (limits) hooks.limits(limits);
-    });
-    child.stderr!.on('data', (d: Buffer) => {
-      errFile.write(d);
-      stderrTail = (stderrTail + d.toString()).slice(-2000);
-    });
-
-    const signal = (sig: NodeJS.Signals) => {
-      if (!child.pid) return;
-      try {
-        process.kill(sig === 'SIGKILL' ? -child.pid : child.pid, sig);
-      } catch {
-        // already gone
-      }
-    };
-
-    const done = new Promise<CycleResult>((resolve) => {
-      let settled = false;
-      const finish = (code: number | null, sig: string | null) => {
-        if (settled) return;
-        settled = true;
-        rl.close();
-        raw.end();
-        errFile.end();
-        const tail = stderrTail.trim().split('\n').slice(-5).join(' | ');
-        resolve(parser.result({ startedAt, endedAt: nowIso(), code, signal: sig, stderrTail: tail }));
-      };
-      child.on('error', (e) => {
-        stderrTail += `\n${e.message}`;
-        finish(null, null);
-      });
-      // 'close' waits for stdout to drain, so the last result line is parsed first.
-      child.on('close', (code, sig) => finish(code, sig));
-    });
-
-    return { pid: child.pid, interrupt: () => signal('SIGINT'), kill: () => signal('SIGKILL'), done };
+    return startCli(spec, hooks, { bin, args, env }, new StreamParser(spec.cwd, spec.permissionMode));
   },
 };
-
-export const adapters: Record<string, Adapter> = { 'claude-code': claudeCode };
