@@ -1,0 +1,2 @@
+# Builder guidance (sequential Codex role)
+Use the cycle's configured Codex model and high effort. Implement the smallest complete native browser game. Keep files and API simple, controls discoverable, rendering clear and layout responsive. Build tower placement, waves, combat, upgrades, lives, outcome and restart before optional features. Keep logic testable from Node. Report changed paths, checks run and limitations in at most 10 lines of handoff. No delegation, dependencies, external assets or writes outside the deliverable.

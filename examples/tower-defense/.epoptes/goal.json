@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "id": "tower-defense-codex",
+  "name": "Tower Defense · Codex 15-minute test",
+  "kind": "code",
+  "objective": "Build a polished, playable, dependency-free browser tower defense game for casual players, and exercise Epoptes with real Codex cycles.",
+  "done": [
+    { "id": "D1", "check": "Standalone browser game exists", "verify": { "type": "file", "path": "index.html" } },
+    { "id": "D2", "check": "Fresh automated checks cover placement, currency, waves, damage, upgrades, lives, victory/defeat and restart", "verify": { "type": "command", "run": "node test.mjs" } },
+    { "id": "D3", "check": "Real browser smoke test passes without runtime errors, with a saved screenshot", "verify": { "type": "command", "run": "node browser-test.mjs" } },
+    { "id": "D4", "check": "README explains launching, controls and verification; final review records usability and visual quality", "verify": { "type": "agent" } }
+  ],
+  "non_goals": ["Changing any files outside examples/tower-defense", "Dependencies, frameworks, accounts, backend, multiplayer or publishing", "Modifying Epoptes source or existing user changes"],
+  "approval_required": ["Spending money or adding paid services", "Publishing, uploads or external writes other than the already-authorized Codex provider", "Deleting or overwriting user data outside the deliverable", "Changing the done definition, model or time box", "Installing dependencies"],
+  "timebox": { "total_min": 15, "wrapup_min": 2, "grace_min": 0, "pause_on_rate_limit": true },
+  "checkpoints": "shadow",
+  "adapter": { "type": "codex", "model": "", "effort": "high", "permission_mode": "workspace-write" },
+  "cycle": { "timeout_min": 20, "pause_between_s": 2, "max_budget_usd": null },
+  "failures": { "cooldown_after": 2, "cooldown_min": 1, "give_up_after": 3 },
+  "rate_limit": { "backoff_s": 30, "backoff_max_s": 120 },
+  "state_caps": { "handoff.md": 25, "lessons.md": 30, "progress.md": 40, "backlog.md": 70 },
+  "notify": ["milestone", "blocked", "done"]
+}

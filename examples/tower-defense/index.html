@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Glowguard — Tower Defense</title><link rel="stylesheet" href="styles.css"><link rel="stylesheet" href="mobile.css">
+</head>
+<body>
+  <main class="shell">
+    <header><div><p class="eyebrow">NIGHTFALL SECTOR</p><h1>GLOWGUARD</h1></div><p class="mission">Hold the neon route for <strong>5 waves</strong>. Place towers off the road, then launch the assault.</p></header>
+    <section class="hud" aria-label="Game status">
+      <div><span>ENERGY</span><strong id="money">160</strong></div><div><span>CORE</span><strong id="lives">12</strong></div>
+      <div><span>WAVE</span><strong id="wave">0 / 5</strong></div><div><span>SCORE</span><strong id="score">0000</strong></div>
+    </section>
+    <section class="game-panel">
+      <div class="canvas-wrap"><canvas id="game" width="800" height="560" aria-label="Tower defense battlefield"></canvas><div id="toast" role="status"></div></div>
+      <aside>
+        <div><p class="label">BUILD TOWERS</p><button class="tower active" data-type="scout"><i class="scout"></i><span><b>Scout</b><small>Fast pulse · 45</small></span><em>45</em></button>
+        <button class="tower" data-type="cannon"><i class="cannon"></i><span><b>Cannon</b><small>Heavy hit · 75</small></span><em>75</em></button></div>
+        <div id="selection" class="selection"><p class="label">SELECTED</p><p>Click a tower to inspect and upgrade it.</p><button id="upgrade" disabled>Upgrade</button></div>
+        <div class="actions"><button id="waveBtn" class="primary">Start wave 1</button><button id="pauseBtn">Pause</button><button id="restartBtn">Restart</button></div>
+        <p class="hint">Choose a tower, then click open ground. Towers fire automatically.</p>
+      </aside>
+    </section>
+    <footer><span><kbd>Space</kbd> start wave</span><span><kbd>P</kbd> pause</span><span id="status">Build your defense</span></footer>
+  </main>
+  <div id="modal" class="modal" hidden><div><p id="modalTag">SECTOR SECURED</p><h2 id="modalTitle">Victory!</h2><p id="modalText"></p><button id="playAgain" class="primary">Play again</button></div></div>
+  <div id="test-result" hidden>NOT_RUN</div><script type="module" src="app.js"></script>
+</body></html>

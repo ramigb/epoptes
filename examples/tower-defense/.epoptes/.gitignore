@@ -1,0 +1,7 @@
+run/
+cycles/
+snapshots.git/
+reports/
+registry/
+*.tmp
+.feedback.lock
