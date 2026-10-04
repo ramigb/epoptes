@@ -705,6 +705,87 @@ function CycleDetail({ d }) {
   </section>`;
 }
 
+// ---------------------------------------------------------------- where the time went
+
+// Four phases, coloured by state (validated: scripts/validate_palette.js, light and dark). Between-cycles gaps are
+// short runner pauses, so they fold into "running"; the table keeps every phase separate.
+const PHASES = [
+  { key: 'running', label: 'Running cycles', parts: ['working', 'between_cycles'] },
+  { key: 'limits', label: 'Rate limits & cooldowns', parts: ['rate_limit', 'cooldown'] },
+  { key: 'you', label: 'Waiting for you', parts: ['needs_you'] },
+  { key: 'paused', label: 'Paused or stopped', parts: ['paused'] },
+];
+const PHASE_LABEL = { working: 'cycles', between_cycles: 'between cycles', rate_limit: 'rate-limit waits', cooldown: 'cooldowns after failures', needs_you: 'waiting for you', paused: 'paused or stopped' };
+
+/** A hover tooltip shared by the marks of one chart. */
+function useTip() {
+  const [tip, setTip] = useState(null);
+  const on = (text) => ({
+    onMouseMove: (e) => {
+      const box = e.currentTarget.closest('.timeuse').getBoundingClientRect();
+      setTip({ text, x: e.clientX - box.left, y: e.clientY - box.top });
+    },
+    onMouseLeave: () => setTip(null),
+  });
+  const el = tip && html`<div class="viz-tip" style=${{ left: `${tip.x}px`, top: `${tip.y}px` }}>${tip.text}</div>`;
+  return [on, el];
+}
+
+function HBars({ rows, on, unit }) {
+  const max = Math.max(1, ...rows.map((r) => r.seconds));
+  return html`<ul class="hbars">${rows.map((r) => html`<li key=${r.name} ...${on(`${r.name}: ${dur(r.seconds)}${r.extra ? ` · ${r.extra}` : ''}`)}>
+    <span class="name" title=${r.name}>${r.name}</span>
+    <span class="bar-track"><span class="bar" style=${{ width: `${Math.max(0.5, (r.seconds / max) * 100)}%` }}></span></span>
+    <span class="val num">${dur(r.seconds)}${unit && r.extra ? html`<small> ${r.extra}</small>` : ''}</span>
+  </li>`)}</ul>`;
+}
+
+function TimeUse({ d }) {
+  const [t, setT] = useState(null);
+  const [on, tipEl] = useTip();
+  useEffect(() => {
+    let live = true;
+    api.get(`/api/goals/${d.id}/time`).then((x) => live && setT(x)).catch(() => {});
+    return () => (live = false);
+  }, [d.id, d.cycles, d.state]);
+  if (!t || !t.cycles) return null;
+  const segs = PHASES.map((p) => ({ ...p, seconds: p.parts.reduce((a, k) => a + (t.phases[k] ?? 0), 0) })).filter((p) => p.seconds > 0);
+  const total = segs.reduce((a, s) => a + s.seconds, 0) || 1;
+  const share = (s) => `${Math.round((s / total) * 100)}%`;
+  const running = segs.find((s) => s.key === 'running')?.seconds ?? 0;
+  const roles = t.roles.filter((r) => r.seconds > 0).map((r) => ({ name: r.role, seconds: r.seconds, extra: r.role === 'orchestrator (alone)' ? 'planning, briefing, checking' : `${r.spans} run${r.spans === 1 ? '' : 's'}` }));
+  const top = t.tools.slice(0, 8);
+  const rest = t.tools.slice(8);
+  const tools = [...top, ...(rest.length ? [{ tool: `${rest.length} other tools`, seconds: rest.reduce((a, x) => a + x.seconds, 0), calls: rest.reduce((a, x) => a + x.calls, 0) }] : [])]
+    .map((x) => ({ name: x.tool, seconds: x.seconds, extra: `${x.calls} call${x.calls === 1 ? '' : 's'}` }));
+  return html`<section class="panel timeuse">
+    <h2>Where the time went <span class="right muted">${t.cycles} cycle${t.cycles === 1 ? '' : 's'} · all runs</span></h2>
+    <p class="tu-head"><b class="num">${dur(total)}</b> on record · <b class="num">${dur(running)}</b> running cycles (${share(running)})</p>
+    <div class="phasebar" role="img" aria-label=${segs.map((s) => `${s.label} ${dur(s.seconds)}`).join(', ')}>
+      ${segs.map((s) => html`<span key=${s.key} class="ph ${s.key}" style=${{ flexGrow: s.seconds }} ...${on(`${s.label}: ${dur(s.seconds)} (${share(s.seconds)})`)}></span>`)}
+    </div>
+    <div class="legend tu-legend">${segs.map((s) => html`<span key=${s.key}><i class="ph ${s.key}"></i>${s.label} <b class="num">${dur(s.seconds)}</b> <span class="faint">${share(s.seconds)}</span></span>`)}</div>
+    <div class="tu-cols">
+      <div><h3>Who worked <span class="faint">agent time</span></h3><${HBars} rows=${roles} on=${on} />
+        <p class="faint tu-note">Subagents working in parallel add up, so this can exceed the time spent running cycles.</p></div>
+      <div><h3>On what <span class="faint">tool time · calls</span></h3><${HBars} rows=${tools} on=${on} unit=${true} />
+        <p class="faint tu-note">From each call to the agent's next step (capped at 15 min). Background commands run start to end, alongside other work.</p></div>
+    </div>
+    <details class="tu-table"><summary>Show as a table</summary>
+      <table><thead><tr><th>where</th><th class="r">time</th><th class="r">share</th></tr></thead><tbody>
+        ${Object.entries(t.phases).filter(([, s]) => s > 0).map(([k, s]) => html`<tr key=${k}><td>${PHASE_LABEL[k] ?? k}</td><td class="r num">${dur(s)}</td><td class="r num">${share(s)}</td></tr>`)}
+      </tbody></table>
+      <table><thead><tr><th>role</th><th class="r">agent time</th><th class="r">runs</th></tr></thead><tbody>
+        ${t.roles.map((r) => html`<tr key=${r.role}><td>${r.role}</td><td class="r num">${dur(r.seconds)}</td><td class="r num">${r.spans}</td></tr>`)}
+      </tbody></table>
+      <table><thead><tr><th>tool</th><th class="r">time</th><th class="r">calls</th></tr></thead><tbody>
+        ${t.tools.map((x) => html`<tr key=${x.tool}><td class="mono">${x.tool}</td><td class="r num">${dur(x.seconds)}</td><td class="r num">${x.calls}</td></tr>`)}
+      </tbody></table>
+    </details>
+    ${tipEl}
+  </section>`;
+}
+
 const FEED_ICON = {
   milestone: '★', done: '✓', blocked: '⊘', note: '•', artifact: '▤', warn: '⚠', wait: '◔', control: '›',
   'run.start': '▶', 'run.end': '■', mode: '↪', 'cycle.end': '✕', wrapup: '↧', needs_you: '⚑',
@@ -953,6 +1034,7 @@ function GoalDetail({ id }) {
         <${Ticker} d=${d} />
         <section class="panel"><h2>Cycles <span class="right muted">median <${Money} usd=${d.cost_median || null} basis=${d.cost_basis} /></span></h2><${Timeline} d=${d} /><${CycleTable} d=${d} /></section>
         <${CycleDetail} d=${d} />
+        <${TimeUse} d=${d} />
         <${Feed} d=${d} />
       </div>
       <div class="stack">

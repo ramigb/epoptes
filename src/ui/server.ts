@@ -9,6 +9,7 @@ import { addFeedback, editFeedback, noteFeedback, setFeedbackStatus, setScope, t
 import { readRegistry } from '../registry.ts';
 import { buildReport, renderAllHtml, renderHtml } from '../report.ts';
 import { goalPaths } from '../paths.ts';
+import { timeUse } from '../timeuse.ts';
 import { cycleView, detail, markSeen, summary } from './views.ts';
 import { GoalWatch, type GoalUpdate } from './watch.ts';
 
@@ -170,6 +171,7 @@ export function serve({ port, lan, pollMs = 1000 }: ServeOptions) {
       const project = w.p.project;
 
       if (req.method === 'GET' && sub === '') return send(res, 200, detail(w));
+      if (req.method === 'GET' && sub === 'time') return send(res, 200, timeUse(w.p));
       const cm = /^cycles\/(\d+)$/.exec(sub);
       if (req.method === 'GET' && cm) return send(res, 200, cycleView(w, Number(cm[1])));
 

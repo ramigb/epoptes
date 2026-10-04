@@ -193,3 +193,30 @@ test('milestones from backlog headings, with targets and task counts', () => {
     ['M3', 'Polish', null, 0, 0, 0, 0, 1, false],
   ]);
 });
+
+test('time use: phases from events, roles and tools from activity', async () => {
+  const { cycleUse, phaseTotals } = await import('../src/timeuse.ts');
+  const t = (s: number) => new Date(Date.UTC(2026, 9, 4, 10, 0, s)).toISOString();
+  const ev = (s: number, type: string, extra: Record<string, unknown> = {}) => ({ ts: t(s), run: 'r1', cycle: 1, src: 'runner' as const, type, ...extra });
+  const phases = phaseTotals([
+    ev(0, 'run.start'), ev(0, 'cycle.start'), ev(100, 'cycle.end', { duration_s: 100 }),
+    ev(100, 'wait', { reason: 'rate_limit', seconds: 600 }), ev(400, 'cycle.start'), // cut short after 300 s
+    ev(500, 'cycle.end', { duration_s: 100 }), ev(500, 'run.end', { reason: 'needs_you' }),
+    ev(800, 'run.start'), ev(900, 'run.end', { reason: 'done' }), ev(5000, 'run.start'), // a gap after DONE doesn't count
+  ], Date.parse(t(6000)));
+  assert.deepEqual(phases, { working: 200, between_cycles: 0, rate_limit: 300, cooldown: 0, needs_you: 300, paused: 0 });
+
+  const a = (s: number, agent: string, kind: string, tool?: string) => ({ ts: t(s), agent, kind, ...(tool ? { tool } : {}), summary: '' }) as any;
+  const use = cycleUse([
+    a(0, 'orchestrator', 'tool', 'Read'), a(10, 'orchestrator', 'tool', 'Agent'),
+    a(10, 'worker#a1', 'agent.start'), a(12, 'worker#a1', 'tool', 'Edit'), a(40, 'worker#a1', 'agent.end'),
+    a(20, 'worker#b2', 'agent.start'), a(60, 'worker#b2', 'agent.end'),
+    a(30, 'agent#bg', 'agent.start'), a(90, 'agent#bg', 'agent.end'), // a background shell task
+    a(70, 'orchestrator', 'tool', 'mcp__docs__search'),
+  ], Date.parse(t(0)), Date.parse(t(100)));
+  assert.deepEqual(Object.fromEntries(use.roles), { worker: { seconds: 70, spans: 2 }, 'orchestrator (alone)': { seconds: 50, spans: 1 } });
+  assert.deepEqual(Object.fromEntries(use.tools), {
+    Read: { seconds: 10, calls: 1 }, Agent: { seconds: 60, calls: 1 }, 'mcp:search': { seconds: 30, calls: 1 },
+    Edit: { seconds: 28, calls: 1 }, 'background commands': { seconds: 60, calls: 1 },
+  });
+});
