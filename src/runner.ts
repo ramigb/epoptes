@@ -175,7 +175,7 @@ export async function runGoal(project: string, { followUp = false } = {}) {
     writeStatus(p, status);
   };
   setStatus({});
-  emit(p, { src: 'runner', type: 'run.start', run, timebox_s: clock.timebox_s, resumed, ...(isFollowUp ? { followup: true } : {}) });
+  emit(p, { src: 'runner', type: 'run.start', run, timebox_s: clock.timebox_s, resumed, job: goal.job?.id ?? null, ...(isFollowUp ? { followup: true } : {}) });
   log(`run ${run} ${resumed ? 'resumed' : 'started'} (pid ${process.pid})`);
 
   // ---- signals, heartbeat, cancellable sleep ----

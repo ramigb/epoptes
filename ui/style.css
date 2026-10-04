@@ -199,6 +199,10 @@ main { max-width: 1320px; margin: 0 auto; padding: 24px; }
 .clockbar.followup .fill.followup { background-size: 40px 100%; animation: march 1.2s linear infinite; }
 @keyframes march { to { background-position: 40px 0; } }
 .chip.followup { color: var(--done); }
+.jobchip { display: inline-flex; gap: 8px; align-items: center; }
+.seg-toggle { display: inline-flex; border: 1px solid var(--line); border-radius: 999px; overflow: hidden; }
+.seg-toggle button { border: 0; background: transparent; padding: 2px 10px; font-size: 12px; color: var(--muted); cursor: pointer; }
+.seg-toggle button.on { background: var(--ink); color: var(--panel); }
 .clockbar .labels { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); }
 .clockbar .track-wrap { position: relative; }
 .ms-tick { position: absolute; top: -4px; bottom: -4px; width: 3px; margin-left: -1.5px; border-radius: 1px; background: var(--faint); box-shadow: 0 0 0 1px var(--panel); }

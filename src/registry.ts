@@ -24,7 +24,9 @@ export function addGoal(project: string) {
   if (clash) throw new Error(`goal id "${goal.id}" is already registered for ${clash.path}`);
   for (const d of [p.state, p.run, p.cycles]) fs.mkdirSync(d, { recursive: true });
   if (!fs.existsSync(p.gitignore)) fs.writeFileSync(p.gitignore, GITIGNORE);
-  if (!reg.goals.some((g) => g.path === p.project)) {
+  const here = reg.goals.find((g) => g.path === p.project);
+  if (here) here.id = goal.id; // goal.json's id wins if it was renamed
+  else {
     reg.goals = reg.goals.filter((g) => g.id !== goal.id);
     reg.goals.push({ id: goal.id, path: p.project, added_at: nowIso() });
   }

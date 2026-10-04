@@ -118,6 +118,7 @@ The dashboard and reports show Codex commands, file changes, messages and token 
 | give feedback | the Feedback box | `epoptes feedback <goal> "the intro is too long"`, or a bullet in `.epoptes/FEEDBACK.md` |
 | change direction now | **⚡ Steer now** | `epoptes feedback <goal> "use SQLite instead" --steer` (interrupts the cycle; the next one replans the whole backlog around it) |
 | answer an approval | **Approve / Disapprove** | `epoptes feedback F-4 approve "test mode only"` (or `reject`) |
+| start a new feature in the same project | ask the skill: "a new epoptes job: …" | `epoptes job new "<title>"`, then update goal.json, loop.md and the backlog (the skill does this for you) |
 | tweak a finished goal | **Follow up on N feedback items** | `epoptes start <goal> --follow-up` (no time box; minor items fixed in place, big ones flagged for a new run) |
 | open what it made | **Open the output ↗** | goal.json `output`, or `epoptes event output <path or URL>` |
 | see where time went | the "Where the time went" panel (running vs rate limits vs waiting for you vs paused, time per role, time per tool) | dashboard only |
@@ -130,6 +131,8 @@ Feedback items get an id (`F-3`) and go through `new → seen → in progress �
 The backlog bar is split into one segment per milestone. The clock bar marks each milestone's target (on time, late, overdue) and where it was actually reached.
 
 Once a goal is done, feedback goes through a **follow-up**: only your open feedback, with no time box, and nothing else. The agent fixes minor items in place (a colour, a size, wording). Anything that needs a restart or a new version is flagged "needs a new run" for you to decide on, and you can override how each item is treated. **Start new run…** begins a fresh run with a new time box. Epoptes asks first, because a new run spends tokens.
+
+**One harness, many jobs.** When the project needs its next feature, don't build a second harness: ask the skill for a new job. It interviews you only about what changes, then runs `epoptes job new "<title>"`. That archives the finished job's backlog, handoff and progress into `.epoptes/state/archive/`, keeps the roles, permissions, lessons and decisions, and resets the clock. The goal page, `epoptes status` and reports show the current job, with a switch to all jobs (`epoptes report --job all`, `epoptes job` to list them).
 
 The dashboard's tab icon shows the state at a glance: arcs turn while a cycle runs, a badge blinks when the run needs you, and it turns red on failure.
 
@@ -153,8 +156,9 @@ epoptes event <type> "<text>"          milestone | blocked | note | artifact | o
 epoptes approval "<what>" [--ref T]    ask the human first (orchestrators) · wait-for-human "<what>": pause until they answer
 epoptes lesson "<rule>" [--topic t]    a harness lesson for the brain (orchestrators, in wrap-up)
 epoptes brain [lessons [--kind k]]     gather every goal into ~/.epoptes/brain/INDEX.md · print the lessons
+epoptes job [goal]                     the harness's jobs · job new "<title>": start the next one (archive, keep memory, reset clock)
 epoptes clock                          one line with the time left and the current milestone's target (used by orchestrators)
-epoptes report [goal] [--all]          Markdown + HTML report
+epoptes report [goal] [--all] [--job <id>|all]   Markdown + HTML report (default: the current job)
 epoptes import-runsh <project>         import an older run.sh harness (dress2impress style)
 epoptes ui [--port N] [--lan]          the dashboard (outputs are served on the next port)
 epoptes skill install [--agent codex]   install the skill (Claude Code by default)

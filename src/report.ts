@@ -9,6 +9,7 @@ import { exists, hm, nowIso, readJson, readJsonl } from './fsx.ts';
 import { loadGoal, type Goal } from './goal.ts';
 import type { GoalPaths } from './paths.ts';
 import { readStatus } from './status.ts';
+import { inJob, jobStateDir, jobsOf, pickJob } from './jobs.ts';
 import { backlogItems, totalCost } from './summary.ts';
 
 type Result = CycleResult & { cycle: number; run: string };
@@ -17,6 +18,9 @@ export interface GoalReport {
   generated_at: string;
   goal: Pick<Goal, 'id' | 'name' | 'kind' | 'objective' | 'done' | 'checkpoints'> & { path: string };
   state: string;
+  /** the job this report covers, or null for the whole history; jobs = how many the harness has had */
+  job: { id: string; title: string; current: boolean } | null;
+  jobs: number;
   estimate: boolean;
   totals: {
     wall_s: number;
@@ -103,7 +107,7 @@ function gitLog(args: string[], cwd: string) {
   }
 }
 
-function readScores(p: GoalPaths): GoalReport['scores'] {
+function readScores(p: Pick<GoalPaths, 'state'>): GoalReport['scores'] {
   const rows: GoalReport['scores']['rows'] = [];
   const criteria = new Set<string>();
   for (const line of readJsonl<Record<string, unknown>>(path.join(p.state, 'scores.jsonl'))) {
@@ -122,10 +126,17 @@ function readScores(p: GoalPaths): GoalReport['scores'] {
   return { criteria: [...criteria], rows };
 }
 
-export function buildReport(p: GoalPaths, now = Date.now()): GoalReport {
+/** `job`: a job id, `current` (the default) or `all` for the whole history. */
+export function buildReport(p: GoalPaths, now = Date.now(), { job: which = 'current' as string | null } = {}): GoalReport {
   const goal = loadGoal(p);
-  const events = readEvents(p);
-  const results = readResults(p);
+  const allEvents = readEvents(p);
+  const jobs = jobsOf(allEvents, goal);
+  const job = pickJob(jobs, which);
+  const within = (ts: string) => !job || inJob(ts, job);
+  const events = allEvents.filter((e) => within(e.ts));
+  const results = readResults(p).filter((r) => within(r.started_at));
+  // A finished job's backlog and scores were archived with it.
+  const stateOf = { state: jobStateDir(p.root, job) };
   const status = readStatus(p);
 
   const costs = results.map((r) => r.cost_usd ?? 0).filter((c) => c > 0);
@@ -155,8 +166,9 @@ export function buildReport(p: GoalPaths, now = Date.now()): GoalReport {
   const first = runs[0]?.started_at ?? results[0]?.started_at;
   const lastEnd = runs.at(-1)?.ended_at ? Date.parse(runs.at(-1)!.ended_at!) : now;
 
-  const items = backlogItems(p);
-  const fb = [...readFeedback(p).values()].map((f) => {
+  const items = backlogItems({ ...p, ...stateOf });
+  // Feedback belongs to a job if it was added or touched during it.
+  const fb = [...readFeedback(p).values()].filter((f) => f.history.some((o) => within(o.ts))).map((f) => {
     const closing = [...f.history].reverse().find((o) => o.op === 'status' && ['done', 'wont_do', 'blocked'].includes(o.status));
     return { id: f.id, text: f.text, status: f.status, src: f.src, created_at: f.created_at, closed_cycle: (closing && 'cycle' in closing ? closing.cycle : null) ?? null, note: closing && 'note' in closing ? (closing.note ?? null) : null };
   });
@@ -182,6 +194,8 @@ export function buildReport(p: GoalPaths, now = Date.now()): GoalReport {
     generated_at: nowIso(now),
     goal: { id: goal.id, name: goal.name, kind: goal.kind, objective: goal.objective, done: goal.done, checkpoints: goal.checkpoints, path: p.project },
     state: status?.state ?? 'idle',
+    job: job && jobs.length > 1 ? { id: job.id, title: job.title, current: job.current } : null,
+    jobs: jobs.length,
     estimate: results.some((r) => r.cost_usd != null && r.cost_basis === 'estimate') || !results.length,
     totals: {
       wall_s: first ? Math.round((lastEnd - Date.parse(first)) / 1000) : 0,
@@ -208,7 +222,7 @@ export function buildReport(p: GoalPaths, now = Date.now()): GoalReport {
     snapshots,
     artifacts: events.filter((e) => e.type === 'artifact').map((e) => ({ ts: e.ts, path: String(e.path), ...(e.text ? { text: String(e.text) } : {}) })),
     feedback: fb,
-    scores: readScores(p),
+    scores: readScores(stateOf),
     problems: [...problems.values()].sort((a, b) => b.count - a.count),
   };
 }
@@ -233,6 +247,8 @@ export function renderMarkdown(r: GoalReport): string {
   const L: string[] = [];
   L.push(`# ${r.goal.name}: report`, '');
   L.push(`${r.goal.objective}`, '');
+  if (r.job) L.push(`**Job:** ${r.job.title} (\`${r.job.id}\`${r.job.current ? ', current' : ''}), one of ${r.jobs} in this harness. \`epoptes report --job all\` covers them all.`, '');
+  else if (r.jobs > 1) L.push(`**All ${r.jobs} jobs** of this harness.`, '');
   L.push(`Goal \`${r.goal.id}\` · ${r.goal.kind} · state **${r.state}** · generated ${day(r.generated_at)}${est ? ` · ${ESTIMATE_HEADER}` : ''}`, '');
   L.push('## Summary', '');
   L.push('| | |', '|---|---|');
@@ -386,6 +402,8 @@ export function renderHtml(r: GoalReport): string {
   const H: string[] = [];
   H.push(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="light dark"><title>${esc(r.goal.name)} · Epoptes report</title><style>${CSS}</style></head><body><main>`);
   H.push(`<h1>${esc(r.goal.name)}</h1><p class="lede">${esc(r.goal.objective)}</p>`);
+  if (r.job) H.push(`<p class="meta">Job <b>${esc(r.job.title)}</b> (<code>${esc(r.job.id)}</code>${r.job.current ? ', current' : ''}), one of ${r.jobs} in this harness.</p>`);
+  else if (r.jobs > 1) H.push(`<p class="meta">All ${r.jobs} jobs of this harness.</p>`);
   H.push(`<p class="meta">Goal <code>${esc(r.goal.id)}</code> · ${esc(r.goal.kind)} · state <b>${esc(r.state)}</b> · generated ${day(r.generated_at)}${est ? ` · ${ESTIMATE_HEADER}` : ''}</p>`);
   H.push('<div class="tiles">');
   const tile = (k: string, v: string) => H.push(`<div class="tile"><div class="k">${k}</div><div class="v">${v}</div></div>`);

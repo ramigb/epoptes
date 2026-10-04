@@ -7,6 +7,7 @@ import { clockState, readClock, runFinished } from '../clock.ts';
 import { fold, followUpItems, pendingApprovals } from '../feedback.ts';
 import { exists, nowIso, readJson, readJsonl, writeJson } from '../fsx.ts';
 import { loadGoal, type Goal } from '../goal.ts';
+import { inJob, jobsOf, type Job } from '../jobs.ts';
 import { epoptesHome } from '../paths.ts';
 import { LIVE_STATES } from '../status.ts';
 import { totalCost, backlogCounts, backlogItems, milestonesWithReach, outputOf, projectFinish } from '../summary.ts';
@@ -127,7 +128,10 @@ export function summary(w: GoalWatch) {
   const s = w.status;
   const c = readClock(p);
   const cs = c ? clockState(c, { wrapupMarker: exists(p.wrapup) }) : null;
-  const results = cycleResults(w);
+  const jobs = jobsOf(w.events.items, goal);
+  const job = jobs.at(-1)!;
+  // Cards and stats count the current job; the detail view can widen to every job.
+  const results = cycleResults(w).filter((r) => inJob(r.started_at, job));
   const seen = readSeen(w.id);
   const cycleEvents = w.events.items.filter((e) => e.cycle === s?.cycle);
   const round = cycleEvents.findLast((e) => e.type === 'round')?.n ?? null;
@@ -162,6 +166,7 @@ export function summary(w: GoalWatch) {
     clock: c && cs ? { active: cs.active, timebox_s: c.timebox_s, wrapup_s: c.wrapup_s, grace_s: c.grace_s, to_end: Number.isFinite(cs.toEnd) ? cs.toEnd : null, paused: Boolean(c.paused_at), clock_mode: cs.mode, followup: c.kind === 'followup' } : null,
     followup_items: followUpItems(items).length,
     backlog: backlogCounts(p),
+    job: { id: job.id, title: job.title, n: jobs.length, named: Boolean(goal.job) || jobs.length > 1 },
     milestones: ms,
     projection: cs && c?.kind !== 'followup' && !runFinished(p) ? projectFinish(ms, cs.active) : null,
     output: output(w, goal),
@@ -177,12 +182,15 @@ export function summary(w: GoalWatch) {
   };
 }
 
-export function detail(w: GoalWatch) {
+/** `all`: every job's cycles and events instead of just the current job's. */
+export function detail(w: GoalWatch, { all = false } = {}) {
   const base = summary(w);
   if ('error' in base) return base;
   const p = w.p;
   const goal = loadGoal(p);
-  const results = cycleResults(w);
+  const job: Job | null = all ? null : jobsOf(w.events.items, goal).at(-1)!;
+  const within = (ts: string) => !job || inJob(ts, job);
+  const results = cycleResults(w).filter((r) => within(r.started_at));
   const costs = results.map((r) => r.cost_usd ?? 0).filter((x) => x > 0);
   const med = median(costs);
   const read = (f: string) => {
@@ -195,12 +203,16 @@ export function detail(w: GoalWatch) {
   const activityCycle = w.activityCycle;
   return {
     ...base,
+    job_scope: all ? 'all' : 'job',
+    cycles: results.length,
+    cost_usd: totalCost(results),
+    cost_basis: results.some((r) => r.cost_basis === 'estimate') || !results.length ? 'estimate' : 'billed',
     goal: { objective: goal.objective, done: goal.done, non_goals: goal.non_goals, approval_required: goal.approval_required, timebox: goal.timebox, checkpoints: goal.checkpoints, adapter: goal.adapter, cycle: goal.cycle },
     seen: readSeen(w.id),
     handoff: read('handoff.md'),
     backlog_items: backlogItems(p),
     feedback: [...fold(w.feedback.items).values()].reverse(),
-    events: w.events.items.slice(-500),
+    events: w.events.items.filter((e) => within(e.ts)).slice(-500),
     cycles_detail: results.map((r) => ({ ...r, flagged: results.length >= 3 && med > 0 && (r.cost_usd ?? 0) > 2 * med })),
     cost_median: med,
     activity_cycle: activityCycle,

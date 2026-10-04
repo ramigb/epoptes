@@ -107,6 +107,25 @@
       "minLength": 1,
       "description": "the main deliverable: a path relative to the project (file or folder) or an http(s) URL. The dashboard links to it; `epoptes event output` overrides it at run time"
     },
+    "job": {
+      "type": "object",
+      "description": "the current job, set by `epoptes job new`: one harness, several jobs over time",
+      "required": [
+        "id",
+        "title"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]{0,62}$"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
     "timebox": {
       "type": "object",
       "required": [

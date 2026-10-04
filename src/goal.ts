@@ -13,6 +13,8 @@ export interface Goal {
   approval_required: string[];
   /** the main deliverable: a project-relative path or an http(s) URL */
   output?: string;
+  /** the current job, set by `epoptes job new` (one harness, several jobs over time) */
+  job?: { id: string; title: string };
   timebox: { total_min: number; wrapup_min: number; grace_min: number; pause_on_rate_limit: boolean };
   checkpoints: 'git' | 'shadow' | 'none';
   adapter: { type: 'claude-code' | 'codex'; prompt: string; model: string; effort: string; permission_mode: string; args: string[] };

@@ -54,6 +54,7 @@ Written by the skill, edited by you. The runner re-reads it before every cycle, 
 | `objective` | one or two sentences |
 | `done[]` | `{id, check, verify: {type: command \| file \| agent \| manual, run?, path?}}` |
 | `non_goals[]`, `approval_required[]` | plain strings; the skill writes them into loop.md too |
+| `job` | set by `epoptes job new`: `{id, title}` of the current job (see Jobs) |
 | `output` | optional: the main deliverable, a project-relative path (file or folder) or an http(s) URL. `epoptes event output <path\|url>` overrides it at run time (latest wins) |
 | `timebox` | `total_min`, `wrapup_min`, `grace_min`, `pause_on_rate_limit` |
 | `checkpoints` | `git` (orchestrator commits), `shadow` (runner commits the workspace to `.epoptes/snapshots.git` after each cycle, no tokens, never touches your repo), `none` |
@@ -250,6 +251,7 @@ epoptes feedback <F-n> approve|reject ["note"]   the human's answer to an approv
 epoptes approval "<what>" [--ref <task>]        (orchestrator) ask before doing something on the approval list
 epoptes wait-for-human "<what>"                 (orchestrator) end the run after this cycle as needs_input
 epoptes event <milestone|blocked|note|artifact|round|wrapup|done> "<text>"
+epoptes job [goal] | job new "<title>" [--id s]  list jobs | start the next job in this harness
 epoptes lesson "<rule>" [--topic t]              (orchestrator) a harness lesson for the brain
 epoptes brain | brain lessons [--kind k]          gather goals into ~/.epoptes/brain/INDEX.md | print lessons
 epoptes report [goal | --all] [--md | --html] [--stdout] [--out <dir>]
@@ -257,6 +259,13 @@ epoptes import-runsh <project> [-g <id>]  import a dress2impress-style run.sh ha
 epoptes ui [--port N] [--lan]
 epoptes skill install | path           link plugin/skills/epoptes into ~/.claude/skills
 ```
+
+## Jobs (`src/jobs.ts`)
+One project keeps one harness; each new piece of work in it is a **job**.
+- `epoptes job new "<title>" [--id slug]` (refused while a runner is live): moves the current job's working state (`state/backlog.md`, `handoff.md`, `progress.md`, `scores.jsonl`) into `state/archive/<previous job id>/`, writes a fresh backlog, handoff and progress, resets the clock (the next `start` is a new run, no `--new-run`), sets `goal.json` `job: {id, title}`, and emits `{type: job, id, title, previous, previous_title, archived}`. Harness memory stays: goal settings, roles, permissions, `state/lessons.md`, `state/decisions.md`, feedback (open items carry over; the CLI lists them).
+- **A job is a window of history** from its `job` event to the next; history before the first one is the first job (named by `previous` / `previous_title`, default `job-1` and the goal's name). `run.start` also records `job`.
+- **Scoping:** goal cards, `epoptes status` and the dashboard's numbers count the current job; with several jobs the goal page has a "This job / All jobs" switch (`GET /api/goals/<id>?jobs=all`, `…/time?jobs=all`). `epoptes report` covers the current job by default (`--job <id>` or `all`; the dashboard: Report / Report: all jobs, `?job=`); a finished job's report reads its archived backlog and scores. Feedback belongs to every job it was added or touched in. `epoptes report --all` (every goal) covers whole histories.
+- `epoptes job` lists the jobs with cycles and cost. The skill's "new job in an existing harness" path runs a short interview about what changes, `job new`, then updates goal.json, the job-specific parts of loop.md and the backlog.
 
 ## Brain (`src/brain.ts`, `~/.epoptes/brain/`)
 What past harnesses taught, for designing the next one. Token-free and local only.

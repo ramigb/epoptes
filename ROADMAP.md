@@ -8,6 +8,7 @@ Short and current. New notes land in `NOTES.md` and get triaged here at the star
 - **Try the skill interactively** (`epoptes skill install`, then in Claude Code: "use the epoptes skill to build a harness for …") and note what the interview gets wrong in NOTES.md.
 
 ## Later / ideas
+- **Maybe:** several harnesses side by side in one project (parallel jobs). Today it's one harness with jobs over time; revisit once that style feels right.
 - Reports: add "where the time went" and the output link to the HTML/Markdown report (dashboard only for now).
 - Steering an *existing* feedback item (today only new items can steer).
 - The follow-up cycle cap (3) and the steering/follow-up runner notes are constants; make them goal settings if they get in the way.

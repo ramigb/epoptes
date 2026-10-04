@@ -125,7 +125,7 @@ export function serve({ port, lan, pollMs = 1000 }: ServeOptions) {
       if (req.method === 'GET' && url.pathname === '/report.html') {
         return sendReport(renderAllHtml([...watches.values()].flatMap((x) => {
           try {
-            return [buildReport(goalPaths(x.p.project))];
+            return [buildReport(goalPaths(x.p.project), Date.now(), { job: 'all' })];
           } catch {
             return [];
           }
@@ -135,7 +135,7 @@ export function serve({ port, lan, pollMs = 1000 }: ServeOptions) {
       if (req.method === 'GET' && rm) {
         const w = watches.get(rm[1]);
         if (!w) return send(res, 404, { error: `no goal ${rm[1]}` });
-        return sendReport(renderHtml(buildReport(w.p)));
+        return sendReport(renderHtml(buildReport(w.p, Date.now(), { job: url.searchParams.get('job') ?? 'current' })));
       }
 
       if (!url.pathname.startsWith('/api/')) return send(res, 404, { error: 'not found' });
@@ -185,8 +185,9 @@ export function serve({ port, lan, pollMs = 1000 }: ServeOptions) {
       const sub = m[2] ?? '';
       const project = w.p.project;
 
-      if (req.method === 'GET' && sub === '') return send(res, 200, detail(w));
-      if (req.method === 'GET' && sub === 'time') return send(res, 200, timeUse(w.p));
+      const all = url.searchParams.get('jobs') === 'all';
+      if (req.method === 'GET' && sub === '') return send(res, 200, detail(w, { all }));
+      if (req.method === 'GET' && sub === 'time') return send(res, 200, timeUse(w.p, Date.now(), { all }));
       const cm = /^cycles\/(\d+)$/.exec(sub);
       if (req.method === 'GET' && cm) return send(res, 200, cycleView(w, Number(cm[1])));
 

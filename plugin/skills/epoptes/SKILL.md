@@ -1,15 +1,16 @@
 ---
 name: epoptes
-description: Design, generate and register a long-running, time-boxed autonomous harness that the Epoptes runner executes as fresh-context Claude Code or Codex cycles, for any goal (code, research, content, data). Use when the user wants to build or set up a harness, an overnight or multi-hour autonomous run, or mentions Epoptes. Also use to check on or steer existing Epoptes goals (status, start, pause, stop, feedback, events, reports).
+description: Design, generate and register a long-running, time-boxed autonomous harness that the Epoptes runner executes as fresh-context Claude Code or Codex cycles, for any goal (code, research, content, data). Use when the user wants to build or set up a harness, an overnight or multi-hour autonomous run, or mentions Epoptes. Also use to start a new job (feature, task) in a project that already has a harness, and to check on or steer existing Epoptes goals (status, start, pause, stop, feedback, events, reports).
 ---
 
 # Epoptes: harnesses for long-running goals
 
 Epoptes runs a goal as a series of **cycles**. Each cycle is a fresh `claude -p` or `codex exec` orchestrator that reads the goal's files, does one slice of work (using subagents when configured), verifies it, records state and exits. All memory lives in files under `<project>/.epoptes/`. The runner, CLI and dashboard only read and write those files.
 
-You do one of two jobs:
+You do one of three jobs:
 - **Check on or steer a goal:** use the CLI (reference at the bottom). Read `epoptes status <goal>` before anything else. Don't open `cycles/` transcripts unless the user asks.
 - **Build a harness:** follow the process below. Do every step, in order.
+- **Start a new job in a project that already has a harness** (`.epoptes/goal.json` exists): don't build a second harness and don't overwrite this one. Follow "A new job in an existing harness" below.
 
 ## Building a harness
 
@@ -57,6 +58,20 @@ Run `epoptes add <project>`. Then tell the user:
 
 Offer to start it; don't start it without a yes.
 
+## A new job in an existing harness
+One project keeps one harness; each new piece of work (a feature, a fix sweep, a new chapter) is a **job** in it. What carries over: roles, models, permissions, `state/lessons.md`, `state/decisions.md`, and the harness's history. What's per job: the objective, done checks, time box, output, milestones and backlog.
+1. **Look first.** `epoptes status` and `epoptes job` (the jobs so far). Read `goal.json`, the end of the last handoff, `state/lessons.md`, and `epoptes feedback --open`. If a run is live, stop here: ask whether to let it finish, pause it, or stop it.
+2. **Short interview, only about what changes:** the new outcome and done checks, non-goals, time box, output, the first milestones, and whether the team, approval list or feedback setup should change. Ask what to do with open feedback from the last job (carry over, or close as `wont_do`). Run `epoptes brain` and apply lessons that fit, as in step 2 of building.
+3. **Sign-off** with the usual summary plus two lines: `JOB <title> (job <n> in this harness)` and `KEEPS <roles, lessons, …> · CHANGES <what you'll change>`.
+4. **Start the job:** `epoptes job new "<title>"`. It archives the finished job's backlog, handoff, progress and scores into `state/archive/<old job>/`, writes fresh ones, resets the clock and records the job. Then:
+   - update `goal.json`: `objective`, `done`, `non_goals`, `timebox`, `output`, and anything the interview changed. Keep `id`.
+   - update the job-specific parts of `loop.md`: the objective, quality bar, done checks, non-goals, approval list, review timing and wrap-up items. If loop.md predates the current template (no `epoptes approval`, `epoptes lesson` or the scope rule), refresh it from [templates/loop.md](templates/loop.md) while you're at it, keeping its goal-specific text.
+   - seed `state/backlog.md` with the new milestones (`## M1 · … (target h:mm)`) and tasks. Milestone ids restart at M1.
+   - close or keep open feedback as agreed.
+5. **Check and hand over:** `epoptes run --dry-run` until it prints `ok`, then offer to start (`epoptes start`); no `--new-run` is needed.
+
+For a small change to a finished job (a colour, a size, wording), don't start a job: add feedback and use `epoptes start --follow-up`.
+
 ## Distilling the brain
 When the user asks you to "distill the brain" (or INDEX.md has grown past ~30 lessons), rewrite `~/.epoptes/brain/NOTES.md`: at most 60 lines of principles for designing harnesses, grouped by topic, merging duplicates and dropping ones later goals contradicted, each with the goals it came from. Keep it generic (no project secrets or client names). Never edit INDEX.md; it is rebuilt from the goals.
 
@@ -92,6 +107,8 @@ Inside a cycle, the runner sets `EPOPTES_GOAL_DIR`, `EPOPTES_RUN`, `EPOPTES_CYCL
 | `epoptes stop [goal]` | stop now; the next cycle recovers interrupted work |
 | `epoptes extend [goal] <dur>` | lengthen the time box, e.g. `2h`, `30m` |
 | `epoptes reset-clock [goal]` | clear the clock; the next start is a new run |
+| `epoptes job [goal]` | the harness's jobs, the current one last |
+| `epoptes job new "<title>" [--id slug]` | start the next job in this harness: archive the finished job's working state, keep roles/lessons/decisions, reset the clock |
 | `epoptes feedback [goal] "<text>"` | add a feedback item (`F-<n>`) |
 | `epoptes feedback [goal] "<text>" --steer` | steering: interrupt the running cycle now; a fresh cycle replans the whole backlog around it first |
 | `epoptes feedback [goal] [--open]` | list feedback (`--open`: only new, seen, in progress, blocked) |
@@ -106,7 +123,7 @@ Inside a cycle, the runner sets `EPOPTES_GOAL_DIR`, `EPOPTES_RUN`, `EPOPTES_CYCL
 | `epoptes event output <path\|url> ["text"]` | where the main deliverable is; the dashboard shows "Open the output" (overrides goal.json `output`) |
 | `epoptes lesson "<rule>" [--topic t]` | (orchestrator, in wrap-up) a lesson about the harness itself for the brain; topics: roles, briefs, cycles, checks, tools, state, cost, steering, other |
 | `epoptes brain` / `epoptes brain lessons [--kind k]` | gather every goal into `~/.epoptes/brain/INDEX.md` / print the harness lessons |
-| `epoptes report [goal] [--all] [--stdout]` | Markdown + HTML report from recorded data into `.epoptes/reports/` (`--all`: every goal; `--stdout`: print the Markdown) |
+| `epoptes report [goal] [--all] [--stdout] [--job <id>\|all]` | Markdown + HTML report from recorded data into `.epoptes/reports/` (`--all`: every goal; `--stdout`: print the Markdown) |
 | `epoptes import-runsh <project>` | import an older run.sh harness (dress2impress style) so it shows in reports and the dashboard |
 | `epoptes ui` | the local dashboard on http://127.0.0.1:4747 |
 

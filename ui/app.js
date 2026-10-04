@@ -29,17 +29,23 @@ const store = {
   selectedCycle: null,
   cycleView: null,
   freshActivity: new Set(),
+  jobScope: 'job', // 'job' (the current job) or 'all' (every job of the harness)
 };
 const listeners = new Set();
+let version = 0; // bumped on every change
 function set(patch) {
   Object.assign(store, patch);
+  version++;
   for (const f of listeners) f();
 }
 function useStore() {
   const [, force] = useState(0);
+  const seen = version;
   useEffect(() => {
     const f = () => force((x) => x + 1);
     listeners.add(f);
+    // A change between render and subscribing (a fast first /api/state) would otherwise be missed until the next one.
+    if (version !== seen) f();
     return () => listeners.delete(f);
   }, []);
   return store;
@@ -116,7 +122,7 @@ function loadState() {
 function loadDetail(id = store.detailId) {
   if (!id) return Promise.resolve();
   return api
-    .get(`/api/goals/${id}`)
+    .get(`/api/goals/${id}${store.jobScope === 'all' ? '?jobs=all' : ''}`)
     .then((detail) => {
       if (store.detailId !== id) return;
       const seenAtOpen = store.seenAtOpen[id] ? store.seenAtOpen : { ...store.seenAtOpen, [id]: detail.seen };
@@ -345,6 +351,22 @@ function Topbar() {
   </header>`;
 }
 
+// ---------------------------------------------------------------- jobs
+
+/** The current job, and with several jobs a switch between "this job" and "all jobs" for the numbers below. */
+function JobChip({ d }) {
+  if (!d.job?.named) return null;
+  const scope = (s) => {
+    if (s === store.jobScope) return;
+    set({ jobScope: s, selectedCycle: null, cycleView: null });
+    loadDetail();
+  };
+  return html`<span class="jobchip"><span class="chip" title=${`Job ${d.job.id}: ${d.job.n} job${d.job.n > 1 ? 's' : ''} in this harness so far`}>job · ${d.job.title}${d.job.n > 1 ? ` · ${d.job.n} of ${d.job.n}` : ''}</span>
+    ${d.job.n > 1 && html`<span class="seg-toggle" role="group" aria-label="Which jobs the numbers cover">
+      <button class=${d.job_scope !== 'all' ? 'on' : ''} onClick=${() => scope('job')}>This job</button><button class=${d.job_scope === 'all' ? 'on' : ''} onClick=${() => scope('all')}>All jobs</button>
+    </span>`}</span>`;
+}
+
 // ---------------------------------------------------------------- waiting for you
 
 /** One line on a goal card when the human is needed: the run waits, or approvals are pending. */
@@ -445,6 +467,7 @@ function GoalCard({ g }) {
     <${ClockBar} g=${g} />
     <div class="facts">
       ${g.mode && html`<span class="chip ${g.mode}">${g.mode}</span>`}
+      ${g.job?.named && html`<span title="the current job of this harness">job <b>${g.job.title}</b></span>`}
       <span>cycle <b class="num">${g.cycle || '–'}</b>${g.round ? html` · round <b>${g.round}</b>` : ''}</span>
       ${b && html`<span>backlog <b class="num">${b.done}/${total}</b></span>`}
       ${g.cycles > 0 && html`<span><${Money} usd=${g.cost_usd} basis=${g.cost_basis} /></span>`}
@@ -506,7 +529,8 @@ function Controls({ d }) {
       ${[['+30m', 1800], ['+1h', 3600], ['+2h', 7200]].map(([l, s]) => html`<button key=${l} class="btn small" disabled=${busy} onClick=${() => act('extend', { seconds: s })} title="Extend the time box">${l}</button>`)}
     </span>`}
     ${!live && d.clock && html`<button class="btn small" disabled=${busy} onClick=${() => act('reset', {}, 'Reset the clock? The next start begins a new run with the time box from goal.json.')}>Reset clock</button>`}
-    <a class="btn small" href=${`/goals/${d.id}/report.html`} target="_blank" rel="noopener">Report</a>
+    <a class="btn small" href=${`/goals/${d.id}/report.html`} target="_blank" rel="noopener" title=${d.job.n > 1 ? 'Report for the current job' : ''}>Report</a>
+    ${d.job.n > 1 && html`<a class="btn small" href=${`/goals/${d.id}/report.html?job=all`} target="_blank" rel="noopener">Report: all jobs</a>`}
     <${OutputLink} o=${d.output} />
   </div>`;
 }
@@ -765,9 +789,9 @@ function TimeUse({ d }) {
   const [on, tipEl] = useTip();
   useEffect(() => {
     let live = true;
-    api.get(`/api/goals/${d.id}/time`).then((x) => live && setT(x)).catch(() => {});
+    api.get(`/api/goals/${d.id}/time${d.job_scope === 'all' ? '?jobs=all' : ''}`).then((x) => live && setT(x)).catch(() => {});
     return () => (live = false);
-  }, [d.id, d.cycles, d.state]);
+  }, [d.id, d.cycles, d.state, d.job_scope]);
   if (!t || !t.cycles) return null;
   const segs = PHASES.map((p) => ({ ...p, seconds: p.parts.reduce((a, k) => a + (t.phases[k] ?? 0), 0) })).filter((p) => p.seconds > 0);
   const total = segs.reduce((a, s) => a + s.seconds, 0) || 1;
@@ -779,7 +803,7 @@ function TimeUse({ d }) {
   const tools = [...top, ...(rest.length ? [{ tool: `${rest.length} other tools`, seconds: rest.reduce((a, x) => a + x.seconds, 0), calls: rest.reduce((a, x) => a + x.calls, 0) }] : [])]
     .map((x) => ({ name: x.tool, seconds: x.seconds, extra: `${x.calls} call${x.calls === 1 ? '' : 's'}` }));
   return html`<section class="panel timeuse">
-    <h2>Where the time went <span class="right muted">${t.cycles} cycle${t.cycles === 1 ? '' : 's'} · all runs</span></h2>
+    <h2>Where the time went <span class="right muted">${t.cycles} cycle${t.cycles === 1 ? '' : 's'} · ${d.job.n > 1 && d.job_scope !== 'all' ? 'this job' : 'all runs'}</span></h2>
     <p class="tu-head"><b class="num">${dur(total)}</b> on record · <b class="num">${dur(running)}</b> running cycles (${share(running)})</p>
     <div class="phasebar" role="img" aria-label=${segs.map((s) => `${s.label} ${dur(s.seconds)}`).join(', ')}>
       ${segs.map((s) => html`<span key=${s.key} class="ph ${s.key}" style=${{ flexGrow: s.seconds }} ...${on(`${s.label}: ${dur(s.seconds)} (${share(s.seconds)})`)}></span>`)}
@@ -1024,7 +1048,7 @@ function FirstRun({ d }) {
 function GoalDetail({ id }) {
   const s = useStore();
   useEffect(() => {
-    set({ detailId: id, detail: null, selectedCycle: null, cycleView: null });
+    set({ detailId: id, detail: null, selectedCycle: null, cycleView: null, jobScope: 'job' });
     loadDetail(id);
     return () => set({ detailId: null, detail: null });
   }, [id]);
@@ -1040,7 +1064,7 @@ function GoalDetail({ id }) {
   }
   return html`<a class="back" href="#/">← All goals</a>
     <div class="detail-head">
-      <div class="title"><h1>${d.name}</h1><${StatePill} state=${d.state} />${d.mode && html`<span class="chip ${d.mode}">${d.mode}</span>`}<span class="muted">run ${d.run ?? '–'} · cycle ${d.cycle || '–'}${d.round ? ` · round ${d.round}` : ''}</span></div>
+      <div class="title"><h1>${d.name}</h1><${StatePill} state=${d.state} />${d.mode && html`<span class="chip ${d.mode}">${d.mode}</span>`}<span class="muted">run ${d.run ?? '–'} · cycle ${d.cycle || '–'}${d.round ? ` · round ${d.round}` : ''}</span><${JobChip} d=${d} /></div>
       <p class="objective">${d.objective}</p>
       <${ClockBar} g=${d} big=${true} />
       <${Controls} d=${d} />

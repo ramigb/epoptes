@@ -401,3 +401,59 @@ test('backlog clear: with no real work left the runner steers the cycle to the d
   assert.doesNotMatch(g.read('cycles/000003/fake-argv.json').prompt, /BACKLOG CLEAR/);
   for (const e of g.events()) assert.deepEqual(validate('event', e), [], JSON.stringify(e));
 });
+
+test('jobs: a new job in the same harness archives the old one, keeps harness memory, and scopes reports', async () => {
+  const g = setup();
+  fs.writeFileSync(path.join(g.root, 'state', 'backlog.md'), '## M1 · Export (target 0:10)\n- [x] M1-1 csv\n');
+  fs.writeFileSync(path.join(g.root, 'state', 'lessons.md'), '- keep briefs short\n');
+  fs.writeFileSync(path.join(g.root, 'state', 'handoff.md'), 'export is done\n');
+  g.run(['start', g.project], { FAKE_DONE_AT: '1' });
+  await until(() => g.read('run/status.json').state === 'done');
+  g.run(['feedback', g.project, 'old job leftover']);
+
+  assert.throws(() => g.run(['job', 'new', '', '--goal', g.project]), /usage: epoptes job new/);
+  const out = g.run(['job', 'new', 'Import from Notion', '--goal', g.project]);
+  assert.match(out, /new job import-from-notion: Import from Notion/);
+  assert.match(out, /archived backlog\.md, handoff\.md of job-1 into \.epoptes\/state\/archive\/job-1\//);
+  assert.match(out, /1 feedback item is still open and will reach the new job: F-1/);
+  const st = path.join(g.root, 'state');
+  assert.match(fs.readFileSync(path.join(st, 'archive', 'job-1', 'backlog.md'), 'utf8'), /M1-1 csv/);
+  assert.match(fs.readFileSync(path.join(st, 'backlog.md'), 'utf8'), /^# Backlog: Import from Notion/);
+  assert.equal(fs.readFileSync(path.join(st, 'lessons.md'), 'utf8'), '- keep briefs short\n', 'harness memory stays');
+  assert.deepEqual(g.read('goal.json').job, { id: 'import-from-notion', title: 'Import from Notion' });
+  assert.equal(fs.existsSync(path.join(g.root, 'run', 'clock.json')), false, 'clock reset');
+  assert.equal(fs.existsSync(path.join(g.root, 'run', 'DONE')), false);
+
+  // The next start is a new run without --new-run, and records its job.
+  g.run(['start', g.project], { FAKE_DONE_AT: '2' });
+  await until(() => g.read('run/status.json').state === 'done' && g.read('run/status.json').cycle === 2);
+  const ev = g.events();
+  for (const e of ev) assert.deepEqual(validate('event', e), [], JSON.stringify(e));
+  assert.equal(ev.filter((e) => e.type === 'run.start').at(-1).job, 'import-from-notion');
+  const jobs = g.run(['job', g.project]);
+  assert.match(jobs, /^ {2}job-1 +1 cycles .* E2E$/m);
+  assert.match(jobs, /^\* import-from-notion +1 cycles .* Import from Notion {2}\(since /m);
+  assert.match(g.run(['status', g.project]), /^job Import from Notion \(import-from-notion, 2 of 2\)$/m);
+
+  const current = g.run(['report', g.project, '--stdout']);
+  assert.match(current, /\*\*Job:\*\* Import from Notion \(`import-from-notion`, current\), one of 2/);
+  assert.match(current, /\| Cycles \| 1 \(0 failed\) \|/);
+  assert.match(g.run(['report', g.project, '--stdout', '--job', 'all']), /\| Cycles \| 2 \(0 failed\) \|/);
+  const old = g.run(['report', g.project, '--stdout', '--job', 'job-1']);
+  assert.match(old, /M1-1 csv/, "an old job's report reads its archived backlog");
+  assert.throws(() => g.run(['report', g.project, '--stdout', '--job', 'nope']), /no job "nope"/);
+
+  // A second new job gets a fresh archive, and ids stay unique.
+  g.run(['job', 'new', 'Import from Notion', '--goal', g.project]);
+  assert.deepEqual(g.read('goal.json').job.id, 'import-from-notion-2');
+  assert.ok(fs.existsSync(path.join(st, 'archive', 'import-from-notion', 'backlog.md')));
+});
+
+test('re-adding a goal whose id was renamed updates the registry', () => {
+  const g = setup();
+  const goal = g.read('goal.json');
+  fs.writeFileSync(path.join(g.root, 'goal.json'), JSON.stringify({ ...goal, id: `${goal.id}-renamed` }));
+  g.run(['add', g.project]);
+  const reg = JSON.parse(fs.readFileSync(path.join(path.dirname(g.project), 'home', 'registry.json'), 'utf8'));
+  assert.deepEqual(reg.goals.map((x: any) => x.id), [`${goal.id}-renamed`]);
+});

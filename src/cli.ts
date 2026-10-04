@@ -13,6 +13,7 @@ import { emit, readEvents } from './events.ts';
 import { addFeedback, editFeedback, followUpItems, ingestInbox, isAgentNote, noteFeedback, pendingApprovals, readFeedback, setFeedbackStatus, setScope, STATUSES, type FeedbackItem, type FeedbackStatus, type Scope } from './feedback.ts';
 import { exists, hm, parseDuration, readJson, touch } from './fsx.ts';
 import { loadGoal } from './goal.ts';
+import { inJob, jobsOf } from './jobs.ts';
 import { lintGoal } from './lint.ts';
 import { epoptesHome, goalPaths } from './paths.ts';
 import { addGoal, readRegistry, resolveGoal } from './registry.ts';
@@ -27,6 +28,9 @@ Goals
   list                            all registered goals
   status [goal]                   state, clock, pace, cycle, backlog, feedback, output, handoff
   clock [goal]                    one line for orchestrators: CYCLE MODE ACTIVE TO_WRAPUP TO_END …
+  job [goal]                      this harness's jobs (the current one last)
+  job new "<title>" [--id slug]   start the next job in the same harness: archive the finished job's backlog,
+                                  handoff and progress, keep roles, lessons and decisions, reset the clock
 
 Runs
   start [goal] [--new-run]        resume, or start (spawns a detached runner); --new-run after DONE / time box over
@@ -71,7 +75,7 @@ Import
 
 Reports
   report [goal] [--all]           Markdown + HTML report into .epoptes/reports/ (--all: ~/.epoptes/reports/)
-         [--md|--html] [--stdout] [--out <dir>]
+         [--md|--html] [--stdout] [--out <dir>] [--job <id>|all]   (default: the current job)
 
 [goal] is a registered id or a path. Without it: $EPOPTES_GOAL_DIR, then the nearest .epoptes/ above the cwd.`;
 
@@ -104,6 +108,8 @@ function statusText(project: string): string {
   const out: string[] = [];
   out.push(`${goal.id} · ${goal.name}   (${tilde(p.project)})`);
   const pid = s.pid ? ` (pid ${s.pid})` : '';
+  const jobs = jobsOf(readEvents(p), goal);
+  if (jobs.length > 1 || goal.job) out.push(`job ${jobs.at(-1)!.title} (${jobs.at(-1)!.id}, ${jobs.length} of ${jobs.length})`);
   out.push(`state ${s.state}${pid}${s.pause_requested ? ' · pause requested' : ''} · run ${s.run ?? '–'} · cycle ${s.cycle || '–'} · mode ${s.mode ?? '–'}`);
   const cs = readClockState(p);
   const c = readClock(p);
@@ -202,6 +208,8 @@ async function main(argv: string[]) {
       ref: { type: 'string' },
       topic: { type: 'string' },
       kind: { type: 'string' },
+      id: { type: 'string' },
+      job: { type: 'string' },
     },
   });
   const [cmd, ...rest] = positionals;
@@ -369,6 +377,29 @@ async function main(argv: string[]) {
       console.log(`${id}: approval requested. Carry on with other work; the decision shows in \`epoptes feedback --open\`.`);
       return;
     }
+    case 'job': {
+      const { newJob } = await import('./jobs.ts');
+      if (rest[0] === 'new') {
+        const r = newJob(resolveGoal(values.goal), rest.slice(1).join(' '), values.id);
+        console.log(`new job ${r.id}: ${r.title}`);
+        console.log(r.archived.length ? `  archived ${r.archived.join(', ')} of ${r.previous} into .epoptes/${r.archiveDir}/` : `  nothing to archive from ${r.previous}`);
+        console.log('  kept: goal settings, roles, permissions, state/lessons.md, state/decisions.md · clock reset (the next start is a new run)');
+        if (r.openFeedback.length) console.log(`  ${r.openFeedback.length} feedback item${r.openFeedback.length > 1 ? 's are' : ' is'} still open and will reach the new job: ${r.openFeedback.map((f) => f.id).join(', ')} (close any that belonged to the old one)`);
+        console.log('Next: update goal.json (objective, done checks, time box, output) and the job-specific parts of loop.md, seed state/backlog.md, then `epoptes run --dry-run`.');
+        return;
+      }
+      if (rest[0] && rest[0] !== 'list') values.goal ??= rest[0]; // `epoptes job <goal>`
+      const p = goalPaths(resolveGoal(values.goal));
+      const goal = loadGoal(p);
+      const { readResults } = await import('./report.ts');
+      const results = readResults(p);
+      for (const j of jobsOf(readEvents(p), goal)) {
+        const rs = results.filter((r) => inJob(r.started_at, j));
+        const cost = !rs.length ? '–' : rs.some((r) => r.cost_usd == null) ? 'unknown' : `≈ $${rs.reduce((a, r) => a + r.cost_usd!, 0).toFixed(2)}`;
+        console.log(`${j.current ? '*' : ' '} ${j.id.padEnd(24)} ${String(rs.length).padStart(3)} cycles  ${cost.padStart(9)}  ${j.title}${j.from ? `  (since ${j.from.slice(0, 10)})` : ''}`);
+      }
+      return;
+    }
     case 'lesson': {
       const text = rest.join(' ').trim();
       const { LESSON_TOPICS } = await import('./brain.ts');
@@ -449,7 +480,7 @@ async function main(argv: string[]) {
       if (values.all) {
         const reports = readRegistry().goals.flatMap((g) => {
           try {
-            return [buildReport(goalPaths(g.path))];
+            return [buildReport(goalPaths(g.path), Date.now(), { job: 'all' })];
           } catch (e) {
             console.error(`skipping ${g.id}: ${(e as Error).message.split('\n')[0]}`);
             return [];
@@ -461,11 +492,11 @@ async function main(argv: string[]) {
         name = `all-goals-${stamp}`;
       } else {
         const p = goalPaths(resolveGoal(goalArg()));
-        const r = buildReport(p);
+        const r = buildReport(p, Date.now(), { job: values.job ?? 'current' });
         md = renderMarkdown(r);
         htmlOut = renderHtml(r);
         dir = values.out ?? path.join(p.root, 'reports');
-        name = `${r.goal.id}-${stamp}`;
+        name = `${r.goal.id}${r.job && !r.job.current ? `-${r.job.id}` : r.jobs > 1 && !r.job ? '-all-jobs' : ''}-${stamp}`;
       }
       if (values.stdout) return console.log(values.html ? htmlOut : md);
       fs.mkdirSync(dir, { recursive: true });

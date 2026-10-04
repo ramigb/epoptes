@@ -53,7 +53,8 @@
         "done",
         "needs_you",
         "output",
-        "lesson"
+        "lesson",
+        "job"
       ]
     }
   },
@@ -80,6 +81,13 @@
           "followup": {
             "type": "boolean",
             "description": "a follow-up run: open feedback only, no time box"
+          },
+          "job": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "the job this run works on (goal.json job id)"
           }
         }
       }
@@ -387,6 +395,39 @@
               "steering",
               "other"
             ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "job"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "id",
+          "title"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "previous": {
+            "type": "string"
+          },
+          "previous_title": {
+            "type": "string"
+          },
+          "archived": {
+            "type": "string",
+            "description": "where the previous job's state went, relative to .epoptes/"
           }
         }
       }

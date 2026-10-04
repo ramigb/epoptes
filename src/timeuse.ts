@@ -5,6 +5,8 @@ import path from 'node:path';
 import type { Activity } from './adapters/types.ts';
 import { readEvents, type EpoptesEvent } from './events.ts';
 import { exists, readJsonl } from './fsx.ts';
+import { loadGoal } from './goal.ts';
+import { inJob, jobsOf } from './jobs.ts';
 import type { GoalPaths } from './paths.ts';
 
 export type Phase = 'working' | 'between_cycles' | 'rate_limit' | 'cooldown' | 'needs_you' | 'paused';
@@ -135,8 +137,18 @@ export function cycleUse(activity: Activity[], startedAt: number, endedAt: numbe
 // Finished cycles never change, so their analysis is cached by directory.
 const cache = new Map<string, CycleUse>();
 
-export function timeUse(p: GoalPaths, now = Date.now()): TimeUse {
-  const events = readEvents(p);
+/** The current job's time by default; `all` for the whole history. */
+export function timeUse(p: GoalPaths, now = Date.now(), { all = false } = {}): TimeUse {
+  let events = readEvents(p);
+  let cycleIn = (_n: number) => true;
+  const jobs = all ? [] : jobsOf(events, loadGoal(p));
+  if (jobs.length > 1) {
+    // Only with several jobs: imported histories may lack cycle.start events.
+    const job = jobs.at(-1)!;
+    events = events.filter((e) => inJob(e.ts, job));
+    const mine = new Set(events.filter((e) => e.type === 'cycle.start').map((e) => e.cycle));
+    cycleIn = (n) => mine.has(n);
+  }
   const roles = new Map<string, { seconds: number; spans: number }>();
   const tools = new Map<string, { seconds: number; calls: number }>();
   let cycles = 0;
@@ -147,6 +159,7 @@ export function timeUse(p: GoalPaths, now = Date.now()): TimeUse {
     // no cycles yet
   }
   for (const d of dirs) {
+    if (!cycleIn(Number(d))) continue;
     const dir = path.join(p.cycles, d);
     const done = exists(path.join(dir, 'result.json'));
     let use = done ? cache.get(dir) : undefined;
