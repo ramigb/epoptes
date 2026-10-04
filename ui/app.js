@@ -232,6 +232,7 @@ function announce(u) {
     }
   }
   for (const f of u.feedback) {
+    if (f.op === 'add' && f.src === 'orchestrator' && f.kind !== 'approval') toast({ kind: 'info', title: `${name}: agent note ${f.id} for the next cycle`, body: f.text, ms: 10000 });
     if (f.op === 'status' && f.by === 'orchestrator') toast({ kind: 'info', title: `${f.id} → ${STATUS_LABEL[f.status]}`, body: f.note || name });
     if (f.op === 'note' && f.by === 'orchestrator') toast({ kind: 'info', title: `${f.id}: note from the orchestrator`, body: f.text });
   }
@@ -719,13 +720,26 @@ const histVerb = (o) => (o.op === 'status' ? ` → ${STATUS_LABEL[o.status]}` : 
 function FeedbackItem({ d, f, seen }) {
   const [noting, setNoting] = useState(false);
   const [note, setNote] = useState('');
-  const updated = seen && f.history.some((o) => o.op !== 'add' && o.by === 'orchestrator' && o.ts > seen);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(f.text);
+  const agentNote = f.kind !== 'approval' && f.src === 'orchestrator';
+  const closed = ['done', 'wont_do'].includes(f.status);
+  const updated = seen && f.history.some((o) => (o.op === 'add' ? o.src === 'orchestrator' : o.by === 'orchestrator') && o.ts > seen);
   const post = (body) =>
     api.post(`/api/goals/${d.id}/feedback/${f.id}`, body).then(() => loadDetail()).catch((e) => toast({ kind: 'bad', title: `Could not update ${f.id}`, body: e.message }));
   const lastCycle = f.history.findLast((o) => o.cycle)?.cycle;
   return html`<li class="fb ${updated ? 'updated' : ''}">
-    <div class="head"><span class="id">${f.id}</span>${f.kind === 'approval' && html`<span class="kind approval">approval</span>`}<span class="st ${f.status}">${f.kind === 'approval' && !f.decision && f.status === 'blocked' ? 'waiting for you' : STATUS_LABEL[f.status]}</span>${f.decision && html`<span class="decision ${f.decision}">${f.decision === 'approved' ? '✓ approved' : '✕ disapproved'}</span>`}${updated && html`<span class="new-dot" title="updated since you last looked"></span>`}</div>
-    <div class="text">${f.text}${f.ref ? html` <span class="chip">${f.ref}</span>` : ''}</div>
+    <div class="head"><span class="id">${f.id}</span>${f.kind === 'approval' && html`<span class="kind approval">approval</span>`}${agentNote && html`<span class="kind agent" title="The orchestrator filed this for a later cycle. Edit or dismiss it if it's wrong.">agent note</span>`}<span class="st ${f.status}">${f.kind === 'approval' && !f.decision && f.status === 'blocked' ? 'waiting for you' : STATUS_LABEL[f.status]}</span>${f.decision && html`<span class="decision ${f.decision}">${f.decision === 'approved' ? '✓ approved' : '✕ disapproved'}</span>`}${updated && html`<span class="new-dot" title="updated since you last looked"></span>`}</div>
+    ${editing
+      ? html`<form class="fb-form" style=${{ margin: '4px 0 0' }} onSubmit=${(e) => {
+          e.preventDefault();
+          if (draft.trim() && draft.trim() !== f.text) post({ text: draft.trim() }).then(() => setEditing(false));
+          else setEditing(false);
+        }}>
+          <textarea rows="3" value=${draft} onInput=${(e) => setDraft(e.currentTarget.value)} aria-label=${`Text of ${f.id}`}></textarea>
+          <div class="row"><span class="faint">The next cycle reads the new text.</span><span><button type="button" class="btn small ghost" onClick=${() => (setDraft(f.text), setEditing(false))}>Cancel</button> <button class="btn primary small">Save</button></span></div>
+        </form>`
+      : html`<div class="text">${f.text}${f.ref ? html` <span class="chip">${f.ref}</span>` : ''}${f.edited ? html` <span class="faint">(edited)</span>` : ''}</div>`}
     <div class="meta"><span>${SRC_LABEL[f.src] ?? `from ${f.src}`} · ${ago(f.created_at)}</span>${lastCycle && html`<span>last touched in c${lastCycle}</span>`}</div>
     ${f.kind === 'approval' && !f.decision && !['done', 'wont_do'].includes(f.status) && html`<${ApprovalButtons} goalId=${d.id} f=${f} />`}
     ${f.history.length > 1 &&
@@ -738,6 +752,8 @@ function FeedbackItem({ d, f, seen }) {
         ${Object.entries(STATUS_LABEL).map(([k, l]) => html`<option key=${k} value=${k}>${l}</option>`)}
       </select>
       <button class="btn small" onClick=${() => setNoting(!noting)}>Note</button>
+      ${!closed && !editing && html`<button class="btn small" onClick=${() => (setDraft(f.text), setEditing(true))}>Edit</button>`}
+      ${agentNote && !closed && html`<button class="btn small ghost" title="Mark it won't do: the next cycle skips it" onClick=${() => post({ status: 'wont_do', note: 'dismissed by the human' })}>Dismiss</button>`}
     </div>
     ${noting &&
     html`<form class="fb-form" style=${{ marginTop: '8px', marginBottom: 0 }} onSubmit=${(e) => {

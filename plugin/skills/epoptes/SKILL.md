@@ -87,6 +87,8 @@ Inside a cycle, the runner sets `EPOPTES_GOAL_DIR`, `EPOPTES_RUN`, `EPOPTES_CYCL
 | `epoptes feedback [goal] [--open]` | list feedback (`--open`: only new, seen, in progress, blocked) |
 | `epoptes feedback F-<n> <status> ["note"]` | set a status: `new`, `seen`, `in_progress`, `done`, `blocked`, `wont_do` |
 | `epoptes feedback F-<n> note "<text>"` | comment on an item |
+| `epoptes feedback F-<n> edit "<text>"` | change an item's text (e.g. correct an agent note) |
+| `epoptes feedback "<text>"` inside a cycle | an **agent note**: something the next cycle must act on (e.g. a research finding that changes the plan); the human sees it and can edit or dismiss it |
 | `epoptes feedback F-<n> approve\|reject ["note"]` | the human's answer to an approval request; resumes a run that was waiting for it |
 | `epoptes approval "<what>" [--ref <task>]` | (orchestrator) ask the human before doing something on the approval list |
 | `epoptes wait-for-human "<what>"` | (orchestrator) end the run after this cycle as "waiting for you"; the clock stops |

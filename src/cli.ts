@@ -10,7 +10,7 @@ import { agentsFromDir } from './adapters/claude-code.ts';
 import { readClock, readClockState } from './clock.ts';
 import * as control from './control.ts';
 import { emit } from './events.ts';
-import { addFeedback, ingestInbox, noteFeedback, pendingApprovals, readFeedback, setFeedbackStatus, STATUSES, type FeedbackItem, type FeedbackStatus } from './feedback.ts';
+import { addFeedback, editFeedback, ingestInbox, isAgentNote, noteFeedback, pendingApprovals, readFeedback, setFeedbackStatus, STATUSES, type FeedbackItem, type FeedbackStatus } from './feedback.ts';
 import { exists, hm, parseDuration, readJson, touch } from './fsx.ts';
 import { loadGoal } from './goal.ts';
 import { lintGoal } from './lint.ts';
@@ -41,10 +41,12 @@ Steering
   feedback [goal] [--open]        list feedback (--open: only items that still need attention)
   feedback <F-n> <status> [note]  set status: ${STATUSES.join(', ')}
   feedback <F-n> note "<text>"    comment on an item
+  feedback <F-n> edit "<text>"    change an item's text (e.g. correct an agent note)
   feedback <F-n> approve|reject [note]  answer an approval request
   event <type> "<text>"           milestone | blocked | note | artifact | round | wrapup | done
 
 Inside cycles (orchestrators)
+  feedback "<text>"               an agent note: something the next cycle must act on (the human sees it)
   approval "<what>" [--ref <task>]  ask the human before doing something on the approval list
   wait-for-human "<what>"         end the run after this cycle as "waiting for you" (nothing else can move)
 
@@ -73,6 +75,7 @@ const inCycle = () => Boolean(process.env.EPOPTES_CYCLE);
 function feedbackLine(f: FeedbackItem): string {
   let tag = '';
   if (f.kind === 'approval') tag = f.decision ? `[approval: ${f.decision.toUpperCase()}${decisionNote(f)}] ` : '[approval: waiting for the human; do not do it yet] ';
+  else if (isAgentNote(f)) tag = f.edited ? '[agent note, edited by the human] ' : '[agent note] ';
   return `${f.id.padEnd(6)} ${f.status.padEnd(12)} ${tag}${f.text}${f.ref ? ` (${f.ref})` : ''}`;
 }
 const decisionNote = (f: FeedbackItem) => {
@@ -283,6 +286,9 @@ async function main(argv: string[]) {
         if (what === 'note') {
           noteFeedback(p, id, text.join(' '), by, envCycle());
           console.log(`${id}: note added`);
+        } else if (what === 'edit') {
+          editFeedback(p, id, text.join(' '), by);
+          console.log(`${id}: text changed`);
         } else if (what === 'approve' || what === 'reject') {
           if (inCycle()) throw new Error('only the human answers approvals');
           const r = await control.decide(p.project, id, what === 'approve' ? 'approved' : 'rejected', text.join(' ') || undefined);
@@ -311,8 +317,9 @@ async function main(argv: string[]) {
         for (const f of items) console.log(feedbackLine(f));
         return;
       }
-      const id = addFeedback(goalPaths(resolveGoal(ref)), text, 'cli');
-      console.log(`added ${id}`);
+      // Inside a cycle this is an agent note: something the next cycle must act on, shown to the human too.
+      const id = addFeedback(goalPaths(resolveGoal(ref)), text, inCycle() ? 'orchestrator' : 'cli');
+      console.log(inCycle() ? `added ${id} (agent note for the next cycle; the human can edit or dismiss it)` : `added ${id}`);
       return;
     }
     case 'approval': {

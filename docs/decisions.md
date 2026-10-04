@@ -60,3 +60,7 @@ Append-only. Each entry: date · decision · why. To change one, add a new entry
 - **The run keeps working while approvals wait** (user's choice). It only pauses when the orchestrator says nothing else can move: `epoptes wait-for-human "<what>"` ends the run as a distinct `needs_input` state, not a plain `paused`. Why: "paused" hid *why* it stopped; "waiting for you" with a reason is what the human needs to see.
 - **Answering the last open approval resumes a `needs_input` run by itself**, and "Send & resume" does the same for open questions. A failed resume (e.g. time box over) is reported, but the answer is kept.
 - **The orchestrator can't answer approvals** (`feedback F-n approve` refuses inside a cycle).
+
+## 2026-10-04 · Agent notes (auto feedback)
+- **`epoptes feedback "<text>"` inside a cycle files an agent note** (`src: "orchestrator"`), triaged by the next cycle after the human's feedback. Why: research findings and missing prerequisites used to vanish into a handoff the human never reads; as feedback they're visible, and the human can edit (`op: edit`) or dismiss (`wont_do`) them before the next cycle acts.
+- **Agent notes are not tasks.** The loop template keeps ordinary work in the backlog, so the feedback list doesn't fill with routine items.

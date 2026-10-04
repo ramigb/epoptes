@@ -317,6 +317,7 @@ td.r { white-space: nowrap; }
 .approval-note { flex: 1 1 100%; }
 .needs-reply { margin: 12px 0 0; }
 .fb .kind.approval { padding: 0 6px; border-radius: 6px; background: var(--accent-soft); color: var(--accent); }
+.fb .kind.agent { padding: 0 6px; border-radius: 6px; background: var(--done-soft); color: var(--done); cursor: help; }
 .decision { font-size: 11.5px; font-weight: 600; }
 .decision.approved { color: var(--ok); }
 .decision.rejected { color: var(--bad); }

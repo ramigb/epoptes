@@ -18,7 +18,8 @@
         "add",
         "status",
         "note",
-        "decide"
+        "decide",
+        "edit"
       ]
     },
     "id": {
@@ -171,6 +172,33 @@
           },
           "note": {
             "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "op": {
+            "const": "edit"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "text",
+          "by"
+        ],
+        "properties": {
+          "text": {
+            "type": "string",
+            "minLength": 1
+          },
+          "by": {
+            "enum": [
+              "orchestrator",
+              "user"
+            ]
           }
         }
       }

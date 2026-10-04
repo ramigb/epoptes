@@ -49,7 +49,7 @@ The runner kills the cycle at the hard stop, so never start work you can't finis
 ## 3. The cycle
 1. **Triage.** Pick work in this order:
    a. broken or interrupted work
-   b. new feedback. For each item: `epoptes feedback F-<n> seen`, add it to the backlog's Feedback section as `- [ ] F-<n> <task>`, then `epoptes feedback F-<n> in_progress` when you dispatch it.
+   b. new feedback: the human's first, then agent notes (`[agent note]`, filed by earlier cycles). For each item: `epoptes feedback F-<n> seen`, add it to the backlog's Feedback section as `- [ ] F-<n> <task>`, then `epoptes feedback F-<n> in_progress` when you dispatch it.
    c. `high` review fixes
    d. the next unchecked tasks of the current milestone, in order, plus at most one `med` fix per round
 2. **Plan a round** of 1–3 tasks, about {{ROUND_MINUTES}} of agent work in total. **Tasks run in parallel only when they write disjoint files and none installs dependencies**; otherwise run them one after another. Split any task that looks bigger than ~45 min.
@@ -67,6 +67,7 @@ The runner kills the cycle at the hard stop, so never start work you can't finis
    - `state/progress.md`: one row per round, `| c<N> | <elapsed> | <task ids> | ok/blocked | <≤ 12 words> |`.
    - `state/handoff.md`: **overwrite** it, ≤ 25 lines: what exists, anything half-done, the next 3 tasks, gotchas.
    - `state/lessons.md`: add a rule only when a mistake cost more than one fix round and could recur. ≤ 30 lines; replace stale rules.
+   - **Agent notes:** when this cycle learned something the next cycle must act on before carrying on (above all a research finding that changes the plan, or a missing prerequisite), file it with `epoptes feedback "<what to do, and why>"`. The human sees it and may edit or dismiss it; the next cycle triages it like feedback. Ordinary tasks go in the backlog, not here.
    - Milestone reached (all its tasks `[x]`, or at least n done when that's the trigger): `epoptes event milestone "<M-id>: <what now works>"`.
 8. **Next round or exit.** Start another round only if the MODE is unchanged, `CYCLE_ELAPSED` < {{SOFT_CAP_MIN}} min, and this cycle has had fewer than 3 rounds. Run `epoptes event round <n>` when you start round n ≥ 2. Otherwise make sure step 7 is done and end with a one-line summary. Fresh contexts are cheap; a bloated one gets expensive and sloppy.
 

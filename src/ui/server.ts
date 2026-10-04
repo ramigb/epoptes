@@ -5,7 +5,7 @@ import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as control from '../control.ts';
-import { addFeedback, noteFeedback, setFeedbackStatus, type FeedbackStatus } from '../feedback.ts';
+import { addFeedback, editFeedback, noteFeedback, setFeedbackStatus, type FeedbackStatus } from '../feedback.ts';
 import { readRegistry } from '../registry.ts';
 import { buildReport, renderAllHtml, renderHtml } from '../report.ts';
 import { goalPaths } from '../paths.ts';
@@ -217,7 +217,8 @@ export function serve({ port, lan, pollMs = 1000 }: ServeOptions) {
             refresh();
             return send(res, 200, { ok: true, ...r });
           }
-          if (body.status) setFeedbackStatus(w.p, fm[1], body.status as FeedbackStatus, 'user', null, body.note || undefined);
+          if (typeof body.text === 'string') editFeedback(w.p, fm[1], body.text, 'user');
+          else if (body.status) setFeedbackStatus(w.p, fm[1], body.status as FeedbackStatus, 'user', null, body.note || undefined);
           else if (body.note) noteFeedback(w.p, fm[1], String(body.note), 'user', null);
           else return send(res, 400, { error: 'status or note required' });
           refresh();

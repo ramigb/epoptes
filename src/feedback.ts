@@ -15,7 +15,8 @@ export type FeedbackOp =
   | { ts: string; op: 'add'; id: string; text: string; src: Src; kind?: FeedbackKind; ref?: string }
   | { ts: string; op: 'status'; id: string; status: FeedbackStatus; by: By; cycle?: number | null; note?: string }
   | { ts: string; op: 'note'; id: string; text: string; by: By; cycle?: number | null }
-  | { ts: string; op: 'decide'; id: string; decision: Decision; by: By; note?: string };
+  | { ts: string; op: 'decide'; id: string; decision: Decision; by: By; note?: string }
+  | { ts: string; op: 'edit'; id: string; text: string; by: By };
 
 export interface FeedbackItem {
   id: string;
@@ -26,6 +27,8 @@ export interface FeedbackItem {
   status: FeedbackStatus;
   /** approvals only: the human's answer, or null while it waits */
   decision: Decision | null;
+  /** the text was changed after it was added (e.g. the human edited an agent note) */
+  edited: boolean;
   created_at: string;
   updated_at: string;
   history: FeedbackOp[];
@@ -37,7 +40,7 @@ export function fold(ops: FeedbackOp[]): Map<string, FeedbackItem> {
     if (op.op === 'add') {
       const kind = op.kind ?? 'feedback';
       // An approval waits for the human, so it starts blocked rather than as new work.
-      if (!items.has(op.id)) items.set(op.id, { id: op.id, text: op.text, src: op.src, kind, ref: op.ref ?? null, status: kind === 'approval' ? 'blocked' : 'new', decision: null, created_at: op.ts, updated_at: op.ts, history: [op] });
+      if (!items.has(op.id)) items.set(op.id, { id: op.id, text: op.text, src: op.src, kind, ref: op.ref ?? null, status: kind === 'approval' ? 'blocked' : 'new', decision: null, edited: false, created_at: op.ts, updated_at: op.ts, history: [op] });
       continue;
     }
     const it = items.get(op.id);
@@ -46,6 +49,10 @@ export function fold(ops: FeedbackOp[]): Map<string, FeedbackItem> {
     it.updated_at = op.ts;
     if (op.op === 'status') it.status = op.status;
     if (op.op === 'decide') it.decision = op.decision;
+    if (op.op === 'edit') {
+      it.text = op.text;
+      it.edited = true;
+    }
   }
   return items;
 }
@@ -54,6 +61,9 @@ export const readFeedback = (p: GoalPaths) => fold(readJsonl<FeedbackOp>(p.feedb
 
 const CLOSED: FeedbackStatus[] = ['done', 'wont_do'];
 export const isOpen = (f: FeedbackItem) => !CLOSED.includes(f.status);
+
+/** A note the orchestrator filed for a later cycle (auto feedback), as opposed to the human's feedback. */
+export const isAgentNote = (f: FeedbackItem) => f.kind === 'feedback' && f.src === 'orchestrator';
 
 /** Approvals the human hasn't answered yet. */
 export const pendingApprovals = (items: Map<string, FeedbackItem> | FeedbackItem[]) =>
@@ -98,6 +108,13 @@ export function setFeedbackStatus(p: GoalPaths, id: string, status: FeedbackStat
   if (!STATUSES.includes(status)) throw new Error(`unknown status "${status}" (use ${STATUSES.join(', ')})`);
   if (!readFeedback(p).has(id)) throw new Error(`no feedback item ${id}`);
   appendJsonl(p.feedback, { ts: nowIso(), op: 'status', id, status, by, cycle, ...(note ? { note } : {}) });
+}
+
+export function editFeedback(p: GoalPaths, id: string, text: string, by: By) {
+  text = text.trim();
+  if (!text) throw new Error('feedback text is empty');
+  if (!readFeedback(p).has(id)) throw new Error(`no feedback item ${id}`);
+  appendJsonl(p.feedback, { ts: nowIso(), op: 'edit', id, text, by });
 }
 
 export function noteFeedback(p: GoalPaths, id: string, text: string, by: By, cycle: number | null) {

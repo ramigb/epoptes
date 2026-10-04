@@ -148,7 +148,7 @@ export function summary(w: GoalWatch) {
     last_exit: results.at(-1)?.exit ?? null,
     notify: goal.notify,
     unread: {
-      feedback: w.feedback.items.filter((o) => o.op !== 'add' && o.by === 'orchestrator' && o.ts > seen.feedback_at).length,
+      feedback: w.feedback.items.filter((o) => (o.op === 'add' ? o.src === 'orchestrator' : o.by === 'orchestrator') && o.ts > seen.feedback_at).length,
       events: w.events.items.filter((e) => NOTABLE.includes(e.type) && e.ts > seen.events_at).length,
     },
   };

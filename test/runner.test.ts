@@ -140,6 +140,13 @@ test('pause after this cycle, extend, feedback and events from the CLI', async (
   const ms = g.events().find((e) => e.type === 'milestone');
   assert.deepEqual([ms.src, ms.cycle, ms.text], ['orchestrator', 4, 'M1 done']);
   assert.match(g.run(['status', g.project]), /feedback 0 new · 0 open · 0 blocked · 1 closed/);
+
+  // Inside a cycle, adding feedback files an agent note; the human can correct or dismiss it.
+  assert.match(g.run(['feedback', 'research says use SQLite, not JSON files: replan M2'], inCycle), /added F-2 \(agent note/);
+  assert.match(g.run(['feedback', g.project, '--open']), /F-2 +new +\[agent note\] research says use SQLite/);
+  g.run(['feedback', 'F-2', 'edit', 'use SQLite for M2 only', '--goal', g.project]);
+  assert.match(g.run(['feedback', g.project, '--open']), /F-2 +new +\[agent note, edited by the human\] use SQLite for M2 only/);
+  for (const op of readJsonl<any>(path.join(g.root, 'feedback.jsonl'))) assert.deepEqual(validate('feedback', op), [], JSON.stringify(op));
 });
 
 test('approvals: the run waits for the human, and answering the last one resumes it', async () => {
