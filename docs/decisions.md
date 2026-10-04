@@ -69,3 +69,9 @@ Append-only. Each entry: date · decision · why. To change one, add a new entry
 - **Steering interrupts the running cycle** (user's choice) via SIGUSR2 to the runner, which interrupts the adapter like stop-now but starts the next cycle at once. SIGUSR1 is reserved by Node for its inspector. Work on disk survives; the next cycle's interrupted-work check recovers it. A steered cycle is not a failure.
 - **The replan instruction comes from the runner, as a note in front of loop.md,** for as long as the steering item is `new`. Why: harnesses generated before this feature get it too, and the note can list the exact items. It asks for a ripple replan (every open task and milestone, not just one task), a decisions.md entry, and a `replanned: …` note on the item.
 - **Rate-limit and cooldown waits are not cut short by steering;** a between-cycles wait is.
+
+## 2026-10-04 · Follow-ups after DONE
+- **Feedback on a finished goal runs as a follow-up, not a new run:** no time box, only the open feedback, and nothing else (no backlog, review fixes or leftover agent notes). Why: on 2026-09-28 one quick feedback item started a full 4 h run of open-ended polish.
+- **The agent triages each item; the human can override** (user's choice). Minor → done in place. Major (restart, new version, change of direction, > ~1 cycle) → `blocked "needs a new run: …"`, and the human decides whether to start one. Overrides are a `scope` op: `tweak` forces in-place, `new_run` keeps it out of the follow-up.
+- **The follow-up clock has no time box but two stops:** the runner records DONE itself once no follow-up item is left, and pauses with a warning after 3 cycles without DONE. Why: "follow the agent's judgement" shouldn't mean "can run all night".
+- **The instructions come from the runner as a FOLLOW-UP note in front of loop.md** (like steering), so older harnesses get them too; loop.md templates also list the `followup` mode.

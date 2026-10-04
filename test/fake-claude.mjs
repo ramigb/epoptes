@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Stands in for `claude -p` in runner tests (set EPOPTES_CLAUDE_BIN to this file). Costs no tokens.
 // FAKE_CLAUDE = ok (default) | slow | error | ratelimit | trickle (slow stream, for watching the dashboard)
-//   | approval (asks for an approval, then waits for the human) | slowfirst (cycle $FAKE_SLOW_CYCLE, default 1, is slow; others ok). FAKE_DONE_AT = cycle number that marks the goal DONE.
+//   | approval (asks for an approval, then waits for the human) | slowfirst (cycle $FAKE_SLOW_CYCLE, default 1, is slow; others ok)
+//   | fixall (marks every open feedback item done, like a follow-up cycle). FAKE_DONE_AT = cycle number that marks the goal DONE.
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -71,7 +72,11 @@ if (mode === 'trickle') {
   if (Number(process.env.FAKE_DONE_AT) === cycle) execFileSync('epoptes', ['event', 'done', 'demo finished']);
   process.exit(0);
 }
-if (mode === 'approval') {
+if (mode === 'fixall') {
+  for (const line of fixture) out(line);
+  const open = execFileSync('epoptes', ['feedback', '--open'], { encoding: 'utf8' });
+  for (const line of open.split('\n').filter((l) => /^F-\d+/.test(l) && !l.includes('[needs a new run]'))) execFileSync('epoptes', ['feedback', line.split(' ')[0], 'done', 'fixed in place']);
+} else if (mode === 'approval') {
   for (const line of fixture) out(line);
   execFileSync('epoptes', ['approval', 'buy a $5 font licence', '--ref', 'M1-2']);
   execFileSync('epoptes', ['wait-for-human', 'approve or reject F-1 (the font)']);

@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { CycleResult } from '../adapters/types.ts';
 import { clockState, readClock, runFinished } from '../clock.ts';
-import { fold, pendingApprovals } from '../feedback.ts';
+import { fold, followUpItems, pendingApprovals } from '../feedback.ts';
 import { exists, nowIso, readJson, readJsonl, writeJson } from '../fsx.ts';
 import { loadGoal, type Goal } from '../goal.ts';
 import { epoptesHome } from '../paths.ts';
@@ -114,7 +114,8 @@ export function summary(w: GoalWatch) {
   const seen = readSeen(w.id);
   const cycleEvents = w.events.items.filter((e) => e.cycle === s?.cycle);
   const round = cycleEvents.findLast((e) => e.type === 'round')?.n ?? null;
-  const pending = pendingApprovals(fold(w.feedback.items));
+  const items = fold(w.feedback.items);
+  const pending = pendingApprovals(items);
   return {
     id: w.id,
     name: goal.name,
@@ -140,7 +141,8 @@ export function summary(w: GoalWatch) {
     done_marker: exists(p.done),
     run_finished: runFinished(p),
     wrapup_marker: exists(p.wrapup),
-    clock: c && cs ? { active: cs.active, timebox_s: c.timebox_s, wrapup_s: c.wrapup_s, grace_s: c.grace_s, to_end: cs.toEnd, paused: Boolean(c.paused_at), clock_mode: cs.mode } : null,
+    clock: c && cs ? { active: cs.active, timebox_s: c.timebox_s, wrapup_s: c.wrapup_s, grace_s: c.grace_s, to_end: Number.isFinite(cs.toEnd) ? cs.toEnd : null, paused: Boolean(c.paused_at), clock_mode: cs.mode, followup: c.kind === 'followup' } : null,
+    followup_items: followUpItems(items).length,
     backlog: backlogCounts(p),
     cycles: results.length,
     cost_usd: totalCost(results),

@@ -268,6 +268,12 @@ function ClockBar({ g, big }) {
   const c = g.clock;
   if (!c) return html`<div class="clockbar ${big ? 'big' : ''}"><div class="track"></div><div class="labels"><span>clock not started</span><span>${g.goal ? dur(g.goal.timebox.total_min * 60) + ' time box' : ''}</span></div></div>`;
   const active = liveActive(g, now);
+  if (c.followup) {
+    return html`<div class="clockbar followup ${big ? 'big' : ''}">
+      <div class="track" aria-label="Follow-up: no time box"><div class="fill ${c.paused ? 'paused' : 'followup'}"></div></div>
+      <div class="labels"><span class="num">${dur(active)} active${c.paused ? ' · clock paused' : ''}</span><span>follow-up · no time box</span></div>
+    </div>`;
+  }
   const total = c.timebox_s + c.grace_s;
   const w = Math.min(100, (active / total) * 100);
   const wrapStart = ((c.timebox_s - c.wrapup_s) / total) * 100;
@@ -443,7 +449,7 @@ function Controls({ d }) {
     setBusy(true);
     api
       .post(`/api/goals/${d.id}/control`, { action, ...extra })
-      .then(() => toast({ kind: 'info', title: { start: 'Starting…', pause: 'Pause requested', stop: 'Stopping…', extend: 'Time box extended', reset: 'Clock reset' }[action], body: d.name, ms: 3500 }))
+      .then(() => toast({ kind: 'info', title: extra.follow_up ? 'Starting a follow-up…' : { start: 'Starting…', pause: 'Pause requested', stop: 'Stopping…', extend: 'Time box extended', reset: 'Clock reset' }[action], body: d.name, ms: 3500 }))
       .catch((e) => toast({ kind: 'bad', title: `Could not ${action}`, body: e.message }))
       .finally(() => {
         setBusy(false);
@@ -457,7 +463,10 @@ function Controls({ d }) {
     ? 'This goal is done. Start a new run?\n\nA new run gets a fresh time box and spends tokens. The orchestrator only finds work if you added feedback or backlog tasks since.'
     : 'The time box is over. Start a new run with a fresh time box?\n\nTo continue this run instead, cancel and use +30m / +1h / +2h.';
   const start = () => (finished ? act('start', { new_run: true }, newRunText) : act('start'));
+  const fu = d.followup_items;
   return html`<div class="controls">
+    ${!live && finished && fu > 0 && html`<button class="btn primary" disabled=${busy} onClick=${() => act('start', { follow_up: true })}
+      title="Handle just the open feedback, with no time box. Minor items are fixed in place; anything that needs a restart or a new version is flagged for a new run instead.">▶ Follow up on ${fu} feedback item${fu > 1 ? 's' : ''}</button>`}
     ${!live && html`<button class=${`btn ${finished ? '' : 'primary'}`} disabled=${busy} onClick=${start} title=${d.needs ? 'Resume without answering' : ''}>▶ ${finished ? 'Start new run…' : d.clock ? 'Resume' : 'Start'}</button>`}
     ${live && html`<button class="btn" disabled=${busy || d.pause_requested} onClick=${() => act('pause')} title="Finish the current cycle, then pause (the clock pauses too)">‖ ${d.pause_requested ? 'Pausing after cycle' : 'Pause after cycle'}</button>`}
     ${live && html`<button class="btn danger" disabled=${busy} onClick=${() => act('stop', {}, 'Stop now? The current cycle is interrupted; the next start recovers its work.')}>■ Stop now</button>`}
@@ -742,6 +751,7 @@ function FeedbackItem({ d, f, seen }) {
       : html`<div class="text">${f.text}${f.ref ? html` <span class="chip">${f.ref}</span>` : ''}${f.edited ? html` <span class="faint">(edited)</span>` : ''}</div>`}
     <div class="meta"><span>${SRC_LABEL[f.src] ?? `from ${f.src}`} · ${ago(f.created_at)}</span>${lastCycle && html`<span>last touched in c${lastCycle}</span>`}</div>
     ${f.kind === 'approval' && !f.decision && !['done', 'wont_do'].includes(f.status) && html`<${ApprovalButtons} goalId=${d.id} f=${f} />`}
+    ${f.status === 'blocked' && /^needs a new run/.test(f.history.findLast((o) => o.op === 'status')?.note ?? '') && html`<div class="needs-run">This needs a new run. Use <b>Start new run…</b> when you're ready.</div>`}
     ${f.history.length > 1 &&
     html`<details open=${updated}>
       <summary>${f.history.length - 1} update${f.history.length > 2 ? 's' : ''}</summary>
@@ -754,6 +764,11 @@ function FeedbackItem({ d, f, seen }) {
       <button class="btn small" onClick=${() => setNoting(!noting)}>Note</button>
       ${!closed && !editing && html`<button class="btn small" onClick=${() => (setDraft(f.text), setEditing(true))}>Edit</button>`}
       ${agentNote && !closed && html`<button class="btn small ghost" title="Mark it won't do: the next cycle skips it" onClick=${() => post({ status: 'wont_do', note: 'dismissed by the human' })}>Dismiss</button>`}
+      ${(d.run_finished || d.clock?.followup) && !closed && !agentNote && f.kind !== 'approval' &&
+      html`<select class="scope" aria-label=${`How to handle ${f.id} after DONE`} value=${f.scope} onChange=${(e) => post({ scope: e.currentTarget.value })}
+        title="After DONE, a follow-up handles open feedback with no time box. Choose how this item is treated.">
+        <option value="auto">agent decides</option><option value="tweak">quick tweak</option><option value="new_run">needs a new run</option>
+      </select>`}
     </div>
     ${noting &&
     html`<form class="fb-form" style=${{ marginTop: '8px', marginBottom: 0 }} onSubmit=${(e) => {
@@ -779,7 +794,8 @@ function Feedback({ d }) {
       .post(`/api/goals/${d.id}/feedback`, { text: text.trim(), ...(steer ? { steer: true } : {}) })
       .then(({ id, interrupted }) => {
         setText('');
-        if (steer) toast({ kind: 'info', title: `${id}: steering`, body: interrupted ? `Cycle ${d.cycle} is interrupted; a fresh cycle replans around it now.` : 'The next cycle replans around it first.', ms: 5000 });
+        if (!steer && d.run_finished) toast({ kind: 'info', title: `${id} added`, body: 'This goal is finished: press "Follow up" to apply your feedback (no time box).', ms: 6000 });
+        else if (steer) toast({ kind: 'info', title: `${id}: steering`, body: interrupted ? `Cycle ${d.cycle} is interrupted; a fresh cycle replans around it now.` : 'The next cycle replans around it first.', ms: 5000 });
         else toast({ kind: 'info', title: `${id} added`, body: 'The next cycle picks it up.', ms: 3500 });
         loadDetail();
       })

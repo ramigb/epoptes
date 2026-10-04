@@ -211,6 +211,48 @@ test('steering feedback interrupts the running cycle; the next cycle replans aro
   assert.match(g.run(['status', g.project]), /steering F-2 waits for the next cycle/);
 });
 
+test('follow-up after DONE: only open feedback, no time box, agent triage with human overrides', async () => {
+  const g = setup();
+  g.run(['start', g.project], { FAKE_DONE_AT: '1' });
+  await until(() => g.read('run/status.json').state === 'done');
+  assert.throws(() => g.run(['start', g.project, '--follow-up']), /no open feedback to follow up on/);
+
+  g.run(['feedback', g.project, 'make the title blue']);
+  g.run(['feedback', g.project, 'rebuild it as a mobile app']);
+  g.run(['feedback', 'F-2', 'scope', 'new_run', '--goal', g.project]);
+  g.run(['feedback', 'F-1', 'scope', 'tweak', '--goal', g.project]);
+  assert.throws(() => g.run(['start', g.project]), /1 open feedback item: `epoptes start --follow-up`/);
+  assert.match(g.run(['status', g.project]), /1 open item since DONE/);
+
+  g.run(['start', g.project, '--follow-up'], { FAKE_CLAUDE: 'fixall' });
+  await until(() => g.read('run/status.json').state === 'done' && g.read('run/status.json').cycle === 2);
+  await until(() => g.events().at(-1).type === 'run.end');
+  const clock = g.read('run/clock.json');
+  assert.deepEqual([clock.kind, clock.timebox_s, clock.run], ['followup', 0, 'r2']);
+  assert.deepEqual(validate('clock', clock), []);
+  const argv = g.read('cycles/000002/fake-argv.json');
+  assert.equal(argv.env.mode, 'followup');
+  assert.match(argv.prompt, /^> \*\*Epoptes runner: FOLLOW-UP \(MODE=followup\)\.\*\*/);
+  assert.match(argv.prompt, /F-1: "make the title blue" \(the human marked it a quick tweak: do it in place\)/);
+  assert.doesNotMatch(argv.prompt, /mobile app/, 'items marked new_run are left for a new run');
+  const ev = g.events();
+  for (const e of ev) assert.deepEqual(validate('event', e), [], JSON.stringify(e));
+  assert.equal(ev.filter((e) => e.type === 'run.start').at(-1).followup, true);
+  assert.deepEqual(ev.filter((e) => e.type === 'control').map((e) => e.action), ['start', 'follow_up']);
+  // The fake fixed F-1 without saying DONE; the runner ends the follow-up once nothing is left.
+  assert.equal(ev.filter((e) => e.type === 'cycle.start' && e.run === 'r2').length, 1);
+  assert.deepEqual([ev.at(-2).type, ev.at(-2).text, ev.at(-1).reason], ['done', 'follow-up: every feedback item is handled', 'done']);
+  assert.match(g.run(['clock', g.project]), /MODE=followup .*TO_END=none/);
+  for (const op of readJsonl<any>(path.join(g.root, 'feedback.jsonl'))) assert.deepEqual(validate('feedback', op), [], JSON.stringify(op));
+
+  // A follow-up that never finishes pauses after a few cycles instead of running away.
+  g.run(['feedback', 'F-2', 'scope', 'auto', '--goal', g.project]);
+  g.run(['start', g.project, '--follow-up']);
+  await until(() => g.read('run/status.json').state === 'paused');
+  assert.equal(g.events().filter((e) => e.type === 'cycle.start' && e.run === 'r3').length, 3);
+  assert.match(g.events().findLast((e) => e.type === 'warn').text, /follow-up paused after 3 cycles/);
+});
+
 test('gives up after repeated failures and reports a crash', async () => {
   const g = setup({ failures: { cooldown_after: 5, cooldown_min: 0, give_up_after: 2 } });
   g.run(['start', g.project], { FAKE_CLAUDE: 'error' });

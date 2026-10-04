@@ -79,6 +79,8 @@ Inside a cycle, the runner sets `EPOPTES_GOAL_DIR`, `EPOPTES_RUN`, `EPOPTES_CYCL
 | `epoptes clock` | one line for orchestrators: `CYCLE= RUN= MODE= ACTIVE= TO_WRAPUP= TO_END= TO_HARD_STOP= CYCLE_ELAPSED=` |
 | `epoptes run [goal] --dry-run` | check the setup and guardrails, print the next cycle's command; never starts the clock |
 | `epoptes start [goal]` | resume, or start a detached run; `--new-run` after DONE or when the time box is over |
+| `epoptes start [goal] --follow-up` | after DONE: handle just the open feedback, with no time box. Minor items are fixed in place; ones that need a restart or new version are flagged for a new run |
+| `epoptes feedback F-<n> scope auto\|tweak\|new_run` | the human's override for a follow-up (default: the agent triages) |
 | `epoptes pause [goal]` | pause after the current cycle (the clock pauses too) |
 | `epoptes stop [goal]` | stop now; the next cycle recovers interrupted work |
 | `epoptes extend [goal] <dur>` | lengthen the time box, e.g. `2h`, `30m` |
@@ -98,4 +100,4 @@ Inside a cycle, the runner sets `EPOPTES_GOAL_DIR`, `EPOPTES_RUN`, `EPOPTES_CYCL
 | `epoptes import-runsh <project>` | import an older run.sh harness (dress2impress style) so it shows in reports and the dashboard |
 | `epoptes ui` | the local dashboard on http://127.0.0.1:4747 |
 
-When the user asks for a report, run `epoptes report <goal>` and give them the paths (or `--stdout` to summarise it). When the user asks how a goal is doing, run `epoptes status <goal>` and summarise it in a few lines: state, time left, progress and anything blocked. When they give feedback in chat, add it with `epoptes feedback <goal> "<their words>"` rather than editing files.
+When the user gives feedback on a **finished** goal, add it, then offer `epoptes start <goal> --follow-up` (no time box; only that feedback) rather than `--new-run`, unless they want a restart or a new version. When the user asks for a report, run `epoptes report <goal>` and give them the paths (or `--stdout` to summarise it). When the user asks how a goal is doing, run `epoptes status <goal>` and summarise it in a few lines: state, time left, progress and anything blocked. When they give feedback in chat, add it with `epoptes feedback <goal> "<their words>"` rather than editing files.

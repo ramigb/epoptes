@@ -143,12 +143,13 @@ export function buildReport(p: GoalPaths, now = Date.now()): GoalReport {
   }
 
   const spans = runSpans(events, goal.timebox.pause_on_rate_limit, now);
+  const followups = new Set(events.filter((e) => e.type === 'run.start' && e.followup).map((e) => e.run));
   const runs: GoalReport['runs'] = [...spans.entries()].map(([run, s]) => {
     const rs = results.filter((r) => r.run === run);
     const exits: Record<string, number> = {};
     for (const r of rs) exits[r.exit] = (exits[r.exit] ?? 0) + 1;
     const end = s.ended_at ? Date.parse(s.ended_at) : now;
-    return { run, started_at: s.started_at, ended_at: s.ended_at, end_reason: s.end_reason, wall_s: Math.round((end - Date.parse(s.started_at)) / 1000), active_s: Math.max(0, Math.round(s.active_ms / 1000)), cycles: rs.length, cost_usd: totalCost(rs), exits };
+    return { run: followups.has(run) ? `${run} (follow-up)` : run, started_at: s.started_at, ended_at: s.ended_at, end_reason: s.end_reason, wall_s: Math.round((end - Date.parse(s.started_at)) / 1000), active_s: Math.max(0, Math.round(s.active_ms / 1000)), cycles: rs.length, cost_usd: totalCost(rs), exits };
   });
 
   const first = runs[0]?.started_at ?? results[0]?.started_at;

@@ -10,13 +10,17 @@ export type Src = 'dashboard' | 'cli' | 'file' | 'orchestrator';
 /** `feedback`: from the human. `approval`: the orchestrator asks before doing something on the approval list. */
 export type FeedbackKind = 'feedback' | 'approval';
 export type Decision = 'approved' | 'rejected';
+/** After DONE: `tweak` = do it in place in a follow-up; `new_run` = needs a new run; `auto` = the agent triages it. */
+export type Scope = 'auto' | 'tweak' | 'new_run';
+export const SCOPES: Scope[] = ['auto', 'tweak', 'new_run'];
 
 export type FeedbackOp =
   | { ts: string; op: 'add'; id: string; text: string; src: Src; kind?: FeedbackKind; ref?: string; steer?: boolean }
   | { ts: string; op: 'status'; id: string; status: FeedbackStatus; by: By; cycle?: number | null; note?: string }
   | { ts: string; op: 'note'; id: string; text: string; by: By; cycle?: number | null }
   | { ts: string; op: 'decide'; id: string; decision: Decision; by: By; note?: string }
-  | { ts: string; op: 'edit'; id: string; text: string; by: By };
+  | { ts: string; op: 'edit'; id: string; text: string; by: By }
+  | { ts: string; op: 'scope'; id: string; scope: Scope; by: By };
 
 export interface FeedbackItem {
   id: string;
@@ -31,6 +35,8 @@ export interface FeedbackItem {
   edited: boolean;
   /** steering: interrupt the current cycle and replan around this item first */
   steer: boolean;
+  /** the human's override for follow-ups (default `auto`: the agent triages) */
+  scope: Scope;
   created_at: string;
   updated_at: string;
   history: FeedbackOp[];
@@ -42,7 +48,7 @@ export function fold(ops: FeedbackOp[]): Map<string, FeedbackItem> {
     if (op.op === 'add') {
       const kind = op.kind ?? 'feedback';
       // An approval waits for the human, so it starts blocked rather than as new work.
-      if (!items.has(op.id)) items.set(op.id, { id: op.id, text: op.text, src: op.src, kind, ref: op.ref ?? null, status: kind === 'approval' ? 'blocked' : 'new', decision: null, edited: false, steer: op.steer === true, created_at: op.ts, updated_at: op.ts, history: [op] });
+      if (!items.has(op.id)) items.set(op.id, { id: op.id, text: op.text, src: op.src, kind, ref: op.ref ?? null, status: kind === 'approval' ? 'blocked' : 'new', decision: null, edited: false, steer: op.steer === true, scope: 'auto', created_at: op.ts, updated_at: op.ts, history: [op] });
       continue;
     }
     const it = items.get(op.id);
@@ -51,6 +57,7 @@ export function fold(ops: FeedbackOp[]): Map<string, FeedbackItem> {
     it.updated_at = op.ts;
     if (op.op === 'status') it.status = op.status;
     if (op.op === 'decide') it.decision = op.decision;
+    if (op.op === 'scope') it.scope = op.scope;
     if (op.op === 'edit') {
       it.text = op.text;
       it.edited = true;
@@ -70,6 +77,13 @@ export const isAgentNote = (f: FeedbackItem) => f.kind === 'feedback' && f.src =
 /** Steering items the orchestrator hasn't picked up yet: the next cycle replans around them first. */
 export const pendingSteers = (items: Map<string, FeedbackItem> | FeedbackItem[]) =>
   [...items.values()].filter((f) => f.steer && f.status === 'new');
+
+/**
+ * What a follow-up run handles: the human's open feedback (and answered approvals), minus items marked
+ * `new_run`. Agent notes left over from the run are not follow-up work.
+ */
+export const followUpItems = (items: Map<string, FeedbackItem> | FeedbackItem[]) =>
+  [...items.values()].filter((f) => ['new', 'seen', 'in_progress'].includes(f.status) && !isAgentNote(f) && f.scope !== 'new_run' && !(f.kind === 'approval' && !f.decision));
 
 /** Approvals the human hasn't answered yet. */
 export const pendingApprovals = (items: Map<string, FeedbackItem> | FeedbackItem[]) =>
@@ -115,6 +129,12 @@ export function setFeedbackStatus(p: GoalPaths, id: string, status: FeedbackStat
   if (!STATUSES.includes(status)) throw new Error(`unknown status "${status}" (use ${STATUSES.join(', ')})`);
   if (!readFeedback(p).has(id)) throw new Error(`no feedback item ${id}`);
   appendJsonl(p.feedback, { ts: nowIso(), op: 'status', id, status, by, cycle, ...(note ? { note } : {}) });
+}
+
+export function setScope(p: GoalPaths, id: string, scope: Scope) {
+  if (!SCOPES.includes(scope)) throw new Error(`unknown scope "${scope}" (use ${SCOPES.join(', ')})`);
+  if (!readFeedback(p).has(id)) throw new Error(`no feedback item ${id}`);
+  appendJsonl(p.feedback, { ts: nowIso(), op: 'scope', id, scope, by: 'user' });
 }
 
 export function editFeedback(p: GoalPaths, id: string, text: string, by: By) {

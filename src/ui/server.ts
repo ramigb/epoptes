@@ -5,7 +5,7 @@ import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as control from '../control.ts';
-import { addFeedback, editFeedback, noteFeedback, setFeedbackStatus, type FeedbackStatus } from '../feedback.ts';
+import { addFeedback, editFeedback, noteFeedback, setFeedbackStatus, setScope, type FeedbackStatus, type Scope } from '../feedback.ts';
 import { readRegistry } from '../registry.ts';
 import { buildReport, renderAllHtml, renderHtml } from '../report.ts';
 import { goalPaths } from '../paths.ts';
@@ -183,7 +183,7 @@ export function serve({ port, lan, pollMs = 1000 }: ServeOptions) {
         if (sub === 'control') {
           switch (body.action) {
             case 'start':
-              await control.start(project, { newRun: body.new_run === true });
+              await control.start(project, { newRun: body.new_run === true, followUp: body.follow_up === true });
               break;
             case 'pause':
               control.pause(project);
@@ -223,6 +223,7 @@ export function serve({ port, lan, pollMs = 1000 }: ServeOptions) {
             return send(res, 200, { ok: true, ...r });
           }
           if (typeof body.text === 'string') editFeedback(w.p, fm[1], body.text, 'user');
+          else if (typeof body.scope === 'string') setScope(w.p, fm[1], body.scope as Scope);
           else if (body.status) setFeedbackStatus(w.p, fm[1], body.status as FeedbackStatus, 'user', null, body.note || undefined);
           else if (body.note) noteFeedback(w.p, fm[1], String(body.note), 'user', null);
           else return send(res, 400, { error: 'status or note required' });

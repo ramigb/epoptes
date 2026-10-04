@@ -41,6 +41,7 @@ Don't read deliverables, transcripts or logs up front. If a worker's report is u
 | wrapup | feature freeze: only the wrap-up checklist (§6) |
 | overtime | finish in-flight wrap-up items, checkpoint, `epoptes event done "<summary>"`, exit |
 | stop | checkpoint whatever is verified, write the handoff, exit now |
+| followup | the goal was already DONE; follow the runner's FOLLOW-UP note at the top of this prompt: only the listed feedback items, minor ones fixed in place, major ones flagged for a new run |
 
 **Early finish:** in build mode, when every task except `low` fixes is `[x]`, `[cut]` or `[blocked…]` and every done check passes, run `epoptes event wrapup "<why>"`. The mode then reads `wrapup` for the rest of the run; start the checklist (§6).
 

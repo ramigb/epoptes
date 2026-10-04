@@ -19,7 +19,8 @@
         "status",
         "note",
         "decide",
-        "edit"
+        "edit",
+        "scope"
       ]
     },
     "id": {
@@ -197,6 +198,36 @@
           "text": {
             "type": "string",
             "minLength": 1
+          },
+          "by": {
+            "enum": [
+              "orchestrator",
+              "user"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "op": {
+            "const": "scope"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "scope",
+          "by"
+        ],
+        "properties": {
+          "scope": {
+            "enum": [
+              "auto",
+              "tweak",
+              "new_run"
+            ]
           },
           "by": {
             "enum": [

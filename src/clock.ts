@@ -13,9 +13,11 @@ export interface Clock {
   timebox_s: number;
   wrapup_s: number;
   grace_s: number;
+  /** `followup`: a run after DONE that only handles open feedback, with no time box */
+  kind?: 'run' | 'followup';
 }
 
-export type Mode = 'build' | 'wrapup' | 'overtime' | 'stop';
+export type Mode = 'build' | 'wrapup' | 'overtime' | 'stop' | 'followup';
 
 export interface ClockState {
   mode: Mode;
@@ -26,6 +28,11 @@ export interface ClockState {
 }
 
 const nowS = () => Math.floor(Date.now() / 1000);
+
+/** A follow-up run's clock: active time is still counted, but there is no time box. */
+export function newFollowUpClock(run: string, at = nowIso()): Clock {
+  return { version: 1, run, started_at: at, paused_s: 0, paused_at: null, timebox_s: 0, wrapup_s: 0, grace_s: 0, kind: 'followup' };
+}
 
 export function newClock(run: string, t: Goal['timebox'], at = nowIso()): Clock {
   return {
@@ -47,6 +54,8 @@ export function activeS(c: Clock, now = nowS()): number {
 
 export function clockState(c: Clock, { wrapupMarker = false, now = nowS() } = {}): ClockState {
   const active = activeS(c, now);
+  // No time box: the follow-up ends when the orchestrator says DONE (or at the runner's cycle cap).
+  if (c.kind === 'followup') return { mode: 'followup', active, toWrapup: Infinity, toEnd: Infinity, toHard: Infinity };
   const end = c.timebox_s;
   const wrap = end - c.wrapup_s;
   const hard = end + c.grace_s;

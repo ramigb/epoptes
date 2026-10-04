@@ -70,6 +70,8 @@ There is no daemon. `epoptes start` spawns one detached runner per goal (`setsid
 
 **States** (`status.json.state`): `idle` (never started / after reset), `running` (a cycle is in flight), `waiting` (between cycles), `rate_limited`, `cooldown`, `pausing` (pause requested, cycle finishing), `paused`, `needs_input` (paused because the orchestrator ran `epoptes wait-for-human`; `status.needs` says why), `stopped`, `crashed`, `failed` (gave up after `give_up_after` fails), `done`, `timeboxed` (hard stop reached).
 
+**Follow-up runs.** After DONE (or a finished time box), `start --follow-up` (dashboard: "Follow up on N feedback items") begins a run whose clock has `kind: "followup"` and no time box (`timebox_s: 0`, mode `followup`, `TO_END=none`). It handles only the *follow-up items*: open feedback (`new | seen | in_progress`) that isn't an agent note, an unanswered approval, or marked `scope: new_run`. Before each cycle the runner puts a FOLLOW-UP note in front of the prompt listing them: minor items (a colour, a size, wording, a small bug) get done in place; major ones (a restart, a new version, a change of direction) are marked `blocked "needs a new run: …"`. The human can override per item with `{op: scope, scope: auto | tweak | new_run}`. The run ends when the orchestrator says DONE or no follow-up item is left (the runner then records `done` itself); after 3 cycles without that it pauses with a warning. `run.start` carries `followup: true`; the control action is `follow_up`.
+
 **Runs.** `start` from `idle`, `done`, `timeboxed` or after `reset-clock` begins a new run `r<k>` with a fresh clock. `start` from `paused`, `stopped`, `crashed` or `failed` resumes the current run. Cycle numbers are monotonic per goal across runs; each record carries its `run`.
 
 ### Controls
@@ -90,7 +92,7 @@ There is no daemon. `epoptes start` spawns one detached runner per goal (`setsid
 
 - `active_s = now − started_at − paused_s − (paused_at ? now − paused_at : 0)`
 - Active time only accrues while a runner is live. Pause, stop and crash set `paused_at`; resume adds the gap to `paused_s` and clears it. Rate-limit waits pause the clock when `timebox.pause_on_rate_limit` is true.
-- **Mode**, derived, never stored: `build` while `active < timebox − wrapup`; `wrapup` until `timebox`; `overtime` until `timebox + grace`; then `stop`. `run/WRAPUP` turns `build` into `wrapup` (early finish). `run/DONE` ends the run after the current cycle.
+- **Mode**, derived, never stored: `followup` for a follow-up clock (no time box); otherwise `build` while `active < timebox − wrapup`; `wrapup` until `timebox`; `overtime` until `timebox + grace`; then `stop`. `run/WRAPUP` turns `build` into `wrapup` (early finish). `run/DONE` ends the run after the current cycle.
 - The runner keeps an in-memory copy and restores the file if something deletes it.
 - `run --dry-run` never creates or changes the clock.
 
@@ -228,7 +230,8 @@ epoptes add [dir]                      validate .epoptes/goal.json and register 
 epoptes list
 epoptes status [goal]                  one screen: state, mode, clock, cycle, backlog, handoff head, open feedback
 epoptes clock [goal]                   one line for orchestrators: CYCLE RUN MODE ACTIVE TO_WRAPUP TO_END TO_HARD_STOP CYCLE_ELAPSED
-epoptes start | pause | stop [goal]
+epoptes start | pause | stop [goal]       start: --new-run after DONE; --follow-up to handle open feedback only, no time box
+epoptes feedback <F-n> scope auto|tweak|new_run   how a follow-up treats the item
 epoptes extend [goal] <dur>            e.g. 2h, 30m
 epoptes reset-clock [goal]
 epoptes run [goal] --dry-run           check claude + files + guardrails (lint), print the next cycle's command; never starts the clock

@@ -5,10 +5,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { adapters } from './adapters/index.ts';
 import type { Activity, Cycle, CycleExit } from './adapters/types.ts';
-import { clockState, newClock, runFinished, pauseClock, readClock, resumeClock, writeClock, type Clock, type Mode } from './clock.ts';
-import { emit } from './events.ts';
-import { ingestInbox, pendingSteers, readFeedback, type FeedbackItem } from './feedback.ts';
-import { appendJsonl, exists, nowIso, readJson, rm, writeJson } from './fsx.ts';
+import { clockState, newClock, newFollowUpClock, runFinished, pauseClock, readClock, resumeClock, writeClock, type Clock, type Mode } from './clock.ts';
+import { emit, readEvents } from './events.ts';
+import { followUpItems, ingestInbox, pendingSteers, readFeedback, type FeedbackItem } from './feedback.ts';
+import { appendJsonl, exists, nowIso, readJson, rm, touch, writeJson } from './fsx.ts';
 import { loadGoal, type Goal } from './goal.ts';
 import { goalPaths, type GoalPaths } from './paths.ts';
 import { idleStatus, isAlive, lastCycle, readStatus, writeStatus, type Status } from './status.ts';
@@ -17,6 +17,8 @@ const HEARTBEAT_MS = 15_000;
 const KILL_AFTER_MS = 120_000;
 const MIN_TIMEOUT_MIN = 20;
 const MAX_TIMEOUT_MIN = 180;
+/** A follow-up has no time box; this many cycles without DONE pauses it so it can't run away. */
+export const FOLLOWUP_MAX_CYCLES = 3;
 
 type EndReason = 'done' | 'timebox' | 'paused' | 'needs_you' | 'stopped' | 'failed';
 const END_STATE = { done: 'done', timebox: 'timeboxed', paused: 'paused', needs_you: 'needs_input', stopped: 'stopped', failed: 'failed' } as const;
@@ -90,6 +92,26 @@ export function steerPreamble(items: FeedbackItem[], interrupted: boolean): stri
   ].join('\n');
 }
 
+const SCOPE_NOTE = { auto: 'triage it yourself', tweak: 'the human marked it a quick tweak: do it in place', new_run: '' };
+
+/**
+ * The note in front of loop.md during a follow-up run: handle exactly these feedback items, each judged on its
+ * own, with no time box, and nothing else. Minor items get done; major ones are flagged for a new run.
+ */
+export function followUpPreamble(items: FeedbackItem[]): string {
+  const list = items.map((f) => `>   - ${f.id}: ${JSON.stringify(f.text)} (${f.kind === 'approval' ? `approval ${f.decision}; ` : ''}${SCOPE_NOTE[f.scope]})`).join('\n');
+  return [
+    '> **Epoptes runner: FOLLOW-UP (MODE=followup).** This goal was already finished. The human started a follow-up for their feedback. There is no time box: take the time each item needs, judged on its own, and nothing more. The items:',
+    list,
+    '> For each item you triage:',
+    '> - **Minor** (adjust what exists: a colour, a size, wording, a small bug, a small addition) → do it, verify it, checkpoint, then `epoptes feedback <id> done "<what changed>"`.',
+    '> - **Major** (restart the job, a new version of the output, a change of direction, or more than about one cycle of work) → do not start it. Run `epoptes feedback <id> blocked "needs a new run: <why, and a rough size>"`.',
+    "> Don't pick up backlog tasks, review fixes, agent notes or polish that no item asks for. Skip the wrap-up checklist. When every item is done or blocked, update the handoff, then `epoptes event done \"follow-up: <one line>\"` and exit.",
+    '',
+    '',
+  ].join('\n');
+}
+
 function capWarnings(p: GoalPaths, goal: Goal): string[] {
   const out: string[] = [];
   for (const [file, max] of Object.entries(goal.state_caps)) {
@@ -103,7 +125,7 @@ function capWarnings(p: GoalPaths, goal: Goal): string[] {
   return out;
 }
 
-export async function runGoal(project: string) {
+export async function runGoal(project: string, { followUp = false } = {}) {
   const p = goalPaths(project);
   acquireLock(p);
 
@@ -118,9 +140,11 @@ export async function runGoal(project: string) {
   if (!clock || runFinished(p)) {
     rm(p.done);
     rm(p.wrapup);
-    clock = newClock(nextRunId(clock?.run ?? prev.run), goal.timebox);
+    const id = nextRunId(clock?.run ?? prev.run);
+    clock = followUp ? newFollowUpClock(id) : newClock(id, goal.timebox);
     resumed = false;
   }
+  const isFollowUp = clock.kind === 'followup';
   clock = resumeClock(clock);
   writeClock(p, clock);
   let backup: Clock = clock;
@@ -134,7 +158,7 @@ export async function runGoal(project: string) {
     writeStatus(p, status);
   };
   setStatus({});
-  emit(p, { src: 'runner', type: 'run.start', run, timebox_s: clock.timebox_s, resumed });
+  emit(p, { src: 'runner', type: 'run.start', run, timebox_s: clock.timebox_s, resumed, ...(isFollowUp ? { followup: true } : {}) });
   log(`run ${run} ${resumed ? 'resumed' : 'started'} (pid ${process.pid})`);
 
   // ---- signals, heartbeat, cancellable sleep ----
@@ -239,13 +263,30 @@ export async function runGoal(project: string) {
 
       for (const id of ingestInbox(p)) log(`feedback ${id} ingested from FEEDBACK.md`);
 
+      let preamble = '';
+      if (isFollowUp) {
+        const items = followUpItems(readFeedback(p));
+        if (!items.length) {
+          // Every item is done or flagged for a new run: nothing left to spend a cycle on.
+          touch(p.done);
+          emit(p, { src: 'runner', type: 'done', run, cycle: status.cycle || null, text: 'follow-up: every feedback item is handled' });
+          return finish('done');
+        }
+        const ran = readEvents(p).filter((e) => e.type === 'cycle.start' && e.run === run).length;
+        if (ran >= FOLLOWUP_MAX_CYCLES) {
+          emit(p, { src: 'runner', type: 'warn', run, text: `follow-up paused after ${ran} cycles without DONE; resume to continue, or look at what's left` });
+          return finish('paused');
+        }
+        preamble = followUpPreamble(items);
+      }
+
       const n = lastCycle(p) + 1;
       const timeoutMin = Math.min(MAX_TIMEOUT_MIN, Math.max(MIN_TIMEOUT_MIN, goal.cycle.timeout_min));
-      const timeoutS = Math.max(60, Math.min(timeoutMin * 60, st.toHard));
+      const timeoutS = Math.round(Math.max(60, Math.min(timeoutMin * 60, st.toHard)));
       const cycleDir = p.cycleDir(n);
       fs.mkdirSync(cycleDir, { recursive: true });
       const steers = pendingSteers(readFeedback(p));
-      const prompt = steerPreamble(steers, lastSteered) + fs.readFileSync(path.join(p.root, goal.adapter.prompt), 'utf8');
+      const prompt = steerPreamble(steers, lastSteered) + preamble + fs.readFileSync(path.join(p.root, goal.adapter.prompt), 'utf8');
 
       const spec = {
         cwd: p.project,

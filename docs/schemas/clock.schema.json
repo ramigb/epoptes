@@ -3,16 +3,59 @@
   "$id": "clock.schema.json",
   "title": "Run clock (.epoptes/run/clock.json)",
   "type": "object",
-  "required": ["version", "run", "started_at", "paused_s", "paused_at", "timebox_s", "wrapup_s", "grace_s"],
+  "required": [
+    "version",
+    "run",
+    "started_at",
+    "paused_s",
+    "paused_at",
+    "timebox_s",
+    "wrapup_s",
+    "grace_s"
+  ],
   "additionalProperties": false,
   "properties": {
-    "version": { "const": 1 },
-    "run": { "type": "string", "pattern": "^r[0-9]+$" },
-    "started_at": { "type": "string", "format": "date-time" },
-    "paused_s": { "type": "integer", "minimum": 0 },
-    "paused_at": { "type": ["string", "null"], "format": "date-time" },
-    "timebox_s": { "type": "integer", "minimum": 1 },
-    "wrapup_s": { "type": "integer", "minimum": 0 },
-    "grace_s": { "type": "integer", "minimum": 0 }
+    "version": {
+      "const": 1
+    },
+    "run": {
+      "type": "string",
+      "pattern": "^r[0-9]+$"
+    },
+    "started_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "paused_s": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "paused_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "timebox_s": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "wrapup_s": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "grace_s": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "kind": {
+      "enum": [
+        "run",
+        "followup"
+      ],
+      "default": "run",
+      "description": "followup: a run after DONE that only handles open feedback; it has no time box (timebox_s 0)"
+    }
   }
 }

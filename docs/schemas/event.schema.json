@@ -74,6 +74,10 @@
           },
           "resumed": {
             "type": "boolean"
+          },
+          "followup": {
+            "type": "boolean",
+            "description": "a follow-up run: open feedback only, no time box"
           }
         }
       }
@@ -126,7 +130,8 @@
               "build",
               "wrapup",
               "overtime",
-              "stop"
+              "stop",
+              "followup"
             ]
           },
           "model": {
@@ -256,7 +261,8 @@
               "stop",
               "extend",
               "reset",
-              "steer"
+              "steer",
+              "follow_up"
             ]
           },
           "seconds": {

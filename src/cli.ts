@@ -10,7 +10,7 @@ import { agentsFromDir } from './adapters/claude-code.ts';
 import { readClock, readClockState } from './clock.ts';
 import * as control from './control.ts';
 import { emit } from './events.ts';
-import { addFeedback, editFeedback, ingestInbox, isAgentNote, noteFeedback, pendingApprovals, readFeedback, setFeedbackStatus, STATUSES, type FeedbackItem, type FeedbackStatus } from './feedback.ts';
+import { addFeedback, editFeedback, followUpItems, ingestInbox, isAgentNote, noteFeedback, pendingApprovals, readFeedback, setFeedbackStatus, setScope, STATUSES, type FeedbackItem, type FeedbackStatus, type Scope } from './feedback.ts';
 import { exists, hm, parseDuration, readJson, touch } from './fsx.ts';
 import { loadGoal } from './goal.ts';
 import { lintGoal } from './lint.ts';
@@ -30,6 +30,7 @@ Goals
 
 Runs
   start [goal] [--new-run]        resume, or start (spawns a detached runner); --new-run after DONE / time box over
+        [--follow-up]             after DONE: handle just the open feedback, no time box (minor fixes in place)
   pause [goal]                    pause after the current cycle (the clock pauses too)
   stop [goal]                     stop now; the next cycle recovers interrupted work
   extend [goal] <dur>             lengthen the time box, e.g. 2h, 30m, 1h30m
@@ -43,6 +44,7 @@ Steering
   feedback <F-n> <status> [note]  set status: ${STATUSES.join(', ')}
   feedback <F-n> note "<text>"    comment on an item
   feedback <F-n> edit "<text>"    change an item's text (e.g. correct an agent note)
+  feedback <F-n> scope <s>        for follow-ups: auto (the agent triages) | tweak | new_run
   feedback <F-n> approve|reject [note]  answer an approval request
   event <type> "<text>"           milestone | blocked | note | artifact | round | wrapup | done
 
@@ -78,6 +80,8 @@ function feedbackLine(f: FeedbackItem): string {
   if (f.kind === 'approval') tag = f.decision ? `[approval: ${f.decision.toUpperCase()}${decisionNote(f)}] ` : '[approval: waiting for the human; do not do it yet] ';
   else if (isAgentNote(f)) tag = f.edited ? '[agent note, edited by the human] ' : '[agent note] ';
   else if (f.steer) tag = '[STEERING: replan around this first] ';
+  if (f.scope === 'tweak') tag += '[quick tweak] ';
+  if (f.scope === 'new_run') tag += '[needs a new run] ';
   return `${f.id.padEnd(6)} ${f.status.padEnd(12)} ${tag}${f.text}${f.ref ? ` (${f.ref})` : ''}`;
 }
 const decisionNote = (f: FeedbackItem) => {
@@ -98,7 +102,8 @@ function statusText(project: string): string {
   out.push(`state ${s.state}${pid}${s.pause_requested ? ' · pause requested' : ''} · run ${s.run ?? '–'} · cycle ${s.cycle || '–'} · mode ${s.mode ?? '–'}`);
   const cs = readClockState(p);
   const c = readClock(p);
-  if (cs && c) {
+  if (cs && c && c.kind === 'followup') out.push(`clock ${hm(cs.active)} active · follow-up, no time box${c.paused_at ? ' · paused' : ''}`);
+  else if (cs && c) {
     out.push(`clock ${hm(cs.active)} active of ${hm(c.timebox_s)} · wrap-up in ${hm(cs.toWrapup)} · end in ${hm(cs.toEnd)} · hard stop in ${hm(cs.toHard)}${c.paused_at ? ' · paused' : ''}`);
   } else out.push('clock not started');
   if (s.state === 'needs_input') out.push(`WAITING FOR YOU (${ago(s.needs?.since ?? null)}): ${s.needs?.reason ?? 'the orchestrator needs you'}`);
@@ -114,6 +119,8 @@ function statusText(project: string): string {
   if (fb.length) {
     const n = (st: FeedbackStatus[]) => fb.filter((f) => st.includes(f.status)).length;
     out.push(`feedback ${n(['new'])} new · ${n(['seen', 'in_progress'])} open · ${n(['blocked'])} blocked · ${n(['done', 'wont_do'])} closed`);
+    const fu = followUpItems(fb).length;
+    if (fu && s.state === 'done') out.push(`  ${fu} open item${fu > 1 ? 's' : ''} since DONE: \`epoptes start --follow-up\` handles just those (no time box)`);
     for (const f of fb.filter((x) => x.steer && x.status === 'new')) out.push(`  steering ${f.id} waits for the next cycle: ${f.text}`);
     for (const f of pendingApprovals(fb)) out.push(`  approval ${f.id} waits for you: ${f.text}  (epoptes feedback ${f.id} approve|reject ["note"])`);
   }
@@ -169,6 +176,7 @@ async function main(argv: string[]) {
     options: {
       'dry-run': { type: 'boolean' },
       'new-run': { type: 'boolean' },
+      'follow-up': { type: 'boolean' },
       steer: { type: 'boolean' },
       open: { type: 'boolean' },
       md: { type: 'boolean' },
@@ -198,7 +206,7 @@ async function main(argv: string[]) {
       console.log(HELP);
       return;
     case '_run': // internal: the detached runner process
-      await runGoal(rest[0]);
+      await runGoal(rest[0], { followUp: Boolean(values['follow-up']) });
       return;
     case 'add': {
       const goal = addGoal(path.resolve(rest[0] ?? '.'));
@@ -230,7 +238,8 @@ async function main(argv: string[]) {
       const s = reconcile(p);
       if (!c || !cs) return console.log(`CYCLE=${s.cycle} MODE=none (clock not started)`);
       const elapsed = s.cycle_started_at ? ` CYCLE_ELAPSED=${hm((Date.now() - Date.parse(s.cycle_started_at)) / 1000)}` : '';
-      console.log(`CYCLE=${envCycle() ?? s.cycle} RUN=${c.run} MODE=${cs.mode} ACTIVE=${hm(cs.active)} TO_WRAPUP=${hm(cs.toWrapup)} TO_END=${hm(cs.toEnd)} TO_HARD_STOP=${hm(cs.toHard)}${elapsed}`);
+      const left = (x: number) => (Number.isFinite(x) ? hm(x) : 'none');
+      console.log(`CYCLE=${envCycle() ?? s.cycle} RUN=${c.run} MODE=${cs.mode} ACTIVE=${hm(cs.active)} TO_WRAPUP=${left(cs.toWrapup)} TO_END=${left(cs.toEnd)} TO_HARD_STOP=${left(cs.toHard)}${elapsed}`);
       return;
     }
     case 'skill': {
@@ -254,8 +263,9 @@ async function main(argv: string[]) {
       return;
     }
     case 'start': {
-      const s = await control.start(resolveGoal(goalArg()), { newRun: Boolean(values['new-run']) });
-      console.log(`started: run ${s.run}, runner pid ${s.pid}`);
+      const followUp = Boolean(values['follow-up']);
+      const s = await control.start(resolveGoal(goalArg()), { newRun: Boolean(values['new-run']), followUp });
+      console.log(`started${followUp ? ' a follow-up' : ''}: run ${s.run}, runner pid ${s.pid}`);
       return;
     }
     case 'pause':
@@ -290,6 +300,9 @@ async function main(argv: string[]) {
         if (what === 'note') {
           noteFeedback(p, id, text.join(' '), by, envCycle());
           console.log(`${id}: note added`);
+        } else if (what === 'scope') {
+          setScope(p, id, text[0] as Scope);
+          console.log(`${id}: scope ${text[0]}`);
         } else if (what === 'edit') {
           editFeedback(p, id, text.join(' '), by);
           console.log(`${id}: text changed`);

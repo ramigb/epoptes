@@ -3,7 +3,7 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import { readClock, runFinished, writeClock } from './clock.ts';
 import { emit, readEvents } from './events.ts';
-import { addFeedback, decideApproval, pendingApprovals, readFeedback, type Decision, type Src } from './feedback.ts';
+import { addFeedback, decideApproval, followUpItems, pendingApprovals, readFeedback, type Decision, type Src } from './feedback.ts';
 import { exists, nowIso, rm, writeJson } from './fsx.ts';
 import { adapters } from './adapters/index.ts';
 import { loadGoal } from './goal.ts';
@@ -17,7 +17,7 @@ const isLive = (s: Status) => LIVE_STATES.includes(s.state);
  * run is over (DONE, or past its hard stop) only starts again with newRun, because a new run spends tokens
  * and finds work only if feedback or backlog tasks were added since.
  */
-export async function start(project: string, { newRun = false } = {}): Promise<Status> {
+export async function start(project: string, { newRun = false, followUp = false } = {}): Promise<Status> {
   const p = goalPaths(project);
   const goal = loadGoal(p); // fail fast on an invalid goal
   const s = reconcile(p);
@@ -26,17 +26,22 @@ export async function start(project: string, { newRun = false } = {}): Promise<S
   const check = await adapters[goal.adapter.type].check();
   if (!check.ok) throw new Error(check.problem);
   const finished = runFinished(p);
-  if (finished && !newRun) {
+  const open = followUpItems(readFeedback(p)).length;
+  if (followUp) {
+    if (!finished) throw new Error('a follow-up is for a finished goal; this run is still going, so feedback reaches it anyway');
+    if (!open) throw new Error('no open feedback to follow up on. Add some first (`epoptes feedback "<text>"`).');
+  } else if (finished && !newRun) {
+    const hint = open ? ` You have ${open} open feedback item${open > 1 ? 's' : ''}: \`epoptes start --follow-up\` handles just those, with no time box.` : '';
     throw new Error(
       exists(p.done)
-        ? 'this goal is done. Starting again begins a new run with a fresh time box, and the orchestrator only finds work if you added feedback or backlog tasks. Use `epoptes start --new-run` to do it anyway.'
-        : 'the time box is over. Use `epoptes extend <dur>` to continue this run, or `epoptes start --new-run` to begin a new one.',
+        ? `this goal is done.${hint} \`epoptes start --new-run\` begins a new run with a fresh time box (the orchestrator only finds work if you added feedback or backlog tasks).`
+        : `the time box is over.${hint} Use \`epoptes extend <dur>\` to continue this run, or \`epoptes start --new-run\` to begin a new one.`,
     );
   }
   const action = finished || !readClock(p) ? 'start' : 'resume';
   fs.mkdirSync(p.run, { recursive: true });
   const out = fs.openSync(p.runnerLog, 'a');
-  const child = spawn(process.execPath, [...process.execArgv, process.argv[1], '_run', p.project], {
+  const child = spawn(process.execPath, [...process.execArgv, process.argv[1], '_run', p.project, ...(followUp ? ['--follow-up'] : [])], {
     cwd: p.project,
     detached: true,
     stdio: ['ignore', out, out],
@@ -44,7 +49,7 @@ export async function start(project: string, { newRun = false } = {}): Promise<S
   });
   child.unref();
   fs.closeSync(out);
-  emit(p, { src: 'user', type: 'control', run: s.run, action });
+  emit(p, { src: 'user', type: 'control', run: s.run, action: followUp ? 'follow_up' : action });
 
   // Confirm with the runner's run.start event: a short run can already be over by the first poll.
   const spawnedAt = Date.now() - 1000;
