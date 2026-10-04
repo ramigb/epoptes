@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
+import { backlogMilestones } from '../src/summary.ts';
 import { agentsFromDir, parseFrontmatter, StreamParser } from '../src/adapters/claude-code.ts';
 import { activeS, clockState, newClock, pauseClock, resumeClock, readClock, writeClock } from '../src/clock.ts';
 import { addFeedback, ingestInbox, readFeedback, setFeedbackStatus } from '../src/feedback.ts';
@@ -172,4 +173,23 @@ test('skill templates: goal.json validates once filled in, and every template fi
   assert.equal(data.name, 'epoptes');
   assert.ok(data.description.length > 50);
   for (const ref of skill.matchAll(/\]\(([^)#]+)\)/g)) assert.ok(fs.existsSync(new URL(`../plugin/skills/epoptes/${ref[1]}`, import.meta.url)), `SKILL.md links to missing ${ref[1]}`);
+});
+
+test('milestones from backlog headings, with targets and task counts', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'epoptes-ms-'));
+  fs.mkdirSync(path.join(dir, '.epoptes', 'state'), { recursive: true });
+  fs.writeFileSync(path.join(dir, '.epoptes', 'state', 'backlog.md'), [
+    '# Backlog', '', '**Current milestone: M2 · Templates**', '',
+    '## Feedback (from `epoptes feedback`)', '- [ ] F-1 bigger title', '',
+    '## M1 · Form works (target 0:40)', '- [x] M1-1 a', '- [x] M1-2 b', '- [cut] M1-3 c', '',
+    '## M2 · Templates (target 1:20)', '- [x] M2-1 a', '- [~] M2-2 b', '- [blocked: needs approval F-3] M2-3 c', '- [ ] M2-4 d', '',
+    '## Review fixes', '- [ ] R-1 [high] x', '',
+    '### M3: Polish', '- [ ] M3-1 a',
+  ].join('\n'));
+  const ms = backlogMilestones(goalPaths(dir));
+  assert.deepEqual(ms.map((m) => [m.id, m.title, m.target_s, m.done, m.doing, m.blocked, m.cut, m.todo, m.current]), [
+    ['M1', 'Form works', 2400, 2, 0, 0, 1, 0, false],
+    ['M2', 'Templates', 4800, 1, 1, 1, 0, 1, true],
+    ['M3', 'Polish', null, 0, 0, 0, 0, 1, false],
+  ]);
 });

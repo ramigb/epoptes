@@ -278,16 +278,43 @@ function ClockBar({ g, big }) {
   const w = Math.min(100, (active / total) * 100);
   const wrapStart = ((c.timebox_s - c.wrapup_s) / total) * 100;
   const cls = c.paused ? 'paused' : g.wrapup_marker && c.clock_mode === 'build' ? 'wrapup' : c.clock_mode;
-  return html`<div class="clockbar ${big ? 'big' : ''}">
-    <div class="track" role="progressbar" aria-valuemin="0" aria-valuemax=${c.timebox_s} aria-valuenow=${Math.round(active)} aria-label="Active time">
-      <div class="zone-wrap" style=${{ left: `${wrapStart}%`, width: `${(c.wrapup_s / total) * 100}%` }}></div>
-      <div class="fill ${cls}" style=${{ width: `${w}%` }}></div>
+  const marks = milestoneMarks(g.milestones ?? [], active, total);
+  return html`<div class="clockbar ${big ? 'big' : ''} ${marks.length ? 'has-ms' : ''}">
+    <div class="track-wrap">
+      <div class="track" role="progressbar" aria-valuemin="0" aria-valuemax=${c.timebox_s} aria-valuenow=${Math.round(active)} aria-label="Active time">
+        <div class="zone-wrap" style=${{ left: `${wrapStart}%`, width: `${(c.wrapup_s / total) * 100}%` }}></div>
+        <div class="fill ${cls}" style=${{ width: `${w}%` }}></div>
+      </div>
+      ${marks.map((m) => html`<span key=${m.id} class="ms-tick ${m.state}" style=${{ left: `${m.pos}%` }} title=${m.tip}></span>`)}
+      ${marks.filter((m) => m.reachedPos != null).map((m) => html`<span key=${`r${m.id}`} class="ms-hit ${m.state}" style=${{ left: `${m.reachedPos}%` }} title=${m.tip}></span>`)}
     </div>
+    ${big && marks.length > 0 && html`<div class="ms-labels" aria-hidden="true">${marks.map((m) => html`<span key=${m.id} class="${m.state} ${m.current ? 'current' : ''}" style=${{ left: `${m.pos}%` }}>${m.id}${m.state === 'overdue' ? ' overdue' : m.state === 'late' ? ' (late)' : ''}</span>`)}</div>`}
     <div class="labels">
       <span class="num">${dur(active)} active${c.paused ? ' · clock paused' : ''}</span>
       <span class="num">${c.to_end > 0 ? `${dur(c.timebox_s - active)} left of ${dur(c.timebox_s)}` : `over by ${dur(active - c.timebox_s)}`}</span>
     </div>
   </div>`;
+}
+
+/**
+ * Milestone targets on the time track, coloured by how they went: reached on time, reached late, overdue (the
+ * current one, past its target), or upcoming. Reached milestones also get a dot where they actually landed.
+ */
+function milestoneMarks(milestones, active, total) {
+  return milestones
+    .filter((m) => m.target_s != null && m.target_s <= total)
+    .map((m) => {
+      const reachedAt = m.reached?.active_s ?? null;
+      const finished = m.reached || (m.todo + m.doing === 0 && m.done > 0);
+      const state = finished ? (reachedAt != null && reachedAt > m.target_s ? 'late' : 'ontime') : m.current && active > m.target_s ? 'overdue' : m.current ? 'current' : 'upcoming';
+      const words = { ontime: 'reached on time', late: 'reached late', overdue: 'overdue', current: 'in progress', upcoming: 'upcoming' }[state];
+      const when = reachedAt != null ? ` · reached at ${dur(reachedAt)}` : '';
+      return {
+        id: m.id, current: m.current, state, pos: (m.target_s / total) * 100,
+        reachedPos: reachedAt != null ? Math.min(100, (reachedAt / total) * 100) : null,
+        tip: `${m.id} ${m.title}: target ${dur(m.target_s)}${when} · ${words}`,
+      };
+    });
 }
 
 // ---------------------------------------------------------------- top bar
@@ -819,17 +846,35 @@ function Feedback({ d }) {
   </section>`;
 }
 
+/** Backlog progress split by milestone: one segment per milestone, width by task count, filled by state. */
+function MilestoneBar({ ms }) {
+  return html`<div class="ms-bar" role="list" aria-label="Progress by milestone">
+    ${ms.map((m) => {
+      const n = m.todo + m.doing + m.done + m.blocked + m.cut;
+      const finished = m.todo + m.doing === 0;
+      const tip = `${m.id} ${m.title}${m.target_s != null ? ` (target ${dur(m.target_s)})` : ''}\n${m.done} done · ${m.doing} in progress · ${m.blocked} blocked · ${m.cut} cut · ${m.todo} to do${m.reached ? `\nreached ${ago(m.reached.at)}` : ''}`;
+      return html`<div key=${m.id} role="listitem" class="ms-seg ${m.current ? 'current' : ''}" style=${{ flexGrow: n }} title=${tip}>
+        <div class="progress"><span class="done" style=${{ flexGrow: m.done }}></span><span class="doing" style=${{ flexGrow: m.doing }}></span><span class="blocked" style=${{ flexGrow: m.blocked }}></span><span class="cut" style=${{ flexGrow: m.cut }}></span><span style=${{ flexGrow: m.todo }}></span></div>
+        <div class="ms-name"><b>${m.id}</b> ${finished ? '✓' : `${m.done}/${n}`}</div>
+      </div>`;
+    })}
+  </div>`;
+}
+
 function Backlog({ d }) {
   const b = d.backlog;
   if (!b) return html`<section class="panel"><h2>Backlog</h2><p class="empty">No state/backlog.md yet.</p></section>`;
   const order = { doing: 0, blocked: 1, todo: 2 };
   const open = d.backlog_items.filter((t) => t.mark in order).sort((a, b) => order[a.mark] - order[b.mark]);
   const total = b.todo + b.doing + b.done + b.blocked + b.cut;
+  const ms = (d.milestones ?? []).filter((m) => m.todo + m.doing + m.done + m.blocked + m.cut > 0);
   return html`<section class="panel">
     <h2>Backlog <span class="right muted">${b.milestone ? `milestone ${b.milestone}` : ''}</span></h2>
-    <div class="progress" title=${`${b.done} done · ${b.doing} in progress · ${b.blocked} blocked · ${b.cut} cut · ${b.todo} to do`}>
+    ${ms.length > 1
+      ? html`<${MilestoneBar} ms=${ms} />`
+      : html`<div class="progress" title=${`${b.done} done · ${b.doing} in progress · ${b.blocked} blocked · ${b.cut} cut · ${b.todo} to do`}>
       <span class="done" style=${{ flexGrow: b.done }}></span><span class="doing" style=${{ flexGrow: b.doing }}></span><span class="blocked" style=${{ flexGrow: b.blocked }}></span><span class="cut" style=${{ flexGrow: b.cut }}></span><span style=${{ flexGrow: b.todo }}></span>
-    </div>
+    </div>`}
     <div class="muted num" style=${{ fontSize: '12.5px' }}>${b.done} of ${total} done · ${b.doing} in progress · ${b.blocked} blocked${b.cut ? ` · ${b.cut} cut` : ''}</div>
     ${open.length > 0 &&
     html`<ul class="tasks">

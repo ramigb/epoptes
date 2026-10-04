@@ -123,6 +123,8 @@ Envelope: `{ts, run, cycle, src: runner | orchestrator | user, type, ...payload}
 | orchestrator | `round` | `n` |
 | orchestrator | `wrapup`, `done` | `text` (the CLI also creates `run/WRAPUP` / `run/DONE`) |
 
+`milestone`, `wrapup` and `done` events from the CLI also carry `active_s` (active time when recorded), so the dashboard can place them on the clock.
+
 Feedback changes are **not** duplicated here; they live in `feedback.jsonl`.
 
 ## feedback.jsonl — `feedback.schema.json`
@@ -164,7 +166,7 @@ The skill generates these with caps in `goal.json.state_caps`. The dashboard rea
 | file | contract |
 |---|---|
 | `handoff.md` | overwritten each cycle, ≤ 25 lines; the dashboard shows it verbatim |
-| `backlog.md` | task lines `- [ ] <ID> <text>`; markers `[ ]` todo, `[~]` in progress, `[x]` done, `[blocked: why]`, `[cut]`. A line `**Current milestone: <name>**` is optional. The dashboard counts markers for backlog progress |
+| `backlog.md` | task lines `- [ ] <ID> <text>`; markers `[ ]` todo, `[~]` in progress, `[x]` done, `[blocked: why]`, `[cut]`. A line `**Current milestone: <name>**` is optional. Milestone headings `## M<n> · <title> (target h:mm)` group the tasks below them until the next heading; the target is active time from the start of the run. The dashboard counts markers for backlog progress, splits the progress bar by milestone, and marks each target on the clock bar (reached on time, late, overdue, upcoming) with a dot where the `milestone` event that names it (`"M2: …"`) actually landed. `epoptes clock` adds `MILESTONE=<id> M_TARGET=<h:mm>` for the current one |
 | `progress.md` | table, one row per round: `\| c<N> \| <elapsed> \| <task ids> \| ok/blocked \| <note> \|` |
 | `lessons.md` | ≤ 30 lines of rules |
 | `decisions.md` | append-only `date · decision · why` |

@@ -9,7 +9,7 @@ import { exists, nowIso, readJson, readJsonl, writeJson } from '../fsx.ts';
 import { loadGoal, type Goal } from '../goal.ts';
 import { epoptesHome } from '../paths.ts';
 import { LIVE_STATES } from '../status.ts';
-import { totalCost, backlogCounts, backlogItems } from '../summary.ts';
+import { totalCost, backlogCounts, backlogItems, backlogMilestones } from '../summary.ts';
 import type { GoalWatch } from './watch.ts';
 
 type Result = CycleResult & { version: 1; cycle: number; run: string };
@@ -90,6 +90,18 @@ function commits(w: GoalWatch, goal: Goal) {
   return list;
 }
 
+// ---------- milestones ----------
+
+/** Backlog milestones, each with when it was reached (its latest `milestone` event naming it, e.g. "M2: …"). */
+function milestones(w: GoalWatch, run: string | null) {
+  return backlogMilestones(w.p).map((m) => {
+    const re = new RegExp(`^${m.id}\\b`, 'i');
+    const e = w.events.items.findLast((x) => x.type === 'milestone' && re.test(String(x.text ?? '')));
+    const reached = e ? { at: e.ts, run: e.run, active_s: e.run === run && typeof e.active_s === 'number' ? e.active_s : null } : null;
+    return { ...m, reached };
+  });
+}
+
 // ---------- views ----------
 
 const median = (xs: number[]) => {
@@ -144,6 +156,7 @@ export function summary(w: GoalWatch) {
     clock: c && cs ? { active: cs.active, timebox_s: c.timebox_s, wrapup_s: c.wrapup_s, grace_s: c.grace_s, to_end: Number.isFinite(cs.toEnd) ? cs.toEnd : null, paused: Boolean(c.paused_at), clock_mode: cs.mode, followup: c.kind === 'followup' } : null,
     followup_items: followUpItems(items).length,
     backlog: backlogCounts(p),
+    milestones: milestones(w, s?.run ?? null),
     cycles: results.length,
     cost_usd: totalCost(results),
     cost_basis: results.some((r) => r.cost_basis === 'estimate') || !results.length ? 'estimate' : 'billed',

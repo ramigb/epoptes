@@ -39,6 +39,61 @@ export function backlogCounts(p: GoalPaths): BacklogCounts | null {
   return c;
 }
 
+export interface Milestone {
+  id: string;
+  title: string;
+  /** planned active time by which it should be done (the heading's "(target h:mm)"), or null */
+  target_s: number | null;
+  todo: number;
+  doing: number;
+  done: number;
+  blocked: number;
+  cut: number;
+  current: boolean;
+}
+
+const MILESTONE_HEADING = /^#{2,3}\s+(M\d+[a-z]?)\b\s*[·:—–-]?\s*(.*?)\s*$/i;
+const TARGET = /\(target\s+(\d+):(\d{2})\)/i;
+
+/**
+ * Milestones from state/backlog.md headings like `## M2 · Templates (target 1:20)`, with the task markers under
+ * each. Any other heading (Feedback, Review fixes) ends the milestone above it.
+ */
+export function backlogMilestones(p: GoalPaths): Milestone[] {
+  let text: string;
+  try {
+    text = fs.readFileSync(path.join(p.state, 'backlog.md'), 'utf8');
+  } catch {
+    return [];
+  }
+  const out: Milestone[] = [];
+  let cur: Milestone | null = null;
+  let current: string | null = null;
+  for (const line of text.split('\n')) {
+    const ms = /\*\*Current milestone:\s*([^*]+)\*\*/.exec(line);
+    if (ms && !current) current = ms[1].trim().split(/[\s·:]/)[0];
+    if (/^#{1,3}\s/.test(line)) {
+      const h = MILESTONE_HEADING.exec(line);
+      if (h) {
+        const t = TARGET.exec(h[2]);
+        cur = { id: h[1].toUpperCase(), title: h[2].replace(TARGET, '').trim(), target_s: t ? Number(t[1]) * 3600 + Number(t[2]) * 60 : null, todo: 0, doing: 0, done: 0, blocked: 0, cut: 0, current: false };
+        out.push(cur);
+      } else cur = null;
+      continue;
+    }
+    const m = /^\s*[-*]\s+\[([^\]]*)\]/.exec(line);
+    if (!m || !cur) continue;
+    const mark = m[1].trim().toLowerCase();
+    if (mark === '') cur.todo++;
+    else if (mark === '~') cur.doing++;
+    else if (mark === 'x') cur.done++;
+    else if (mark.startsWith('blocked')) cur.blocked++;
+    else if (mark === 'cut') cur.cut++;
+  }
+  for (const m of out) m.current = m.id === current?.toUpperCase();
+  return out;
+}
+
 export interface BacklogItem {
   mark: 'todo' | 'doing' | 'done' | 'blocked' | 'cut';
   text: string;

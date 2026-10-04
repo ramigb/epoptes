@@ -193,6 +193,24 @@ main { max-width: 1320px; margin: 0 auto; padding: 24px; }
 @keyframes march { to { background-position: 40px 0; } }
 .chip.followup { color: var(--done); }
 .clockbar .labels { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); }
+.clockbar .track-wrap { position: relative; }
+.ms-tick { position: absolute; top: -4px; bottom: -4px; width: 3px; margin-left: -1.5px; border-radius: 1px; background: var(--faint); box-shadow: 0 0 0 1px var(--panel); }
+.ms-tick.ontime { background: var(--ok); }
+.ms-tick.late, .ms-tick.overdue { background: var(--warn); }
+.ms-tick.current { background: var(--ink); }
+.ms-hit { position: absolute; top: 50%; width: 10px; height: 10px; margin: -5px 0 0 -5px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 2px var(--bg); }
+.ms-hit.late { background: var(--warn); }
+.ms-labels { position: relative; height: 14px; font-size: 11px; color: var(--faint); }
+.ms-labels span { position: absolute; transform: translateX(-50%); white-space: nowrap; }
+.ms-labels .current, .ms-labels .overdue { color: var(--ink); font-weight: 600; }
+.ms-bar { display: flex; gap: 2px; margin-bottom: 8px; }
+.ms-seg { min-width: 28px; display: grid; gap: 4px; }
+.ms-seg .progress { margin-bottom: 0; border-radius: 3px; }
+.ms-seg:first-child .progress { border-radius: 5px 3px 3px 5px; }
+.ms-seg:last-child .progress { border-radius: 3px 5px 5px 3px; }
+.ms-seg .ms-name { font-size: 11.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ms-seg.current .ms-name { color: var(--ink); }
+.ms-seg.current .ms-name b::after { content: ' ●'; font-size: 8px; vertical-align: 2px; color: var(--accent); }
 
 /* ---------- goal detail ---------- */
 .back { display: inline-flex; gap: 6px; align-items: center; color: var(--muted); text-decoration: none; margin-bottom: 12px; font-size: 13px; }

@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { adapters } from './adapters/index.ts';
 import { agentsFromDir } from './adapters/claude-code.ts';
-import { readClock, readClockState } from './clock.ts';
+import { activeS, readClock, readClockState } from './clock.ts';
 import * as control from './control.ts';
 import { emit } from './events.ts';
 import { addFeedback, editFeedback, followUpItems, ingestInbox, isAgentNote, noteFeedback, pendingApprovals, readFeedback, setFeedbackStatus, setScope, STATUSES, type FeedbackItem, type FeedbackStatus, type Scope } from './feedback.ts';
@@ -18,7 +18,7 @@ import { epoptesHome, goalPaths } from './paths.ts';
 import { addGoal, readRegistry, resolveGoal } from './registry.ts';
 import { runGoal } from './runner.ts';
 import { reconcile } from './status.ts';
-import { backlogCounts, lastResult, money, readHead } from './summary.ts';
+import { backlogCounts, backlogMilestones, lastResult, money, readHead } from './summary.ts';
 
 const HELP = `epoptes: create, run, watch and steer long-running Claude Code or Codex harnesses
 
@@ -239,7 +239,10 @@ async function main(argv: string[]) {
       if (!c || !cs) return console.log(`CYCLE=${s.cycle} MODE=none (clock not started)`);
       const elapsed = s.cycle_started_at ? ` CYCLE_ELAPSED=${hm((Date.now() - Date.parse(s.cycle_started_at)) / 1000)}` : '';
       const left = (x: number) => (Number.isFinite(x) ? hm(x) : 'none');
-      console.log(`CYCLE=${envCycle() ?? s.cycle} RUN=${c.run} MODE=${cs.mode} ACTIVE=${hm(cs.active)} TO_WRAPUP=${left(cs.toWrapup)} TO_END=${left(cs.toEnd)} TO_HARD_STOP=${left(cs.toHard)}${elapsed}`);
+      // The current milestone's target lets the orchestrator see whether it's ahead of or behind plan.
+      const m = backlogMilestones(p).find((x) => x.current);
+      const ms = m ? ` MILESTONE=${m.id}${m.target_s != null ? ` M_TARGET=${hm(m.target_s)}` : ''}` : '';
+      console.log(`CYCLE=${envCycle() ?? s.cycle} RUN=${c.run} MODE=${cs.mode} ACTIVE=${hm(cs.active)} TO_WRAPUP=${left(cs.toWrapup)} TO_END=${left(cs.toEnd)} TO_HARD_STOP=${left(cs.toHard)}${elapsed}${ms}`);
       return;
     }
     case 'skill': {
@@ -367,13 +370,16 @@ async function main(argv: string[]) {
       const p = goalPaths(resolveGoal(values.goal));
       const s = reconcile(p);
       const base = { src: inCycle() ? ('orchestrator' as const) : ('user' as const), type, run: process.env.EPOPTES_RUN ?? s.run, cycle: envCycle() ?? (s.cycle || null) };
+      // Active time at the event puts milestones on the clock bar (wall time would include pauses).
+      const clock = readClock(p);
+      const at = ['milestone', 'wrapup', 'done'].includes(type) && clock ? { active_s: activeS(clock) } : {};
       if (type === 'round') emit(p, { ...base, n: Number(text[0]) || 1 });
       else if (type === 'artifact') {
         if (!text[0]) throw new Error('usage: epoptes event artifact <path> ["text"]');
         emit(p, { ...base, path: text[0], ...(text[1] ? { text: text.slice(1).join(' ') } : {}) });
       } else {
         if (!text.length) throw new Error(`usage: epoptes event ${type} "<text>"`);
-        emit(p, { ...base, text: text.join(' ') });
+        emit(p, { ...base, ...at, text: text.join(' ') });
       }
       if (type === 'done') touch(p.done);
       if (type === 'wrapup') touch(p.wrapup);

@@ -43,7 +43,9 @@ Don't read deliverables, transcripts or logs up front. If a worker's report is u
 | stop | checkpoint whatever is verified, write the handoff, exit now |
 | followup | the goal was already DONE; follow the runner's FOLLOW-UP note at the top of this prompt: only the listed feedback items, minor ones fixed in place, major ones flagged for a new run |
 
-**Early finish:** in build mode, when every task except `low` fixes is `[x]`, `[cut]` or `[blocked…]` and every done check passes, run `epoptes event wrapup "<why>"`. The mode then reads `wrapup` for the rest of the run; start the checklist (§6).
+**Early finish (milestones):** a milestone is done when its tasks are `[x]`, `[cut]` or `[blocked…]` and its checks pass, not when its target time arrives. Then, right away: `epoptes event milestone "<M-id>: <what now works>"`, move the "Current milestone" line, and start the next milestone in this cycle if the round caps allow. Never pad a milestone with polish to fill its target. `epoptes clock` shows `MILESTONE=` and `M_TARGET=`: if ACTIVE is past M_TARGET by more than half the milestone's planned length, shrink what's left of it (cut or simplify nice-to-have tasks) and log that in `state/decisions.md`.
+
+**Early finish (whole goal):** in build mode, when every task except `low` fixes is `[x]`, `[cut]` or `[blocked…]` and every done check passes, run `epoptes event wrapup "<why>"`. The mode then reads `wrapup` for the rest of the run; start the checklist (§6).
 
 The runner kills the cycle at the hard stop, so never start work you can't finish before it.
 
@@ -69,7 +71,7 @@ The runner kills the cycle at the hard stop, so never start work you can't finis
    - `state/handoff.md`: **overwrite** it, ≤ 25 lines: what exists, anything half-done, the next 3 tasks, gotchas.
    - `state/lessons.md`: add a rule only when a mistake cost more than one fix round and could recur. ≤ 30 lines; replace stale rules.
    - **Agent notes:** when this cycle learned something the next cycle must act on before carrying on (above all a research finding that changes the plan, or a missing prerequisite), file it with `epoptes feedback "<what to do, and why>"`. The human sees it and may edit or dismiss it; the next cycle triages it like feedback. Ordinary tasks go in the backlog, not here.
-   - Milestone reached (all its tasks `[x]`, or at least n done when that's the trigger): `epoptes event milestone "<M-id>: <what now works>"`.
+   - Milestone reached (all its tasks `[x]`, or at least n done when that's the trigger): `epoptes event milestone "<M-id>: <what now works>"`, starting the text with the milestone id exactly as in the backlog heading (the dashboard matches on it). Do it as soon as it's true, even if early (§2).
 8. **Next round or exit.** Start another round only if the MODE is unchanged, `CYCLE_ELAPSED` < {{SOFT_CAP_MIN}} min, and this cycle has had fewer than 3 rounds. Run `epoptes event round <n>` when you start round n ≥ 2. Otherwise make sure step 7 is done and end with a one-line summary. Fresh contexts are cheap; a bloated one gets expensive and sloppy.
 
 ## 4. Brief template (use it for every dispatch)

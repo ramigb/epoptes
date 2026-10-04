@@ -139,6 +139,9 @@ test('pause after this cycle, extend, feedback and events from the CLI', async (
   assert.equal(fb[2].by, 'orchestrator');
   const ms = g.events().find((e) => e.type === 'milestone');
   assert.deepEqual([ms.src, ms.cycle, ms.text], ['orchestrator', 4, 'M1 done']);
+  assert.equal(typeof ms.active_s, 'number', 'milestones record active time for the clock bar');
+  fs.writeFileSync(path.join(g.root, 'state', 'backlog.md'), '**Current milestone: M2**\n## M1 · A (target 0:40)\n- [x] M1-1 a\n## M2 · B (target 1:20)\n- [ ] M2-1 b\n');
+  assert.match(g.run(['clock', g.project]), / MILESTONE=M2 M_TARGET=1h20m$/m);
   assert.match(g.run(['status', g.project]), /feedback 0 new · 0 open · 0 blocked · 1 closed/);
 
   // Inside a cycle, adding feedback files an agent note; the human can correct or dismiss it.

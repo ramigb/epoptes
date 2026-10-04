@@ -300,6 +300,10 @@
           },
           "ref": {
             "type": "string"
+          },
+          "active_s": {
+            "type": "integer",
+            "description": "active time when the event was recorded (milestone, wrapup, done)"
           }
         }
       }

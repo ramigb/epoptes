@@ -10,6 +10,7 @@
 
 ## Review fixes
 
+<!-- template: Milestone headings must keep the shape `## M<n> · <title> (target h:mm)`: the target is the active time by which it should be done, counted from the start of the run. The dashboard draws these on the clock bar and splits the progress bar by them. -->
 ## M1 · {{first milestone: what is checkable at the end}} (target {{h:mm}})
 - [ ] M1-1 {{task}}
 - [ ] M1-2 {{task}}
