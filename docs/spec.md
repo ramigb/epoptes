@@ -249,11 +249,21 @@ epoptes feedback <F-n> approve|reject ["note"]   the human's answer to an approv
 epoptes approval "<what>" [--ref <task>]        (orchestrator) ask before doing something on the approval list
 epoptes wait-for-human "<what>"                 (orchestrator) end the run after this cycle as needs_input
 epoptes event <milestone|blocked|note|artifact|round|wrapup|done> "<text>"
+epoptes lesson "<rule>" [--topic t]              (orchestrator) a harness lesson for the brain
+epoptes brain | brain lessons [--kind k]          gather goals into ~/.epoptes/brain/INDEX.md | print lessons
 epoptes report [goal | --all] [--md | --html] [--stdout] [--out <dir>]
 epoptes import-runsh <project> [-g <id>]  import a dress2impress-style run.sh harness into <project>/.epoptes
 epoptes ui [--port N] [--lan]
 epoptes skill install | path           link plugin/skills/epoptes into ~/.claude/skills
 ```
+
+## Brain (`src/brain.ts`, `~/.epoptes/brain/`)
+What past harnesses taught, for designing the next one. Token-free and local only.
+- **Lessons:** `epoptes lesson "<rule>" --topic <roles|briefs|cycles|checks|tools|state|cost|steering|other>` emits a `lesson` event (`text`, `topic`) in the goal's events.jsonl. Loop templates ask for 1–3 in wrap-up.
+- **Digest per goal:** `brain/goals/<id>.json`: kind, adapter, model, roles and their models, time box, stats (runs, follow-ups, cycles by exit, active time, median cycle length and cost, rate-limit waits, steers, approvals, waits for the human, feedback, milestones reached / on time / late, done), automatic *signals* from those numbers (frequent timeouts, rate limits, late milestones, repeated steering or follow-ups, finishing far under the time box…), the lessons, and the goal's `state/lessons.md` rules as *work lessons*.
+- **Index:** `brain/INDEX.md` (and `index.json`): lessons by topic with near-duplicates merged across goals, a table by goal kind, and one block per goal. Rebuilt; never hand-edited. Curated principles live in `brain/NOTES.md`, written by the skill when asked to "distill the brain".
+- **When:** the runner gathers its goal and rebuilds the index whenever a run ends (errors only log); `epoptes brain` gathers every registered goal. The skill runs it and reads NOTES.md + INDEX.md before designing (step 2), and lists the lessons it applied in the sign-off summary.
+- **Dashboard:** "Brain" on the goal list (`#/brain`, `GET /api/brain`, `POST /api/brain` to gather first).
 
 ## Reports (`src/report.ts`)
 Built only from recorded files: `events.jsonl`, `cycles/*/result.json`, `feedback.jsonl`, `state/backlog.md`, `state/scores.jsonl`, and git (commits since the first run for `git`, snapshot count for `shadow`). Markdown and a self-contained HTML page (inline CSS and SVG, no scripts, light/dark, printable). `epoptes report` writes both to `.epoptes/reports/` (gitignored); `--all` writes an across-goals report to `~/.epoptes/reports/`. The dashboard serves them at `/goals/<id>/report.html` and `/report.html` with a CSP that allows inline styles and nothing else.

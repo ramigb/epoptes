@@ -453,7 +453,7 @@ function GoalList() {
   const s = useStore();
   if (!s.state) return html`<p class="empty">Loading…</p>`;
   const goals = [...s.state.goals].sort((a, b) => (b.live ?? 0) - (a.live ?? 0) || (a.name ?? a.id).localeCompare(b.name ?? b.id));
-  return html`<div class="list-head"><h1>Goals</h1><span class="muted">${goals.filter((g) => g.live).length} running · ${goals.length} total</span>${goals.length > 0 && html`<a class="btn small" style=${{ marginLeft: 'auto' }} href="/report.html" target="_blank" rel="noopener">Report: all goals</a>`}</div>
+  return html`<div class="list-head"><h1>Goals</h1><span class="muted">${goals.filter((g) => g.live).length} running · ${goals.length} total</span><span class="list-actions"><a class="btn small" href="#/brain" title="What past harnesses taught: lessons, numbers by goal kind, signals">Brain</a>${goals.length > 0 && html`<a class="btn small" href="/report.html" target="_blank" rel="noopener">Report: all goals</a>`}</span></div>
     ${goals.length === 0
       ? html`<div class="panel empty-state">
           <h2>No goals yet</h2>
@@ -1156,10 +1156,62 @@ const favicon = {
   },
 };
 
+// ---------------------------------------------------------------- brain
+
+function Brain() {
+  const [b, setB] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const load = (gather) => {
+    setBusy(true);
+    (gather ? api.post('/api/brain') : api.get('/api/brain'))
+      .then(setB)
+      .catch((e) => toast({ kind: 'bad', title: 'Could not read the brain', body: e.message }))
+      .finally(() => setBusy(false));
+  };
+  useEffect(() => load(false), []);
+  useEffect(() => {
+    document.title = 'Brain · Epoptes';
+  });
+  const money = (x) => (x == null ? '–' : `≈ $${x.toFixed(2)}`);
+  return html`<a class="back" href="#/">← All goals</a>
+    <div class="list-head"><h1>Brain</h1><span class="muted">what past harnesses taught, for designing the next one</span>
+      <span class="list-actions"><button class="btn small" disabled=${busy} onClick=${() => load(true)} title="Gather every goal's numbers and lessons again (no tokens)">↻ Gather now</button></span></div>
+    ${!b
+      ? html`<p class="empty">Loading…</p>`
+      : html`<div class="grid brain">
+      <div class="stack">
+        ${b.notes && html`<section class="panel"><h2>Curated notes <span class="right muted mono">NOTES.md</span></h2><pre class="handoff"><${Rich} text=${b.notes} /></pre></section>`}
+        <section class="panel"><h2>Harness lessons <span class="right muted">${b.lessons.reduce((a, t) => a + t.lessons.length, 0)} from ${b.goals.length} goals</span></h2>
+          ${b.lessons.length === 0
+            ? html`<p class="empty">No lessons yet. Orchestrators record them in wrap-up (<span class="mono">epoptes lesson "…" --topic roles</span>); they arrive here when a run ends.</p>`
+            : b.lessons.map((t) => html`<div key=${t.topic} class="lesson-topic"><h3>${t.topic}</h3><ul class="lessons">${t.lessons.map((l, i) => html`<li key=${i}>${l.text}<span class="faint"> · ${l.goals.join(', ')}${l.goals.length > 1 ? ` (${l.goals.length} goals)` : ''}</span></li>`)}</ul></div>`)}
+        </section>
+        <section class="panel"><h2>Signals by goal</h2>
+          ${b.goals.filter((g) => g.signals.length).length === 0
+            ? html`<p class="empty">No signals yet.</p>`
+            : html`<ul class="lessons">${b.goals.filter((g) => g.signals.length).map((g) => g.signals.map((s, i) => html`<li key=${g.id + i}><a href=${`#/g/${g.id}`}>${g.name}</a>: ${s}</li>`))}</ul>`}
+        </section>
+      </div>
+      <div class="stack">
+        <section class="panel"><h2>By goal kind</h2>
+          <div class="table-wrap" style=${{ marginTop: 0 }}><table><thead><tr><th>kind</th><th class="r" title="done / all">goals</th><th class="r">cycles</th><th class="r">median cycle</th><th class="r">cycle cost</th><th class="r">timeouts</th></tr></thead><tbody>
+            ${b.kinds.map((k) => html`<tr key=${k.kind}><td>${k.kind}</td><td class="r num">${k.done}/${k.goals}</td><td class="r num">${k.cycles}</td><td class="r num">${dur(k.median_cycle_s)}</td><td class="r num">${money(k.median_cycle_cost_usd)}</td><td class="r num">${pct(k.timeout_share)}</td></tr>`)}
+          </tbody></table></div>
+          <p class="faint" style=${{ fontSize: '12px', marginBottom: 0 }}>Median cycle cost is an API-equivalent estimate unless runs were billed.</p>
+        </section>
+        <section class="panel"><h2>Work lessons <span class="right muted">from each goal's state/lessons.md</span></h2>
+          ${b.goals.filter((g) => g.work_lessons.length).map((g) => html`<details key=${g.id}><summary>${g.name} <span class="faint">${g.work_lessons.length}</span></summary><ul class="lessons">${g.work_lessons.map((l, i) => html`<li key=${i}>${l}</li>`)}</ul></details>`)}
+        </section>
+        <p class="faint" style=${{ fontSize: '12px' }}>Stored in <span class="mono">${b.dir}</span> on this machine only. The epoptes skill reads INDEX.md when it designs a harness; ask it to "distill the brain" to write NOTES.md.</p>
+      </div>
+    </div>`}`;
+}
+
 // ---------------------------------------------------------------- app
 
 function useRoute() {
   const parse = () => {
+    if (location.hash.startsWith('#/brain')) return 'brain';
     const m = /^#\/g\/([a-z0-9-]+)/.exec(location.hash);
     return m ? m[1] : null;
   };
@@ -1183,14 +1235,14 @@ function App() {
   useEffect(() => {
     const goals = s.state?.goals ?? [];
     // On a goal's page the icon follows that goal; on the list, the most urgent goal.
-    const kinds = id ? [favKind(goals.find((g) => g.id === id))] : goals.map(favKind);
+    const kinds = id && id !== 'brain' ? [favKind(goals.find((g) => g.id === id))] : goals.map(favKind);
     favicon.set(kinds.sort((a, b) => FAV_ORDER.indexOf(a) - FAV_ORDER.indexOf(b))[0] ?? 'idle');
     const waiting = goals.filter((g) => g.needs || g.pending_approvals?.length).length;
-    document.title = `${waiting ? `⚑ ${waiting} · ` : ''}${s.detail?.name ? `${s.detail.name} · Epoptes` : 'Epoptes'}`;
+    if (id !== 'brain') document.title = `${waiting ? `⚑ ${waiting} · ` : ''}${s.detail?.name ? `${s.detail.name} · Epoptes` : 'Epoptes'}`;
   }, [s.detail?.name, s.state, id]);
   return html`<${Topbar} />
     ${s.offline && html`<div class="offline pill bad">Dashboard server unreachable. Runs keep going; reconnecting…</div>`}
-    <main>${id ? html`<${GoalDetail} id=${id} />` : html`<${GoalList} />`}</main>
+    <main>${id === 'brain' ? html`<${Brain} />` : id ? html`<${GoalDetail} id=${id} />` : html`<${GoalList} />`}</main>
     <${Toasts} />`;
 }
 

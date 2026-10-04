@@ -69,6 +69,7 @@ SAVES     <git commits | shadow snapshots | none>
 ASK FIRST <approval list>
 FEEDBACK  <cadence and channel> · notify on <milestone, blocked, done> · <pause-for-review points>
 FIRST     M1 <milestone> → M2 <milestone> → …
+LESSONS   <brain lessons or signals applied, one line each, or "none yet">
 ```
 
 Then ask: "Shall I generate the harness with this?" Generate only after a clear yes.

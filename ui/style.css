@@ -163,6 +163,13 @@ main { max-width: 1320px; margin: 0 auto; padding: 24px; }
 /* ---------- goal list ---------- */
 .list-head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 16px; }
 .list-head h1 { margin: 0; font-size: 22px; font-weight: 650; }
+.list-actions { margin-left: auto; display: inline-flex; gap: 8px; }
+.brain h3, .lesson-topic h3 { margin: 12px 0 6px; font-size: 13px; font-weight: 650; text-transform: capitalize; }
+.lesson-topic:first-of-type h3 { margin-top: 0; }
+.lessons { margin: 0; padding-left: 18px; display: grid; gap: 6px; font-size: 13px; }
+.brain details { margin-bottom: 8px; font-size: 13px; }
+.brain details summary { cursor: pointer; }
+.brain details .lessons { margin-top: 6px; }
 .cards { display: grid; gap: 16px; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); }
 .card {
   display: grid; gap: 10px; text-decoration: none;

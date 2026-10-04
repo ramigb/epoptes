@@ -52,7 +52,8 @@
         "wrapup",
         "done",
         "needs_you",
-        "output"
+        "output",
+        "lesson"
       ]
     }
   },
@@ -350,6 +351,38 @@
           "n": {
             "type": "integer",
             "minimum": 1
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "lesson"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "text"
+        ],
+        "properties": {
+          "text": {
+            "type": "string"
+          },
+          "topic": {
+            "enum": [
+              "roles",
+              "briefs",
+              "cycles",
+              "checks",
+              "tools",
+              "state",
+              "cost",
+              "steering",
+              "other"
+            ]
           }
         }
       }

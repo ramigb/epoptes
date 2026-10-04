@@ -53,6 +53,11 @@ Inside cycles (orchestrators)
   feedback "<text>"               an agent note: something the next cycle must act on (the human sees it)
   approval "<what>" [--ref <task>]  ask the human before doing something on the approval list
   wait-for-human "<what>"         end the run after this cycle as "waiting for you" (nothing else can move)
+  lesson "<rule>" [--topic t]     a harness lesson for the brain (topics: roles, briefs, cycles, checks, tools, state, cost, steering, other)
+
+Brain
+  brain                           gather every goal's digest and lessons into ~/.epoptes/brain/INDEX.md
+  brain lessons [--kind k]        print the harness lessons (optionally for one goal kind)
 
 Later
 Skill
@@ -194,6 +199,8 @@ async function main(argv: string[]) {
       lan: { type: 'boolean' },
       agent: { type: 'string' },
       ref: { type: 'string' },
+      topic: { type: 'string' },
+      kind: { type: 'string' },
     },
   });
   const [cmd, ...rest] = positionals;
@@ -359,6 +366,40 @@ async function main(argv: string[]) {
       const id = addFeedback(p, text, inCycle() ? 'orchestrator' : 'cli', { kind: 'approval', ref: values.ref });
       emit(p, { src: inCycle() ? 'orchestrator' : 'user', type: 'blocked', run: process.env.EPOPTES_RUN ?? s.run, cycle: envCycle() ?? (s.cycle || null), text: `needs approval: ${text}`, ref: id });
       console.log(`${id}: approval requested. Carry on with other work; the decision shows in \`epoptes feedback --open\`.`);
+      return;
+    }
+    case 'lesson': {
+      const text = rest.join(' ').trim();
+      const { LESSON_TOPICS } = await import('./brain.ts');
+      const topic = values.topic ?? 'other';
+      if (!text) throw new Error('usage: epoptes lesson "<a rule for future harnesses>" [--topic <topic>]');
+      if (!(LESSON_TOPICS as readonly string[]).includes(topic)) throw new Error(`topic must be one of ${LESSON_TOPICS.join(', ')}`);
+      const p = goalPaths(resolveGoal(values.goal));
+      const s = reconcile(p);
+      emit(p, { src: inCycle() ? 'orchestrator' : 'user', type: 'lesson', run: process.env.EPOPTES_RUN ?? s.run, cycle: envCycle() ?? (s.cycle || null), text, topic });
+      console.log(`lesson recorded (${topic}); it reaches ~/.epoptes/brain when the run ends`);
+      return;
+    }
+    case 'brain': {
+      const { gatherAll, lessonIndex, readDigests, brainDir } = await import('./brain.ts');
+      if (rest[0] === 'lessons') {
+        const ds = readDigests().filter((d) => !values.kind || d.kind === values.kind);
+        const idx = lessonIndex(ds);
+        if (!idx.length) return console.log(`no harness lessons yet${values.kind ? ` for ${values.kind} goals` : ''}`);
+        for (const t of idx) {
+          console.log(`== ${t.topic}`);
+          for (const l of t.lessons) console.log(`- ${l.text}  (${l.goals.join(', ')})`);
+        }
+        return;
+      }
+      if (rest[0]) throw new Error('usage: epoptes brain | epoptes brain lessons [--kind <kind>]');
+      const r = gatherAll();
+      const lessons = r.digests.reduce((a, d) => a + d.lessons.length, 0);
+      const signals = r.digests.reduce((a, d) => a + d.signals.length, 0);
+      console.log(`brain: ${r.digests.length} goal${r.digests.length === 1 ? '' : 's'}, ${lessons} harness lesson${lessons === 1 ? '' : 's'}, ${signals} signal${signals === 1 ? '' : 's'}`);
+      for (const s of r.skipped) console.log(`  skipped ${s}`);
+      console.log(`  ${tilde(r.file)}${fs.existsSync(path.join(brainDir(), 'NOTES.md')) ? `
+  ${tilde(path.join(brainDir(), 'NOTES.md'))} (curated)` : ''}`);
       return;
     }
     case 'wait-for-human': {

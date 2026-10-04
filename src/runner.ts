@@ -4,6 +4,7 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { adapters } from './adapters/index.ts';
+import { gatherGoal, rebuildIndex } from './brain.ts';
 import type { Activity, Cycle, CycleExit } from './adapters/types.ts';
 import { clockState, newClock, newFollowUpClock, runFinished, pauseClock, readClock, resumeClock, writeClock, type Clock, type Mode } from './clock.ts';
 import { emit, readEvents } from './events.ts';
@@ -213,6 +214,13 @@ export async function runGoal(project: string, { followUp = false } = {}) {
     setStatus({ state: END_STATE[reason], pid: null, pause_requested: false, waiting_until: null, wait_reason: null, cycle_started_at: null, needs });
     emit(p, { src: 'runner', type: 'run.end', run, cycle: status.cycle || null, reason });
     rm(p.lock);
+    // After run.end, so the digest sees how the run ended. Feed the brain (~/.epoptes/brain): token-free, and never allowed to break the run's ending.
+    try {
+      gatherGoal(p);
+      rebuildIndex();
+    } catch (e) {
+      log(`brain not updated: ${(e as Error).message}`);
+    }
     log(`run ${run} ended: ${reason}`);
   };
 

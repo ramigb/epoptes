@@ -18,7 +18,10 @@ Work through [reference/interview.md](reference/interview.md) until every item h
 
 Keep asking until you agree. Never fill a gap with a silent assumption; propose a default and get a yes.
 
-### 2. Design
+### 2. Consult the brain
+Run `epoptes brain` (it gathers every goal's numbers and lessons, no tokens), then read `~/.epoptes/brain/NOTES.md` if it exists and `~/.epoptes/brain/INDEX.md`: the harness lessons for the topics you are about to decide (roles, briefs, cycles, checks, tools), the numbers for this goal kind (typical cycle length and cost, timeout share), and the signals of similar goals. Apply what fits this goal and list it under LESSONS in the sign-off summary. Lessons are advice from past runs, not rules: the user's answers win.
+
+### 3. Design
 Use [reference/design.md](reference/design.md) to pick:
 - the roles (and their models and effort)
 - the cycle size and budgets
@@ -28,10 +31,10 @@ Use [reference/design.md](reference/design.md) to pick:
 
 Adapt the roles to the goal. Don't copy a software team onto a research goal.
 
-### 3. Sign-off
+### 4. Sign-off
 Show the one-screen summary from interview.md. Wait for an explicit yes. If the user changes anything, update the summary and ask again.
 
-### 4. Generate
+### 5. Generate
 1. Copy [templates/](templates/) into `<project>/.epoptes/`: `goal.json`, `loop.md`, `settings.json`, `FEEDBACK.md`, `agents/*.md` and `state/*.md`.
 2. Adapt **every** file to this goal and the selected adapter (Claude Code or Codex):
    - Replace every `{{…}}` placeholder.
@@ -43,16 +46,19 @@ Show the one-screen summary from interview.md. Wait for an explicit yes. If the 
 3. Apply [reference/guardrails.md](reference/guardrails.md): the permissions for this goal kind, no git push or history rewrites, and secrets kept out of every file.
 4. For a new directory without git: set `checkpoints` to `shadow`, not `git`, unless the user wants a repo.
 
-### 5. Check
+### 6. Check
 Run `epoptes run --dry-run <project>`. Fix every problem **and** every warning it prints, then run it again until it prints `ok`. It never starts the clock.
 
-### 6. Register
+### 7. Register
 Run `epoptes add <project>`. Then tell the user:
 - the goal id
 - how to start it (`epoptes start <id>`, or Start in the dashboard, `epoptes ui` → http://127.0.0.1:4747)
 - how to give feedback while it runs
 
 Offer to start it; don't start it without a yes.
+
+## Distilling the brain
+When the user asks you to "distill the brain" (or INDEX.md has grown past ~30 lessons), rewrite `~/.epoptes/brain/NOTES.md`: at most 60 lines of principles for designing harnesses, grouped by topic, merging duplicates and dropping ones later goals contradicted, each with the goals it came from. Keep it generic (no project secrets or client names). Never edit INDEX.md; it is rebuilt from the goals.
 
 ## Rules every generated harness follows
 - **Fresh context every cycle.** All memory is in `state/`, and each state file has a cap in `goal.json` `state_caps`.
@@ -67,6 +73,7 @@ Offer to start it; don't start it without a yes.
   - secrets never in goal files (point to the user's secret manager, e.g. the 1Password CLI or MCP)
 - **Anything in the goal's approval list is never done autonomously.** The orchestrator runs `epoptes approval "…" --ref <task>`, marks the task `[blocked: needs approval F-<n>]` and moves on. The human answers with Approve / Disapprove in the dashboard (or `epoptes feedback F-<n> approve|reject`). When nothing else can move, the orchestrator runs `epoptes wait-for-human "…"` and the run waits, clock stopped, until the human answers.
 - **Semantic events go through the CLI:** `epoptes event milestone|blocked|done …` (plus PushNotification when it's available).
+- **Every harness feeds the brain:** in wrap-up the orchestrator records 1–3 harness lessons with `epoptes lesson "<rule>" --topic <topic>`.
 
 ## CLI reference
 Inside a cycle, the runner sets `EPOPTES_GOAL_DIR`, `EPOPTES_RUN`, `EPOPTES_CYCLE` and `EPOPTES_MODE`, so the goal argument can be left out. `[goal]` is a registered id or a path.
@@ -97,6 +104,8 @@ Inside a cycle, the runner sets `EPOPTES_GOAL_DIR`, `EPOPTES_RUN`, `EPOPTES_CYCL
 | `epoptes wait-for-human "<what>"` | (orchestrator) end the run after this cycle as "waiting for you"; the clock stops |
 | `epoptes event milestone\|blocked\|note\|artifact\|round\|wrapup\|done "<text>"` | record a semantic event; `wrapup` and `done` also set the run markers |
 | `epoptes event output <path\|url> ["text"]` | where the main deliverable is; the dashboard shows "Open the output" (overrides goal.json `output`) |
+| `epoptes lesson "<rule>" [--topic t]` | (orchestrator, in wrap-up) a lesson about the harness itself for the brain; topics: roles, briefs, cycles, checks, tools, state, cost, steering, other |
+| `epoptes brain` / `epoptes brain lessons [--kind k]` | gather every goal into `~/.epoptes/brain/INDEX.md` / print the harness lessons |
 | `epoptes report [goal] [--all] [--stdout]` | Markdown + HTML report from recorded data into `.epoptes/reports/` (`--all`: every goal; `--stdout`: print the Markdown) |
 | `epoptes import-runsh <project>` | import an older run.sh harness (dress2impress style) so it shows in reports and the dashboard |
 | `epoptes ui` | the local dashboard on http://127.0.0.1:4747 |

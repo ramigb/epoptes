@@ -352,3 +352,28 @@ test('the skill installs for Codex without overwriting existing directories', ()
   fs.mkdirSync(path.join(home, '.agents', 'skills', 'epoptes'));
   assert.throws(() => run(['--agent', 'codex']), /cannot be read as a link/);
 });
+
+test('brain: lessons and digests reach ~/.epoptes/brain when a run ends, and `epoptes brain` indexes them', async () => {
+  const g = setup();
+  const inCycle = { EPOPTES_GOAL_DIR: g.root, EPOPTES_CYCLE: '1', EPOPTES_RUN: 'r1' };
+  g.run(['start', g.project], { FAKE_DONE_AT: '1' });
+  await until(() => g.read('run/status.json').state === 'done');
+  const home = path.join(path.dirname(g.project), 'home');
+  const id = g.read('goal.json').id;
+  await until(() => fs.existsSync(path.join(home, 'brain', 'goals', `${id}.json`)));
+  const digest = JSON.parse(fs.readFileSync(path.join(home, 'brain', 'goals', `${id}.json`), 'utf8'));
+  assert.deepEqual([digest.stats.cycles, digest.stats.done, digest.roles], [1, true, [{ name: 'scribe', model: 'haiku' }]]);
+  assert.ok(fs.existsSync(path.join(home, 'brain', 'INDEX.md')), 'the runner rebuilt the index');
+
+  assert.match(g.run(['lesson', 'one scribe was enough for a one-file goal', '--topic', 'roles'], inCycle), /lesson recorded \(roles\)/);
+  assert.throws(() => g.run(['lesson', 'x', '--topic', 'vibes'], inCycle), /topic must be one of/);
+  fs.writeFileSync(path.join(g.root, 'state', 'lessons.md'), '- Check the file exists before reporting done.\n');
+  assert.match(g.run(['brain']), /brain: 1 goal, 1 harness lesson/);
+  const index = fs.readFileSync(path.join(home, 'brain', 'INDEX.md'), 'utf8');
+  assert.match(index, /### roles\n\n- one scribe was enough for a one-file goal {2}_\(e2e-/);
+  assert.match(index, /work lessons \(state\/lessons\.md\): “Check the file exists before reporting done\.”/);
+  assert.match(index, /\| other \| 1 \| 1 \| 1 \|/);
+  assert.match(g.run(['brain', 'lessons', '--kind', 'other']), /== roles\n- one scribe was enough/);
+  assert.match(g.run(['brain', 'lessons', '--kind', 'code']), /no harness lessons yet for code goals/);
+  for (const e of g.events()) assert.deepEqual(validate('event', e), [], JSON.stringify(e));
+});

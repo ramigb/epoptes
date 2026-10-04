@@ -59,7 +59,7 @@ const cacheShare = (models: Record<string, ModelUsage>) => {
   return all ? read / all : null;
 };
 
-function readResults(p: GoalPaths): Result[] {
+export function readResults(p: GoalPaths): Result[] {
   let dirs: string[] = [];
   try {
     dirs = fs.readdirSync(p.cycles).filter((d) => /^\d{6}$/.test(d)).sort();

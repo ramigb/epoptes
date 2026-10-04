@@ -10,6 +10,7 @@ import { readRegistry } from '../registry.ts';
 import { buildReport, renderAllHtml, renderHtml } from '../report.ts';
 import { goalPaths } from '../paths.ts';
 import { timeUse } from '../timeuse.ts';
+import { brainDir, gatherAll, kindTable, lessonIndex, readDigests } from '../brain.ts';
 import { serveOutput } from './output.ts';
 import { cycleView, detail, markSeen, setOutputBase, summary } from './views.ts';
 import { GoalWatch, type GoalUpdate } from './watch.ts';
@@ -162,6 +163,19 @@ export function serve({ port, lan, pollMs = 1000 }: ServeOptions) {
           .filter(Boolean)
           .sort((a, b) => (a!.at < b!.at ? 1 : -1))[0] ?? null;
         return send(res, 200, { goals, limits, lan });
+      }
+
+      if (url.pathname === '/api/brain') {
+        // GET reads the digests as they are; POST gathers every goal first (no tokens, a second or two).
+        if (req.method === 'POST') gatherAll();
+        const digests = readDigests();
+        let notes: string | null = null;
+        try {
+          notes = fs.readFileSync(path.join(brainDir(), 'NOTES.md'), 'utf8');
+        } catch {
+          // not curated yet
+        }
+        return send(res, 200, { dir: brainDir(), notes, lessons: lessonIndex(digests), kinds: kindTable(digests), goals: digests.map((d) => ({ id: d.id, name: d.name, kind: d.kind, signals: d.signals, stats: d.stats, work_lessons: d.work_lessons, updated_at: d.updated_at })) });
       }
 
       const m = /^\/api\/goals\/([a-z0-9-]+)(?:\/(.*))?$/.exec(url.pathname);

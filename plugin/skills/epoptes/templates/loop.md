@@ -95,6 +95,7 @@ Be concrete; vague briefs waste the most tokens. Point at paths; don't paste fil
 {{WRAPUP_ITEMS}}
 <!-- template: goal-specific final steps, e.g. "3. README for the user: how to run it, where things are." "4. Final review; append scores." -->
 - If the main deliverable isn't where goal.json `output` says (or it's served at a URL), run `epoptes event output <path or URL> "<one line>"` so the dashboard links to it.
+- Record 1–3 **harness lessons** for future harnesses with `epoptes lesson "<rule>" --topic roles|briefs|cycles|checks|tools|state|cost|steering`: what about this harness itself (roles, models, briefs, round size, checks, tools) helped or hurt. Not about the product (that's `state/lessons.md`). Write each as a rule someone designing the next harness can apply, without secrets or client names.
 - Rewrite `state/handoff.md` as the end state plus the top 10 next tasks.
 - Checkpoint, then `epoptes event done "<one-line summary>"`.
 
