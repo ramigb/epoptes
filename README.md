@@ -97,7 +97,9 @@ The dashboard and reports show Codex commands, file changes, messages and token 
   - Each cycle orients from the state files, does a slice of work (through subagents when configured), verifies it, records it and exits.
   - Between cycles, the runner checks the time box, your controls, rate limits and failures.
   - Closing the dashboard or the terminal never stops a run.
-- **The clock counts active time.** It doesn't count pauses, stops or (by default) rate-limit waits. Near the end the goal switches to *wrap-up* (feature freeze), then *overtime*, then stops. A goal can also finish early once its checks pass.
+- **The clock counts active time.** It doesn't count pauses, stops or (by default) rate-limit waits. Near the end the goal switches to *wrap-up* (feature freeze), then *overtime*, then stops. A goal can also finish early once its checks pass, and each milestone moves on as soon as it's done rather than waiting for its target time.
+- **You stay in the loop without watching.** Anything on the goal's approval list waits for your Approve / Disapprove while the run carries on with other work. When nothing else can move, the run pauses as **waiting for you**, with the reason, until you answer. The orchestrator can also leave you *agent notes* (findings the next cycle must act on), which you can edit or dismiss.
+- **Every harness makes the next one better.** Orchestrators record harness lessons in wrap-up. When a run ends, Epoptes gathers them, plus each goal's numbers and automatic signals, into a local **brain** (`~/.epoptes/brain/INDEX.md`). The skill reads it before designing a new harness.
 - **Observability costs no tokens.** The live ticker comes from the CLI's JSON stream: which tools ran and which files changed (plus agent activity for Claude Code). Orchestrators add a few semantic events through the CLI (milestones, blocks, done).
 
 ## Everyday use
@@ -109,11 +111,19 @@ The dashboard and reports show Codex commands, file changes, messages and token 
 | stop right now | **Stop now** | `epoptes stop <goal>` (the next start recovers the interrupted work) |
 | give it more time | **+30m / +1h / +2h** | `epoptes extend <goal> 2h` |
 | give feedback | the Feedback box | `epoptes feedback <goal> "the intro is too long"`, or a bullet in `.epoptes/FEEDBACK.md` |
+| change direction now | **⚡ Steer now** | `epoptes feedback <goal> "use SQLite instead" --steer` (interrupts the cycle; the next one replans the whole backlog around it) |
+| answer an approval | **Approve / Disapprove** | `epoptes feedback F-4 approve "test mode only"` (or `reject`) |
+| tweak a finished goal | **Follow up on N feedback items** | `epoptes start <goal> --follow-up` (no time box; minor items fixed in place, big ones flagged for a new run) |
+| open what it made | **Open the output ↗** | goal.json `output`, or `epoptes event output <path or URL>` |
+| see where time went | the "Where the time went" panel | `GET /api/goals/<goal>/time` |
+| see what past runs taught | **Brain** | `epoptes brain` (writes `~/.epoptes/brain/INDEX.md`) |
 | see what it did | the Report button | `epoptes report <goal>` (Markdown + HTML) |
 
 Feedback items get an id (`F-3`) and go through `new → seen → in progress → done | blocked | won't do`. Each change records its cycle and a note, and the dashboard shows it live with an unread badge. Desktop notifications are optional: use the 🔔 button.
 
-Once a goal is done, **Start new run…** begins a fresh run with a new time box. Epoptes asks first, because a new run spends tokens and only finds work if you added feedback or tasks since.
+Once a goal is done, feedback goes through a **follow-up**: only your open feedback, with no time box, and nothing else. The agent fixes minor items in place (a colour, a size, wording). Anything that needs a restart or a new version is flagged "needs a new run" for you to decide on, and you can override how each item is treated. **Start new run…** begins a fresh run with a new time box. Epoptes asks first, because a new run spends tokens.
+
+The dashboard's tab icon shows the state at a glance: arcs turn while a cycle runs, a badge blinks when the run needs you, and it turns red on failure.
 
 ## CLI reference
 ```
@@ -122,12 +132,19 @@ epoptes list                           all goals
 epoptes status [goal]                  one screen: state, clock, cycle, backlog, feedback, last cycle, handoff
 epoptes run [goal] --dry-run           check setup and guardrails, print the next cycle's command (never starts the clock)
 epoptes start [goal] [--new-run]       start or resume (--new-run after DONE / time box over)
+epoptes start [goal] --follow-up       after DONE: just the open feedback, no time box
 epoptes pause [goal] · stop [goal]     pause after this cycle · stop now
 epoptes extend [goal] <dur>            e.g. 2h, 30m
 epoptes reset-clock [goal]             the next start is a new run
 epoptes feedback [goal] "<text>"       add feedback      · epoptes feedback [goal] [--open]  list it
+epoptes feedback [goal] "<text>" --steer   interrupt the running cycle and replan around it
 epoptes feedback F-3 <status> [note]   new | seen | in_progress | done | blocked | wont_do
-epoptes event <type> "<text>"          milestone | blocked | note | artifact | round | wrapup | done (used by orchestrators)
+epoptes feedback F-3 approve|reject [note]   answer an approval (resumes a run waiting for it)
+epoptes feedback F-3 edit "<text>"     correct an item (e.g. an agent note) · scope auto|tweak|new_run for follow-ups
+epoptes event <type> "<text>"          milestone | blocked | note | artifact | output | round | wrapup | done (used by orchestrators)
+epoptes approval "<what>" [--ref T]    ask the human first (orchestrators) · wait-for-human "<what>": pause until they answer
+epoptes lesson "<rule>" [--topic t]    a harness lesson for the brain (orchestrators, in wrap-up)
+epoptes brain [lessons [--kind k]]     gather every goal into ~/.epoptes/brain/INDEX.md · print the lessons
 epoptes clock                          one line with the time left (used by orchestrators)
 epoptes report [goal] [--all]          Markdown + HTML report
 epoptes import-runsh <project>         import an older run.sh harness (dress2impress style)
@@ -146,7 +163,8 @@ epoptes skill path                     print the shared skill directory
 ## Safety and privacy
 - **Local only.** The dashboard binds to `127.0.0.1`. It rejects other hosts (DNS rebinding) and cross-site writes (CSRF), because feedback ends up in agents' prompts. `--lan` is an explicit opt-in with a warning and no login.
 - **No telemetry,** no accounts, no keys handled by Epoptes. It runs the `claude` or `codex` you're already logged into; the CLI's own data settings still apply.
-- **Transcripts and logs stay on your machine,** gitignored under `.epoptes/cycles/` and `.epoptes/run/`.
+- **Transcripts and logs stay on your machine,** gitignored under `.epoptes/cycles/` and `.epoptes/run/`. So does the brain (`~/.epoptes/brain/`).
+- **Outputs open on a separate local origin** (the dashboard's port + 1, read-only): an agent-built page runs normally but can't reach the dashboard's controls. It serves only files inside registered projects, never dotfiles such as `.env` or `.epoptes/`, and it's off in `--lan` mode.
 - **Guardrails in every generated harness:**
   - Claude Code's permissions allow/deny list, or Codex's native sandbox and rules
   - no `git push`, no history rewrites, no destructive cleans

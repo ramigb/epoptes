@@ -3,9 +3,16 @@
 Short and current. New notes land in `NOTES.md` and get triaged here at the start of each session.
 
 ## Now
+- **Read [docs/overnight-2026-10-04.md](docs/overnight-2026-10-04.md)** and try the new features on a real goal: approvals, steering, follow-ups, milestones, the time chart, the output link, the brain.
+- **Update the existing harnesses' loop.md** (pipo, epoptes-video) to use `epoptes approval`, `wait-for-human`, `lesson`, `event output` and per-milestone early finish, or regenerate them with the skill.
 - **Try the skill interactively** (`epoptes skill install`, then in Claude Code: "use the epoptes skill to build a harness for …") and note what the interview gets wrong in NOTES.md.
 
 ## Later / ideas
+- Reports: add "where the time went" and the output link to the HTML/Markdown report (dashboard only for now).
+- Steering an *existing* feedback item (today only new items can steer).
+- The follow-up cycle cap (3) and the steering/follow-up runner notes are constants; make them goal settings if they get in the way.
+- Brain: a staleness rule for lessons later goals contradict (today NOTES.md curation handles it by hand).
+- Favicon: an unread count on the list page.
 - The FAQ run did 5 task rows in one cycle against the 3-round cap (harmless on a 20 min goal); watch whether longer goals respect it.
 - Dashboard: a theme toggle; "add goal" from the UI; open a cycle's raw stream.
 - Nicer ticker summaries for `SubagentHandback` / `ScheduleWakeup` tool calls (seen in the M1 run).
@@ -14,6 +21,7 @@ Short and current. New notes land in `NOTES.md` and get triaged here at the star
 - Retention setting for `cycles/*/stream.jsonl`.
 
 ## Done
+- **Overnight features** (2026-10-04): approvals with Approve / Disapprove and a `needs_input` ("waiting for you") state; agent notes; steering that interrupts and replans; follow-ups after DONE with no time box; milestone segments and per-milestone early finish; "where the time went"; animated favicon; output link on its own origin; the brain. 38 tests. Details: [docs/overnight-2026-10-04.md](docs/overnight-2026-10-04.md).
 - **M5 Polish** (2026-09-28): README (install, quick start, concepts, CLI, costs, safety), `bin/` launcher + `npm pack`-ready package, `--version`, friendly errors (port in use, missing `claude`, goal not found, last cycle failed), first-run and empty-state guides, state-change and milestone animations.
 - **M4 Reports** (2026-09-28): `epoptes report` (Markdown + script-free HTML, per goal and `--all`), dashboard Report links, `epoptes import-runsh`. Checked by importing a clone of dress2impress: every total matches its raw logs.
 - **M3 Skill** (2026-09-28): plugin `plugin/` with the `epoptes` skill (process, interview checklist, design rules, guardrails, templates), `epoptes skill install`, `epoptes clock`, `feedback --open`, and a guardrail lint in `--dry-run`. Checked end to end: Claude built a FAQ harness from written interview answers (≈ $0.53, dry run clean), and it ran to DONE in 1 cycle / 7 min / ≈ $0.84 with editor scores 9/9.
