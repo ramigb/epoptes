@@ -25,7 +25,7 @@ const HELP = `epoptes: create, run, watch and steer long-running Claude Code or 
 Goals
   add [dir]                       validate <dir>/.epoptes/goal.json and register it
   list                            all registered goals
-  status [goal]                   state, clock, cycle, backlog, feedback, handoff
+  status [goal]                   state, clock, pace, cycle, backlog, feedback, output, handoff
   clock [goal]                    one line for orchestrators: CYCLE MODE ACTIVE TO_WRAPUP TO_END …
 
 Runs
@@ -59,7 +59,6 @@ Brain
   brain                           gather every goal's digest and lessons into ~/.epoptes/brain/INDEX.md
   brain lessons [--kind k]        print the harness lessons (optionally for one goal kind)
 
-Later
 Skill
   skill install [--agent codex]    link the skill for Claude Code (default) or Codex
   skill path                      print where the skill lives

@@ -17,7 +17,7 @@ It grew out of a 12-hour autonomous game build. Its rules for keeping long runs 
 - cheap models for mechanical work
 - a time and round cap per cycle
 
-> **Status:** early (0.1). A personal tool that's improved from daily use. File formats may still change; see [ROADMAP.md](ROADMAP.md).
+> **Status:** early (0.3). A personal tool that's improved from daily use. File formats may still change; see [ROADMAP.md](ROADMAP.md).
 
 ## What you need
 - **Node.js 22.18 or newer**
@@ -53,9 +53,10 @@ On WSL2, keep the checkout on the Linux side (`~/…`), not under `/mnt/c` or `/
    - non-goals and the time box
    - the team (roles, models and effort)
    - checkpoints, and what always needs your approval
+   - where the deliverable lives (so the dashboard can link to it)
    - how you'll give feedback
 
-   It shows a one-screen summary for sign-off. Then it generates `.epoptes/`, runs `epoptes run --dry-run`, and registers the goal with `epoptes add`.
+   It also reads the brain (lessons from your past harnesses, below) and shows a one-screen summary for sign-off, including which lessons it applied. Then it generates `.epoptes/`, runs `epoptes run --dry-run`, and registers the goal with `epoptes add`.
 3. **Open the dashboard:**
    ```sh
    epoptes ui                # http://127.0.0.1:4747
@@ -97,9 +98,13 @@ The dashboard and reports show Codex commands, file changes, messages and token 
   - Each cycle orients from the state files, does a slice of work (through subagents when configured), verifies it, records it and exits.
   - Between cycles, the runner checks the time box, your controls, rate limits and failures.
   - Closing the dashboard or the terminal never stops a run.
-- **The clock counts active time.** It doesn't count pauses, stops or (by default) rate-limit waits. Near the end the goal switches to *wrap-up* (feature freeze), then *overtime*, then stops. A goal can also finish early once its checks pass, and each milestone moves on as soon as it's done rather than waiting for its target time.
+- **The clock counts active time.** It doesn't count pauses, stops or (by default) rate-limit waits. Near the end the goal switches to *wrap-up* (feature freeze), then *overtime*, then stops.
+- **The time box is a limit, not a target.** A goal finishes early once its checks pass, and each milestone moves on as soon as it's done rather than waiting for its target time. The harness doesn't invent work to fill the time:
+  - a task only enters the backlog if a done check, a milestone or your feedback needs it; ideas go in the handoff for you
+  - when the backlog has no real work left, the runner tells the next cycle to run the done checks and wrap up
+  - the dashboard shows a projected finish from the milestone pace so far (for example, a 2-hour milestone done in 30 minutes puts a 10-hour plan on pace for about 2h30m)
 - **You stay in the loop without watching.** Anything on the goal's approval list waits for your Approve / Disapprove while the run carries on with other work. When nothing else can move, the run pauses as **waiting for you**, with the reason, until you answer. The orchestrator can also leave you *agent notes* (findings the next cycle must act on), which you can edit or dismiss.
-- **Every harness makes the next one better.** Orchestrators record harness lessons in wrap-up. When a run ends, Epoptes gathers them, plus each goal's numbers and automatic signals, into a local **brain** (`~/.epoptes/brain/INDEX.md`). The skill reads it before designing a new harness.
+- **Every harness makes the next one better.** Orchestrators record harness lessons in wrap-up. When a run ends, Epoptes gathers them, plus each goal's numbers and automatic signals, into a local **brain** (`~/.epoptes/brain/INDEX.md`). Signals are things like frequent timeouts, late milestones or repeated steering. This costs no tokens. The skill reads the brain before designing a new harness. Ask it to "distill the brain" to get a short curated `NOTES.md`.
 - **Observability costs no tokens.** The live ticker comes from the CLI's JSON stream: which tools ran and which files changed (plus agent activity for Claude Code). Orchestrators add a few semantic events through the CLI (milestones, blocks, done).
 
 ## Everyday use
@@ -115,11 +120,14 @@ The dashboard and reports show Codex commands, file changes, messages and token 
 | answer an approval | **Approve / Disapprove** | `epoptes feedback F-4 approve "test mode only"` (or `reject`) |
 | tweak a finished goal | **Follow up on N feedback items** | `epoptes start <goal> --follow-up` (no time box; minor items fixed in place, big ones flagged for a new run) |
 | open what it made | **Open the output ↗** | goal.json `output`, or `epoptes event output <path or URL>` |
-| see where time went | the "Where the time went" panel | `GET /api/goals/<goal>/time` |
+| see where time went | the "Where the time went" panel (running vs rate limits vs waiting for you vs paused, time per role, time per tool) | dashboard only |
+| see if it'll finish early | milestone ticks and the dashed "on pace to finish" marker on the clock bar | the `pace` line in `epoptes status` |
 | see what past runs taught | **Brain** | `epoptes brain` (writes `~/.epoptes/brain/INDEX.md`) |
 | see what it did | the Report button | `epoptes report <goal>` (Markdown + HTML) |
 
-Feedback items get an id (`F-3`) and go through `new → seen → in progress → done | blocked | won't do`. Each change records its cycle and a note, and the dashboard shows it live with an unread badge. Desktop notifications are optional: use the 🔔 button.
+Feedback items get an id (`F-3`) and go through `new → seen → in progress → done | blocked | won't do`. Each change records its cycle and a note, and the dashboard shows it live with an unread badge. Approval requests start as "waiting for you", and notes the orchestrator files for the next cycle are marked "agent note". Desktop notifications are optional: use the 🔔 button.
+
+The backlog bar is split into one segment per milestone. The clock bar marks each milestone's target (on time, late, overdue) and where it was actually reached.
 
 Once a goal is done, feedback goes through a **follow-up**: only your open feedback, with no time box, and nothing else. The agent fixes minor items in place (a colour, a size, wording). Anything that needs a restart or a new version is flagged "needs a new run" for you to decide on, and you can override how each item is treated. **Start new run…** begins a fresh run with a new time box. Epoptes asks first, because a new run spends tokens.
 
@@ -129,7 +137,7 @@ The dashboard's tab icon shows the state at a glance: arcs turn while a cycle ru
 ```
 epoptes add [dir]                      register a goal (validates .epoptes/goal.json)
 epoptes list                           all goals
-epoptes status [goal]                  one screen: state, clock, cycle, backlog, feedback, last cycle, handoff
+epoptes status [goal]                  one screen: state, clock, pace, cycle, backlog, feedback, output, last cycle, handoff
 epoptes run [goal] --dry-run           check setup and guardrails, print the next cycle's command (never starts the clock)
 epoptes start [goal] [--new-run]       start or resume (--new-run after DONE / time box over)
 epoptes start [goal] --follow-up       after DONE: just the open feedback, no time box
@@ -145,14 +153,23 @@ epoptes event <type> "<text>"          milestone | blocked | note | artifact | o
 epoptes approval "<what>" [--ref T]    ask the human first (orchestrators) · wait-for-human "<what>": pause until they answer
 epoptes lesson "<rule>" [--topic t]    a harness lesson for the brain (orchestrators, in wrap-up)
 epoptes brain [lessons [--kind k]]     gather every goal into ~/.epoptes/brain/INDEX.md · print the lessons
-epoptes clock                          one line with the time left (used by orchestrators)
+epoptes clock                          one line with the time left and the current milestone's target (used by orchestrators)
 epoptes report [goal] [--all]          Markdown + HTML report
 epoptes import-runsh <project>         import an older run.sh harness (dress2impress style)
-epoptes ui [--port N] [--lan]          the dashboard
+epoptes ui [--port N] [--lan]          the dashboard (outputs are served on the next port)
 epoptes skill install [--agent codex]   install the skill (Claude Code by default)
 epoptes skill path                     print the shared skill directory
 ```
 `[goal]` is a registered id or a path. Leave it out inside a goal's folder.
+
+## Upgrading from 0.2
+Harnesses generated before 0.3 keep working. Some of the new behaviour comes from the runner, so they get it right away:
+- steering
+- follow-ups after DONE
+- the backlog-clear nudge
+- the dashboard features
+
+The rest comes from the loop template: approval requests, "waiting for you", harness lessons, the output event, the scope rule and per-milestone early finish. To get these, regenerate the harness with the skill, or ask Claude to update that goal's `.epoptes/loop.md` from the current template. You can also add `"output"` to an old `goal.json` by hand.
 
 ## Costs and usage limits
 - The dashboard and reports show **tokens by model, cache-read share and cost per cycle**, and flag cycles that cost more than twice the median.
@@ -179,7 +196,7 @@ npm test            # node --test: unit tests, runner tests with fake Claude/Cod
 npm run typecheck
 npm run build       # dist/ for the npm package (the checkout runs src/ directly)
 ```
-- `src/`: the CLI, runner, adapters (`adapters/`), dashboard server (`ui/`), reports and the importer.
+- `src/`: the CLI, runner, adapters (`adapters/`), dashboard and output servers (`ui/`), reports, the importer, time use (`timeuse.ts`) and the brain (`brain.ts`).
 - `ui/`: the dashboard (Preact via `htm`, no build step).
 - `plugin/`: the shared Claude Code/Codex skill and templates.
 - `docs/`: the spec, JSON Schemas and decisions.
