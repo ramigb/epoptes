@@ -1047,6 +1047,99 @@ function GoalDetail({ id }) {
     </div>`;
 }
 
+// ---------------------------------------------------------------- favicon
+
+// The tab icon says what's happening, so a background tab is enough to keep an eye on things:
+// needs-you (amber flag, blinking) > failed (red) > running (spinning arcs) > rate-limited (amber, slow pulse)
+// > between cycles (green pulse) > done (purple check) > idle (the plain mark).
+const FAV_ORDER = ['needs', 'failed', 'running', 'limited', 'waiting', 'done', 'idle'];
+const FAV_COLOR = { needs: '#E8A23A', failed: '#D9503C', running: '#2EA36B', limited: '#D9A030', waiting: '#2EA36B', done: '#8C6BDB', idle: '#E8A23A' };
+const ANIMATED = new Set(['needs', 'running', 'limited', 'waiting']);
+
+function favKind(g) {
+  if (!g || g.error) return 'idle';
+  if (g.needs || g.pending_approvals?.length) return 'needs';
+  if (g.state === 'failed' || g.state === 'crashed') return 'failed';
+  if (g.state === 'running' || g.state === 'pausing') return 'running';
+  if (g.state === 'rate_limited' || g.state === 'cooldown') return 'limited';
+  if (g.state === 'waiting') return 'waiting';
+  if (g.state === 'done') return 'done';
+  return 'idle';
+}
+
+const favicon = {
+  kind: null,
+  timer: null,
+  frame: 0,
+  canvas: null,
+  link: null,
+  set(kind) {
+    if (kind === this.kind) return;
+    this.kind = kind;
+    clearInterval(this.timer);
+    this.timer = null;
+    this.frame = 0;
+    this.draw();
+    const still = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (ANIMATED.has(kind) && !still) this.timer = setInterval(() => (this.frame++, this.draw()), 110);
+  },
+  draw() {
+    this.canvas ??= Object.assign(document.createElement('canvas'), { width: 64, height: 64 });
+    this.link ??= document.querySelector('link[rel=icon]');
+    const c = this.canvas.getContext('2d');
+    const k = this.kind;
+    const f = this.frame;
+    const col = FAV_COLOR[k];
+    c.clearRect(0, 0, 64, 64);
+    c.lineCap = 'round';
+    // Three outer arcs, like the mark; they turn while a cycle runs.
+    const spin = k === 'running' ? f * 0.35 : 0;
+    c.strokeStyle = k === 'idle' || k === 'done' ? '#7d828b' : col;
+    c.lineWidth = 9;
+    for (let i = 0; i < 3; i++) {
+      const a = spin + (i * 2 * Math.PI) / 3 - Math.PI / 2;
+      c.beginPath();
+      c.arc(32, 32, 26, a + 0.3, a + 2 * Math.PI / 3 - 0.3);
+      c.stroke();
+    }
+    // The eye: a pupil that pulses between cycles and while rate-limited.
+    const pulse = k === 'waiting' || k === 'limited' ? (Math.sin(f / (k === 'limited' ? 6 : 3)) + 1) / 2 : 0;
+    c.fillStyle = k === 'idle' ? '#7d828b' : col;
+    c.globalAlpha = 1 - pulse * 0.55;
+    c.beginPath();
+    c.arc(32, 32, 14 + pulse * 4, 0, 2 * Math.PI);
+    c.fill();
+    c.globalAlpha = 1;
+    c.fillStyle = '#ffffff';
+    c.beginPath();
+    c.arc(32, 32, 4.5, 0, 2 * Math.PI);
+    c.fill();
+    if (k === 'done') {
+      c.strokeStyle = col;
+      c.lineWidth = 7;
+      c.beginPath();
+      c.moveTo(36, 50); c.lineTo(45, 58); c.lineTo(61, 38);
+      c.stroke();
+    }
+    // A badge in the corner when the human is needed (blinking) or a run failed.
+    if (k === 'needs' || k === 'failed') {
+      const on = k === 'failed' || Math.floor(f / 5) % 2 === 0;
+      if (on) {
+        c.fillStyle = col;
+        c.beginPath();
+        c.arc(48, 16, 16, 0, 2 * Math.PI);
+        c.fill();
+        c.fillStyle = '#ffffff';
+        c.font = 'bold 26px system-ui, sans-serif';
+        c.textAlign = 'center';
+        c.textBaseline = 'middle';
+        c.fillText('!', 48, 17);
+      }
+    }
+    if (this.link) this.link.href = this.canvas.toDataURL('image/png');
+  },
+};
+
 // ---------------------------------------------------------------- app
 
 function useRoute() {
@@ -1072,9 +1165,13 @@ function App() {
   const s = useStore();
   const id = useRoute();
   useEffect(() => {
-    const waiting = s.state?.goals.filter((g) => g.needs || g.pending_approvals?.length).length ?? 0;
+    const goals = s.state?.goals ?? [];
+    // On a goal's page the icon follows that goal; on the list, the most urgent goal.
+    const kinds = id ? [favKind(goals.find((g) => g.id === id))] : goals.map(favKind);
+    favicon.set(kinds.sort((a, b) => FAV_ORDER.indexOf(a) - FAV_ORDER.indexOf(b))[0] ?? 'idle');
+    const waiting = goals.filter((g) => g.needs || g.pending_approvals?.length).length;
     document.title = `${waiting ? `⚑ ${waiting} · ` : ''}${s.detail?.name ? `${s.detail.name} · Epoptes` : 'Epoptes'}`;
-  }, [s.detail?.name, s.state]);
+  }, [s.detail?.name, s.state, id]);
   return html`<${Topbar} />
     ${s.offline && html`<div class="offline pill bad">Dashboard server unreachable. Runs keep going; reconnecting…</div>`}
     <main>${id ? html`<${GoalDetail} id=${id} />` : html`<${GoalList} />`}</main>

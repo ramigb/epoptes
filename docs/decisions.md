@@ -85,3 +85,7 @@ Append-only. Each entry: date · decision · why. To change one, add a new entry
 - **Computed from files on demand** (`GET /api/goals/<id>/time`), with finished cycles cached; no new runner output. Why: everything needed is already in events and activity.jsonl, and it works for past runs too (checked on a copy of a real 12-cycle goal: ≈ 100 ms).
 - **Three questions, three marks:** a part-to-whole bar for *where* (phases), and two single-hue bar lists for *who* (agent time per role) and *how* (tool time and calls), with a table view. Why: phases are states, so they take state colours (validated with the dataviz palette checker in light and dark; dark uses chart-only steps inside the lightness band); roles and tools are magnitudes of one measure, so they need no categorical palette.
 - **Background shell tasks are not a role.** The claude-code stream reports them like subagents with no type; they run alongside everything and would dwarf real roles, so they show under tools as `background commands`.
+
+## 2026-10-04 · Animated favicon
+- **The tab icon is drawn on a canvas** (8–9 fps only while something moves) rather than shipped as sprite files. Why: no assets, it can combine state colour, motion and a badge, and the CSP already allows `data:` images.
+- **Priority on the goal list: needs you > failed > running > rate-limited > between cycles > done > idle.** Why: a background tab should say first whether the human is needed. Each state differs in colour *and* shape or motion (badge, turning arcs, pulse, check), so it doesn't rely on hue alone at 16 px.
