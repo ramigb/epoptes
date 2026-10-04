@@ -29,7 +29,7 @@ Set `adapter.type` to `codex` and `permission_mode` to `workspace-write` (or `re
 - Tell workers not to print environment variables or read `.env` files, `~/.ssh`, `~/.aws` or similar. The baseline deny list blocks the common paths.
 
 ## Approval list
-Every item in `goal.json` `approval_required` is copied into `loop.md` §Rules. The orchestrator never does these. It marks the task `[blocked: needs approval — <what>]`, runs `epoptes event blocked "needs approval: <what>"`, and continues with other work.
+Every item in `goal.json` `approval_required` is copied into `loop.md` §Rules. The orchestrator never does these. It runs `epoptes approval "<what>" --ref <task>`, marks the task `[blocked: needs approval F-<n>]`, and continues with other work. The human answers with Approve / Disapprove; the next cycle sees APPROVED or REJECTED in `epoptes feedback --open`. When nothing else can move, it runs `epoptes wait-for-human "<what>"`.
 
 ## Data stays local
 Cycle transcripts and logs (`.epoptes/cycles/`, `run/`) can contain confidential material. They're gitignored and never leave the machine. Don't tell workers to upload, paste or post them anywhere.

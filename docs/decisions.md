@@ -53,3 +53,10 @@ Append-only. Each entry: date · decision · why. To change one, add a new entry
 - **`epoptes start` checks that `claude` runs before spawning a runner.** Why: otherwise a missing CLI shows up as six failed cycles and a "failed" goal.
 - **License: MIT.** Why: a permissive licence for a personal side project meant to help colleagues and anyone getting into long-horizon agent work; it contains no employer code or IP.
 - **Package renamed to `@ramigbcom/epoptes`** (supersedes `@ramigb/epoptes`). Why: the npm account used for publishing is `ramigbcom`; the `@ramigb` scope belongs to another login. The binary stays `epoptes`.
+
+## 2026-10-04 · Approvals and "waiting for you"
+- **Approval requests are feedback items** (`kind: "approval"`, `src: "orchestrator"`), not a new log. Why: the orchestrator already reads `epoptes feedback --open` every cycle, so the answer reaches it with no new plumbing, and the dashboard and reports already show feedback.
+- **An approval starts `blocked`; the human's answer is a `decide` op followed by `status → new`.** Why: "new" means "act on this" to the orchestrator; a waiting approval must not look like work.
+- **The run keeps working while approvals wait** (user's choice). It only pauses when the orchestrator says nothing else can move: `epoptes wait-for-human "<what>"` ends the run as a distinct `needs_input` state, not a plain `paused`. Why: "paused" hid *why* it stopped; "waiting for you" with a reason is what the human needs to see.
+- **Answering the last open approval resumes a `needs_input` run by itself**, and "Send & resume" does the same for open questions. A failed resume (e.g. time box over) is reported, but the answer is kept.
+- **The orchestrator can't answer approvals** (`feedback F-n approve` refuses inside a cycle).

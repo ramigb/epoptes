@@ -65,7 +65,7 @@ Offer to start it; don't start it without a yes.
   - Claude Code: a permissions allow/deny list; Codex: a workspace-write sandbox and native rules
   - no `git push`, no history rewrites, no destructive cleans
   - secrets never in goal files (point to the user's secret manager, e.g. the 1Password CLI or MCP)
-- **Anything in the goal's approval list is never done autonomously.** The orchestrator marks the task `[blocked: needs approval]`, runs `epoptes event blocked "…"` and moves on.
+- **Anything in the goal's approval list is never done autonomously.** The orchestrator runs `epoptes approval "…" --ref <task>`, marks the task `[blocked: needs approval F-<n>]` and moves on. The human answers with Approve / Disapprove in the dashboard (or `epoptes feedback F-<n> approve|reject`). When nothing else can move, the orchestrator runs `epoptes wait-for-human "…"` and the run waits, clock stopped, until the human answers.
 - **Semantic events go through the CLI:** `epoptes event milestone|blocked|done …` (plus PushNotification when it's available).
 
 ## CLI reference
@@ -87,6 +87,9 @@ Inside a cycle, the runner sets `EPOPTES_GOAL_DIR`, `EPOPTES_RUN`, `EPOPTES_CYCL
 | `epoptes feedback [goal] [--open]` | list feedback (`--open`: only new, seen, in progress, blocked) |
 | `epoptes feedback F-<n> <status> ["note"]` | set a status: `new`, `seen`, `in_progress`, `done`, `blocked`, `wont_do` |
 | `epoptes feedback F-<n> note "<text>"` | comment on an item |
+| `epoptes feedback F-<n> approve\|reject ["note"]` | the human's answer to an approval request; resumes a run that was waiting for it |
+| `epoptes approval "<what>" [--ref <task>]` | (orchestrator) ask the human before doing something on the approval list |
+| `epoptes wait-for-human "<what>"` | (orchestrator) end the run after this cycle as "waiting for you"; the clock stops |
 | `epoptes event milestone\|blocked\|note\|artifact\|round\|wrapup\|done "<text>"` | record a semantic event; `wrapup` and `done` also set the run markers |
 | `epoptes report [goal] [--all] [--stdout]` | Markdown + HTML report from recorded data into `.epoptes/reports/` (`--all`: every goal; `--stdout`: print the Markdown) |
 | `epoptes import-runsh <project>` | import an older run.sh harness (dress2impress style) so it shows in reports and the dashboard |

@@ -205,11 +205,18 @@ export function serve({ port, lan, pollMs = 1000 }: ServeOptions) {
         }
         if (sub === 'feedback') {
           const id = addFeedback(w.p, String(body.text ?? ''), 'dashboard');
+          // "Send & resume" from the waiting-for-you banner: the reply is the answer the run waited for.
+          const r = body.resume === true ? await control.resumeIfAnswered(project, { force: true }) : null;
           refresh();
-          return send(res, 200, { id });
+          return send(res, 200, { id, ...r });
         }
         const fm = /^feedback\/(F-\d+)$/.exec(sub);
         if (fm) {
+          if (body.decision === 'approved' || body.decision === 'rejected') {
+            const r = await control.decide(project, fm[1], body.decision, body.note ? String(body.note) : undefined);
+            refresh();
+            return send(res, 200, { ok: true, ...r });
+          }
           if (body.status) setFeedbackStatus(w.p, fm[1], body.status as FeedbackStatus, 'user', null, body.note || undefined);
           else if (body.note) noteFeedback(w.p, fm[1], String(body.note), 'user', null);
           else return send(res, 400, { error: 'status or note required' });

@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { CycleResult } from '../adapters/types.ts';
 import { clockState, readClock, runFinished } from '../clock.ts';
-import { fold } from '../feedback.ts';
+import { fold, pendingApprovals } from '../feedback.ts';
 import { exists, nowIso, readJson, readJsonl, writeJson } from '../fsx.ts';
 import { loadGoal, type Goal } from '../goal.ts';
 import { epoptesHome } from '../paths.ts';
@@ -39,7 +39,7 @@ export function markSeen(id: string) {
 }
 
 /** Event types that count as unread and raise toasts. */
-export const NOTABLE = ['milestone', 'blocked', 'done', 'warn', 'run.end'];
+export const NOTABLE = ['milestone', 'blocked', 'needs_you', 'done', 'warn', 'run.end'];
 
 // ---------- cycle results (immutable once written, so cached) ----------
 
@@ -114,6 +114,7 @@ export function summary(w: GoalWatch) {
   const seen = readSeen(w.id);
   const cycleEvents = w.events.items.filter((e) => e.cycle === s?.cycle);
   const round = cycleEvents.findLast((e) => e.type === 'round')?.n ?? null;
+  const pending = pendingApprovals(fold(w.feedback.items));
   return {
     id: w.id,
     name: goal.name,
@@ -134,6 +135,8 @@ export function summary(w: GoalWatch) {
     cycle_started_at: s?.cycle_started_at ?? null,
     heartbeat_at: s?.heartbeat_at ?? null,
     limits: s?.limits ?? null,
+    needs: s?.state === 'needs_input' ? (s.needs ?? { reason: 'the orchestrator needs you', since: s.updated_at }) : null,
+    pending_approvals: pending.map((f) => ({ id: f.id, text: f.text, ref: f.ref })),
     done_marker: exists(p.done),
     run_finished: runFinished(p),
     wrapup_marker: exists(p.wrapup),

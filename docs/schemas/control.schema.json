@@ -3,12 +3,41 @@
   "$id": "control.schema.json",
   "title": "Runner control request (.epoptes/run/control.json)",
   "type": "object",
-  "required": ["version", "pause_after_cycle", "requested_at", "by"],
+  "required": [
+    "version",
+    "pause_after_cycle",
+    "requested_at",
+    "by"
+  ],
   "additionalProperties": false,
   "properties": {
-    "version": { "const": 1 },
-    "pause_after_cycle": { "type": "boolean" },
-    "requested_at": { "type": "string", "format": "date-time" },
-    "by": { "enum": ["user", "orchestrator"] }
+    "version": {
+      "const": 1
+    },
+    "pause_after_cycle": {
+      "type": "boolean"
+    },
+    "requested_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "by": {
+      "enum": [
+        "user",
+        "orchestrator"
+      ]
+    },
+    "for_human": {
+      "type": "object",
+      "description": "set by `epoptes wait-for-human`: the run ends as needs_input instead of paused",
+      "required": [
+        "reason"
+      ],
+      "properties": {
+        "reason": {
+          "type": "string"
+        }
+      }
+    }
   }
 }

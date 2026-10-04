@@ -142,6 +142,39 @@ test('pause after this cycle, extend, feedback and events from the CLI', async (
   assert.match(g.run(['status', g.project]), /feedback 0 new · 0 open · 0 blocked · 1 closed/);
 });
 
+test('approvals: the run waits for the human, and answering the last one resumes it', async () => {
+  const g = setup();
+  g.run(['start', g.project], { FAKE_CLAUDE: 'approval' });
+  await until(() => g.read('run/status.json').state === 'needs_input');
+  const s = g.read('run/status.json');
+  assert.deepEqual(validate('status', s), []);
+  assert.equal(s.needs.reason, 'approve or reject F-1 (the font)');
+  assert.equal(s.pid, null);
+  assert.ok(g.read('run/clock.json').paused_at, 'the clock stops while it waits');
+  assert.equal(fs.existsSync(path.join(g.root, 'run', 'control.json')), false);
+  const ev = g.events();
+  for (const e of ev) assert.deepEqual(validate('event', e), [], JSON.stringify(e));
+  const blocked = ev.find((e) => e.type === 'blocked');
+  assert.deepEqual([blocked.src, blocked.text, blocked.ref], ['orchestrator', 'needs approval: buy a $5 font licence', 'F-1']);
+  assert.equal(ev.find((e) => e.type === 'needs_you').text, 'approve or reject F-1 (the font)');
+  assert.equal(ev.at(-1).reason, 'needs_you');
+  for (const op of readJsonl<any>(path.join(g.root, 'feedback.jsonl'))) assert.deepEqual(validate('feedback', op), [], JSON.stringify(op));
+
+  assert.match(g.run(['status', g.project]), /WAITING FOR YOU .*approve or reject F-1/);
+  assert.match(g.run(['status', g.project]), /approval F-1 waits for you: buy a \$5 font licence/);
+  assert.match(g.run(['feedback', g.project]), /F-1 +blocked +\[approval: waiting for the human; do not do it yet\] buy a \$5 font licence \(M1-2\)/);
+  assert.throws(() => g.run(['feedback', 'F-1', 'approve'], { EPOPTES_GOAL_DIR: g.root, EPOPTES_CYCLE: '9', EPOPTES_RUN: 'r1' }), /only the human/);
+
+  // Answering the only open approval resumes the run, with the answer visible to the next cycle.
+  const out = g.run(['feedback', 'F-1', 'approve', 'test', 'licence', 'only', '--goal', g.project], { FAKE_DONE_AT: '2' });
+  assert.match(out, /F-1 approved; the run resumes/);
+  await until(() => g.read('run/status.json').state === 'done');
+  assert.equal(g.read('run/status.json').needs, null);
+  assert.equal(g.read('cycles/000002/result.json').run, 'r1', 'resumed the same run');
+  assert.match(g.run(['feedback', g.project, '--open']), /F-1 +new +\[approval: APPROVED "test licence only"\]/);
+  for (const op of readJsonl<any>(path.join(g.root, 'feedback.jsonl'))) assert.deepEqual(validate('feedback', op), [], JSON.stringify(op));
+});
+
 test('gives up after repeated failures and reports a crash', async () => {
   const g = setup({ failures: { cooldown_after: 5, cooldown_min: 0, give_up_after: 2 } });
   g.run(['start', g.project], { FAKE_CLAUDE: 'error' });

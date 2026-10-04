@@ -68,7 +68,7 @@ There is no daemon. `epoptes start` spawns one detached runner per goal (`setsid
 
 **Liveness.** The runner writes `status.json` on every state change and a `heartbeat_at` every 15 s. A reader treats a goal as live when `pid` is alive (`kill -0`) and the heartbeat is < 60 s old. If `state` says running but the pid is dead, the next reader (CLI or dashboard) rewrites the state as `crashed` and pauses the clock at `heartbeat_at`. Starting a runner when a live one exists is refused.
 
-**States** (`status.json.state`): `idle` (never started / after reset), `running` (a cycle is in flight), `waiting` (between cycles), `rate_limited`, `cooldown`, `pausing` (pause requested, cycle finishing), `paused`, `stopped`, `crashed`, `failed` (gave up after `give_up_after` fails), `done`, `timeboxed` (hard stop reached).
+**States** (`status.json.state`): `idle` (never started / after reset), `running` (a cycle is in flight), `waiting` (between cycles), `rate_limited`, `cooldown`, `pausing` (pause requested, cycle finishing), `paused`, `needs_input` (paused because the orchestrator ran `epoptes wait-for-human`; `status.needs` says why), `stopped`, `crashed`, `failed` (gave up after `give_up_after` fails), `done`, `timeboxed` (hard stop reached).
 
 **Runs.** `start` from `idle`, `done`, `timeboxed` or after `reset-clock` begins a new run `r<k>` with a fresh clock. `start` from `paused`, `stopped`, `crashed` or `failed` resumes the current run. Cycle numbers are monotonic per goal across runs; each record carries its `run`.
 
@@ -77,6 +77,7 @@ There is no daemon. `epoptes start` spawns one detached runner per goal (`setsid
 |---|---|
 | start / resume | CLI spawns the runner; the clock resumes. If the run is over (DONE, or past the hard stop), `start` refuses unless given `--new-run` (dashboard: "Start new run…" with a confirm), because a new run spends tokens and only finds work if feedback or tasks were added. The `control` event says `start` for a new run and `resume` for a continuation |
 | pause after this cycle | CLI writes `control.json {pause_after_cycle: true}`; runner finishes the cycle, pauses the clock, sets `paused`, exits |
+| wait for the human | orchestrator runs `epoptes wait-for-human "<what>"`: `control.json {pause_after_cycle: true, for_human: {reason}}` plus a `needs_you` event. The run ends after the cycle as `needs_input` with `status.needs = {reason, since}` and the clock paused. Resume as usual; answering the last open approval (or "Send & resume" in the dashboard) resumes it by itself |
 | stop now | CLI sends SIGINT to the runner pid; the runner SIGINTs the adapter, kills it after 120 s, records the cycle as `interrupted`, pauses the clock, sets `stopped`, exits. The next cycle recovers interrupted work (loop.md orient step) |
 | extend `<dur>` | CLI adds to `clock.json.timebox_s` (wrap-up and hard stop move with it) |
 | reset-clock | only when no runner is live; clears `clock.json`, `DONE`, `WRAPUP`; next start is a new run |
@@ -93,12 +94,12 @@ There is no daemon. `epoptes start` spawns one detached runner per goal (`setsid
 - `run --dry-run` never creates or changes the clock.
 
 ## run/status.json — `status.schema.json`
-`{version, state, pid, run, cycle, mode, cycle_started_at, heartbeat_at, waiting_until, wait_reason, pause_requested, fails_in_row, limits, updated_at}`
+`{version, state, pid, run, cycle, mode, cycle_started_at, heartbeat_at, waiting_until, wait_reason, pause_requested, fails_in_row, limits, needs, updated_at}`
 
 `limits` is the latest account usage report from the adapter (`{status, resets_at, windows: {five_hour: {utilization, resets_at}, …}, at}`). Every goal runs on the same account, so the dashboard shows the newest `limits` across goals as the shared rate-limit state. It costs no tokens: claude-code emits it in the stream.
 
 ## run/control.json — `control.schema.json`
-`{version, pause_after_cycle, requested_at, by}`. The runner clears it when it acts on it.
+`{version, pause_after_cycle, requested_at, by, for_human?: {reason}}`. The runner clears it when it acts on it.
 
 ## events.jsonl — `event.schema.json`
 Envelope: `{ts, run, cycle, src: runner | orchestrator | user, type, ...payload}`. `run`/`cycle` are null outside a run.
@@ -106,14 +107,15 @@ Envelope: `{ts, run, cycle, src: runner | orchestrator | user, type, ...payload}
 | src | type | payload |
 |---|---|---|
 | runner | `run.start` | `timebox_s`, `resumed` (true when continuing a paused/stopped/crashed run) |
-| runner | `run.end` | `reason: done \| timebox \| paused \| stopped \| failed \| crashed`. `run.start`/`run.end` bracket one runner process; a run id can span several |
+| runner | `run.end` | `reason: done \| timebox \| paused \| needs_you \| stopped \| failed \| crashed`. `run.start`/`run.end` bracket one runner process; a run id can span several |
 | runner | `cycle.start` | `mode, model, effort, timeout_s` |
 | runner | `cycle.end` | `exit, duration_s, cost_usd, turns` (full detail in `cycles/N/result.json`) |
 | runner | `wait` | `reason: rate_limit \| cooldown \| between_cycles, seconds` |
 | runner | `mode` | `from, to` |
 | runner / user | `control` | `action: start \| resume \| pause \| stop \| extend \| reset, seconds?` |
 | runner | `warn` | `text` (state cap exceeded, clock restored, feedback file unparsable, …) |
-| orchestrator | `milestone`, `blocked`, `note` | `text`, `ref?` (task or feedback id) |
+| orchestrator | `milestone`, `blocked`, `note` | `text`, `ref?` (task or feedback id). `epoptes approval` emits `blocked` with `text: "needs approval: …"` and `ref: F-<n>` |
+| orchestrator / user | `needs_you` | `text`: what the human should do (`epoptes wait-for-human`) |
 | orchestrator | `artifact` | `path`, `text?` (produced file worth showing in reports) |
 | orchestrator | `round` | `n` |
 | orchestrator | `wrapup`, `done` | `text` (the CLI also creates `run/WRAPUP` / `run/DONE`) |
@@ -128,8 +130,9 @@ An append-only log of operations; the current state of each item is the fold of 
 {"ts":"…","op":"status","id":"F-3","status":"done","cycle":12,"by":"orchestrator","note":"arms clear skirts/bags"}
 {"ts":"…","op":"note","id":"F-3","text":"still clips with the big bag","by":"user"}
 ```
+- **Approvals.** `epoptes approval "<what>" [--ref <task>]` adds `{op: add, kind: "approval", src: "orchestrator", ref?}`; an approval starts as `blocked` (waiting for the human). The human answers with `{op: decide, decision: approved | rejected, by: user, note?}`, followed by a `status → new` line so the next cycle acts on it; `epoptes feedback --open` prints `[approval: APPROVED "<note>"]`. An approval is *pending* while it has no decision and isn't closed.
 - Statuses: `new → seen → in_progress → done | blocked | wont_do`. Any transition is allowed and recorded; you reopen an item by setting it to `new`.
-- `src` on add: `dashboard | cli | file`. `by` on status/note: `orchestrator | user`.
+- `src` on add: `dashboard | cli | file | orchestrator`. `by` on status/note: `orchestrator | user`.
 - Ids are `F-<n>`, next free number. Adds take `.epoptes/.feedback.lock` (created with O_EXCL, stale after 10 s) so two writers can't pick the same id.
 - **Inbox.** Before each cycle, and whenever `epoptes status`, `epoptes feedback` or the dashboard reads feedback, Epoptes ingests new bullets from `.epoptes/FEEDBACK.md` as `add` with `src: file` and appends ` → F-<n>` to each bullet. No model tokens are spent on intake.
 
@@ -212,8 +215,9 @@ A local web server (`src/ui/`) plus static files (`ui/`, Preact via `htm`'s stan
 - **Binding:** `127.0.0.1:4747` by default (`--port`, or `port` in `~/.epoptes/config.json`). `--lan` binds `0.0.0.0` after a warning; there is no login in v1.
 - **Guards:** requests must carry `Host: 127.0.0.1|localhost|[::1]:<port>` (DNS-rebinding guard; skipped with `--lan`). Every write needs `X-Epoptes: 1` and a JSON body, and a present `Origin` must match; that forces a CORS preflight the server never answers, so other sites can't post feedback (which ends up in prompts) or start runs. A strict CSP allows only `'self'`.
 - **Updates:** the server polls each goal every second (inotify doesn't work on WSL's `/mnt` drives), tails the JSONL files incrementally, and pushes `update` events over SSE (`/api/stream`): `{id, parts, events, feedback, activity, cycle}`. After a write it polls that goal at once.
-- **API:** `GET /api/state` (all goal summaries + newest `limits`), `GET /api/goals/<id>` (detail), `GET /api/goals/<id>/cycles/<n>` (one cycle's result and activity), `POST /api/goals/<id>/control {action: start|pause|stop|extend|reset, seconds?}`, `POST /api/goals/<id>/feedback {text}`, `POST /api/goals/<id>/feedback/<F-n> {status?, note?}`, `POST /api/goals/<id>/seen`.
-- **Unread badges:** feedback updates by the orchestrator and `milestone | blocked | done | warn | run.end` events newer than the goal's cursor in `~/.epoptes/ui.json`. Opening a goal moves the cursor; a goal seen for the first time starts at "now".
+- **API:** `GET /api/state` (all goal summaries + newest `limits`), `GET /api/goals/<id>` (detail), `GET /api/goals/<id>/cycles/<n>` (one cycle's result and activity), `POST /api/goals/<id>/control {action: start|pause|stop|extend|reset, seconds?}`, `POST /api/goals/<id>/feedback {text, resume?}` (`resume`: also resume a `needs_input` run), `POST /api/goals/<id>/feedback/<F-n> {status?, note?}` or `{decision: approved|rejected, note?}`, `POST /api/goals/<id>/seen`.
+- **Waiting for you:** a goal that is `needs_input` or has pending approvals shows a ⚑ line on its card, a highlighted panel at the top of its page (the reason, Approve / Disapprove with an optional note, and a reply box with "Send & resume"), and `⚑ <n>` in the page title.
+- **Unread badges:** feedback updates by the orchestrator and `milestone | blocked | needs_you | done | warn | run.end` events newer than the goal's cursor in `~/.epoptes/ui.json`. Opening a goal moves the cursor; a goal seen for the first time starts at "now".
 - **Notifications:** toasts and the activity feed for the same events plus rate-limit waits and failed cycles; desktop notifications (browser Notification API, opt-in button) for the types in `goal.notify`. Milestones and DONE get a small confetti burst, skipped under `prefers-reduced-motion`, which also turns off every animation.
 
 ## CLI
@@ -229,6 +233,9 @@ epoptes run [goal] --dry-run           check claude + files + guardrails (lint),
 epoptes feedback [goal] "<text>"
 epoptes feedback [goal] [--open]       list (--open: new, seen, in progress, blocked)
 epoptes feedback <F-n> <status> ["note"]
+epoptes feedback <F-n> approve|reject ["note"]   the human's answer to an approval
+epoptes approval "<what>" [--ref <task>]        (orchestrator) ask before doing something on the approval list
+epoptes wait-for-human "<what>"                 (orchestrator) end the run after this cycle as needs_input
 epoptes event <milestone|blocked|note|artifact|round|wrapup|done> "<text>"
 epoptes report [goal | --all] [--md | --html] [--stdout] [--out <dir>]
 epoptes import-runsh <project> [-g <id>]  import a dress2impress-style run.sh harness into <project>/.epoptes

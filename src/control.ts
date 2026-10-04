@@ -3,6 +3,7 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import { readClock, runFinished, writeClock } from './clock.ts';
 import { emit, readEvents } from './events.ts';
+import { decideApproval, pendingApprovals, readFeedback, type Decision } from './feedback.ts';
 import { exists, nowIso, rm, writeJson } from './fsx.ts';
 import { adapters } from './adapters/index.ts';
 import { loadGoal } from './goal.ts';
@@ -66,6 +67,47 @@ export function pause(project: string) {
   writeJson(p.control, { version: 1, pause_after_cycle: true, requested_at: nowIso(), by: process.env.EPOPTES_CYCLE ? 'orchestrator' : 'user' });
   emit(p, { src: 'user', type: 'control', run: s.run, cycle: s.cycle || null, action: 'pause' });
   return s;
+}
+
+/**
+ * Ends the run after this cycle as `needs_input`: the orchestrator can't move anything else until the human
+ * answers (approvals, a review, an opinion). Unlike a plain pause, the dashboard and status say so clearly.
+ */
+export function waitForHuman(project: string, reason: string) {
+  const p = goalPaths(project);
+  reason = reason.trim();
+  if (!reason) throw new Error('say what you are waiting for: epoptes wait-for-human "<what the human should do>"');
+  const s = reconcile(p);
+  if (!isLive(s)) throw new Error(`not running (state: ${s.state})`);
+  const inCycle = Boolean(process.env.EPOPTES_CYCLE);
+  writeJson(p.control, { version: 1, pause_after_cycle: true, requested_at: nowIso(), by: inCycle ? 'orchestrator' : 'user', for_human: { reason } });
+  emit(p, { src: inCycle ? 'orchestrator' : 'user', type: 'needs_you', run: s.run, cycle: s.cycle || null, text: reason });
+  return s;
+}
+
+/**
+ * The human's answer to an approval. When the run was waiting for the human and this was the last
+ * unanswered approval, the run resumes by itself.
+ */
+export async function decide(project: string, id: string, decision: Decision, note?: string): Promise<{ resumed: boolean; problem?: string }> {
+  const p = goalPaths(project);
+  decideApproval(p, id, decision, note);
+  return resumeIfAnswered(project);
+}
+
+/** Resumes a needs_input run once no approval is left unanswered. */
+export async function resumeIfAnswered(project: string, { force = false } = {}): Promise<{ resumed: boolean; problem?: string }> {
+  const p = goalPaths(project);
+  const s = reconcile(p);
+  if (s.state !== 'needs_input') return { resumed: false };
+  if (!force && pendingApprovals(readFeedback(p)).length) return { resumed: false };
+  try {
+    await start(project);
+  } catch (e) {
+    // The answer is recorded either way; say why the run didn't resume (e.g. the time box is over).
+    return { resumed: false, problem: (e as Error).message };
+  }
+  return { resumed: true };
 }
 
 /** Stop now: SIGINT to the runner, which interrupts the cycle; the next cycle recovers the interrupted work. */

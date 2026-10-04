@@ -50,7 +50,8 @@
         "artifact",
         "round",
         "wrapup",
-        "done"
+        "done",
+        "needs_you"
       ]
     }
   },
@@ -96,6 +97,7 @@
               "timebox",
               "paused",
               "stopped",
+              "needs_you",
               "failed",
               "crashed"
             ]
@@ -261,7 +263,8 @@
               "blocked",
               "note",
               "wrapup",
-              "done"
+              "done",
+              "needs_you"
             ]
           }
         }

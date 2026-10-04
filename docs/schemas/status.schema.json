@@ -27,6 +27,7 @@
         "cooldown",
         "pausing",
         "paused",
+        "needs_input",
         "stopped",
         "crashed",
         "failed",
@@ -139,6 +140,26 @@
           }
         },
         "at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "needs": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "description": "set while state is needs_input: what the orchestrator is waiting for",
+      "required": [
+        "reason",
+        "since"
+      ],
+      "properties": {
+        "reason": {
+          "type": "string"
+        },
+        "since": {
           "type": "string",
           "format": "date-time"
         }

@@ -79,7 +79,7 @@ const pct = (x) => `${Math.round(x * 100)}%`;
 const STATUS_LABEL = { new: 'new', seen: 'seen', in_progress: 'in progress', done: 'done', blocked: 'blocked', wont_do: "won't do" };
 const STATE_LABEL = {
   idle: 'idle', running: 'running', waiting: 'between cycles', rate_limited: 'rate-limited', cooldown: 'cooling down',
-  pausing: 'pausing after cycle', paused: 'paused', stopped: 'stopped', crashed: 'crashed', failed: 'failed', done: 'done', timeboxed: 'time box over',
+  pausing: 'pausing after cycle', paused: 'paused', needs_input: 'waiting for you', stopped: 'stopped', crashed: 'crashed', failed: 'failed', done: 'done', timeboxed: 'time box over',
 };
 const LIVE = ['running', 'waiting', 'rate_limited', 'cooldown', 'pausing'];
 
@@ -213,8 +213,12 @@ function announce(u) {
       desktop(goal, 'done', `Done · ${name}`, e.text);
       celebrate(true);
     } else if (e.type === 'blocked') {
-      toast({ kind: 'warn', title: `Blocked · ${name}`, body: e.text, ms: 12000 });
-      desktop(goal, 'blocked', `Blocked · ${name}`, e.text);
+      const approval = /^needs approval: /.test(e.text ?? '');
+      toast({ kind: 'warn', title: `${approval ? 'Approval needed' : 'Blocked'} · ${name}`, body: e.text.replace(/^needs approval: /, ''), ms: 12000 });
+      desktop(goal, 'blocked', `${approval ? 'Approval needed' : 'Blocked'} · ${name}`, e.text);
+    } else if (e.type === 'needs_you') {
+      toast({ kind: 'warn', title: `Waiting for you · ${name}`, body: `${e.text} (the run pauses after this cycle)`, ms: 15000 });
+      desktop(goal, 'blocked', `Waiting for you · ${name}`, e.text);
     } else if (e.type === 'warn') {
       toast({ kind: 'warn', title: `Warning · ${name}`, body: e.text });
       desktop(goal, 'warn', `Warning · ${name}`, e.text);
@@ -222,7 +226,7 @@ function announce(u) {
       toast({ kind: 'warn', title: `Rate-limited · ${name}`, body: `Waiting ${dur(e.seconds)} before the next cycle.` });
     } else if (e.type === 'cycle.end' && e.exit !== 'ok' && e.exit !== 'interrupted') {
       toast({ kind: 'bad', title: `Cycle ${e.cycle} ${e.exit} · ${name}`, body: 'See the cycle table for details.' });
-    } else if (e.type === 'run.end' && e.reason !== 'done') {
+    } else if (e.type === 'run.end' && e.reason !== 'done' && e.reason !== 'needs_you') {
       toast({ kind: e.reason === 'failed' || e.reason === 'crashed' ? 'bad' : 'info', title: `${name}: run ${e.reason}`, body: `After cycle ${e.cycle ?? '–'}.` });
       desktop(goal, 'run.end', `${name}: run ${e.reason}`, `After cycle ${e.cycle ?? '–'}`);
     }
@@ -303,6 +307,84 @@ function Topbar() {
   </header>`;
 }
 
+// ---------------------------------------------------------------- waiting for you
+
+/** One line on a goal card when the human is needed: the run waits, or approvals are pending. */
+function NeedsYouLine({ g }) {
+  const n = g.pending_approvals?.length ?? 0;
+  if (!g.needs && !n) return null;
+  const what = g.needs ? `Waiting for you: ${g.needs.reason}` : `${n} approval${n > 1 ? 's' : ''} waiting for you`;
+  return html`<div class="needs-line" title=${what}><span class="flagmark" aria-hidden="true">⚑</span><span>${what}</span>${g.needs && n > 0 ? html`<span class="faint">· ${n} approval${n > 1 ? 's' : ''}</span>` : ''}</div>`;
+}
+
+function decideApproval(goalId, id, decision, note) {
+  return api
+    .post(`/api/goals/${goalId}/feedback/${id}`, { decision, note: note || undefined })
+    .then((r) => {
+      toast({ kind: 'info', title: `${id} ${decision === 'approved' ? 'approved' : 'disapproved'}`, body: r.resumed ? 'Nothing else was waiting, so the run resumes.' : r.problem ? `Not resumed: ${r.problem}` : 'The next cycle acts on it.', ms: 5000 });
+      loadState();
+      loadDetail();
+    })
+    .catch((e) => toast({ kind: 'bad', title: `Could not answer ${id}`, body: e.message }));
+}
+
+/** Approve / Disapprove, with an optional note that goes to the orchestrator. */
+function ApprovalButtons({ goalId, f }) {
+  const [busy, setBusy] = useState(false);
+  const [noting, setNoting] = useState(false);
+  const [note, setNote] = useState('');
+  const go = (decision) => {
+    setBusy(true);
+    decideApproval(goalId, f.id, decision, note.trim()).finally(() => setBusy(false));
+  };
+  return html`<div class="approval-actions">
+    <button class="btn small approve" disabled=${busy} onClick=${() => go('approved')}>✓ Approve</button>
+    <button class="btn small reject" disabled=${busy} onClick=${() => go('rejected')}>✕ Disapprove</button>
+    <button class="btn small ghost" onClick=${() => setNoting(!noting)} aria-expanded=${noting}>${noting ? 'No note' : 'Add a note'}</button>
+    ${noting && html`<input type="text" class="approval-note" value=${note} onInput=${(e) => setNote(e.currentTarget.value)} placeholder="Conditions or reasons (sent with your answer)" aria-label=${`Note for ${f.id}`} />`}
+  </div>`;
+}
+
+/** The panel at the top of a goal when it needs the human: what it waits for, approvals, and a reply box. */
+function NeedsYou({ d }) {
+  const [text, setText] = useState('');
+  const [busy, setBusy] = useState(false);
+  const pending = d.feedback.filter((f) => f.kind === 'approval' && !f.decision && !['done', 'wont_do'].includes(f.status));
+  if (!d.needs && !pending.length) return null;
+  const reply = (e) => {
+    e?.preventDefault();
+    setBusy(true);
+    const p = text.trim() ? api.post(`/api/goals/${d.id}/feedback`, { text: text.trim(), resume: true }) : api.post(`/api/goals/${d.id}/control`, { action: 'start' }).then(() => ({ resumed: true }));
+    p.then((r) => {
+      setText('');
+      toast({ kind: 'info', title: r.resumed ? 'Resuming' : r.id ? `${r.id} added` : 'Sent', body: r.problem ? `Not resumed: ${r.problem}` : d.name, ms: 4000 });
+    })
+      .catch((err) => toast({ kind: 'bad', title: 'Could not resume', body: err.message }))
+      .finally(() => {
+        setBusy(false);
+        loadState();
+        loadDetail();
+      });
+  };
+  return html`<section class="panel needs-you" aria-live="polite">
+    <h2><span class="flagmark" aria-hidden="true">⚑</span> ${d.needs ? 'Waiting for you' : 'Approval needed'}
+      <span class="right muted">${d.needs ? `paused ${ago(d.needs.since)} · the clock is stopped` : 'the run keeps working on other tasks meanwhile'}</span></h2>
+    ${d.needs && html`<p class="needs-reason">${d.needs.reason}</p>`}
+    ${pending.length > 0 &&
+    html`<ul class="approvals">${pending.map((f) => html`<li key=${f.id}>
+      <div class="approval-text"><span class="id">${f.id}</span> ${f.text}${f.ref ? html` <span class="chip">${f.ref}</span>` : ''}</div>
+      <${ApprovalButtons} goalId=${d.id} f=${f} />
+    </li>`)}</ul>`}
+    ${d.needs &&
+    html`<form class="fb-form needs-reply" onSubmit=${reply}>
+      <textarea rows="2" value=${text} disabled=${busy} placeholder=${pending.length ? 'Anything else to tell it? (optional)' : 'Your answer or opinion. It becomes a feedback item the next cycle reads first.'}
+        aria-label="Reply" onInput=${(e) => setText(e.currentTarget.value)} onKeyDown=${(e) => (e.ctrlKey || e.metaKey) && e.key === 'Enter' && reply(e)}></textarea>
+      <div class="row"><span class="faint">${pending.length ? 'Answering the last approval resumes the run by itself.' : 'Ctrl+Enter to send'}</span>
+        <button class="btn primary small" disabled=${busy}>${text.trim() ? 'Send & resume' : 'Resume'}</button></div>
+    </form>`}
+  </section>`;
+}
+
 // ---------------------------------------------------------------- goal list
 
 function GoalCard({ g }) {
@@ -321,6 +403,7 @@ function GoalCard({ g }) {
       <${StatePill} state=${g.state} />
     </div>
     <div class="objective">${g.objective}</div>
+    <${NeedsYouLine} g=${g} />
     <${ClockBar} g=${g} />
     <div class="facts">
       ${g.mode && html`<span class="chip ${g.mode}">${g.mode}</span>`}
@@ -374,7 +457,7 @@ function Controls({ d }) {
     : 'The time box is over. Start a new run with a fresh time box?\n\nTo continue this run instead, cancel and use +30m / +1h / +2h.';
   const start = () => (finished ? act('start', { new_run: true }, newRunText) : act('start'));
   return html`<div class="controls">
-    ${!live && html`<button class=${`btn ${finished ? '' : 'primary'}`} disabled=${busy} onClick=${start}>▶ ${finished ? 'Start new run…' : d.clock ? 'Resume' : 'Start'}</button>`}
+    ${!live && html`<button class=${`btn ${finished ? '' : 'primary'}`} disabled=${busy} onClick=${start} title=${d.needs ? 'Resume without answering' : ''}>▶ ${finished ? 'Start new run…' : d.clock ? 'Resume' : 'Start'}</button>`}
     ${live && html`<button class="btn" disabled=${busy || d.pause_requested} onClick=${() => act('pause')} title="Finish the current cycle, then pause (the clock pauses too)">‖ ${d.pause_requested ? 'Pausing after cycle' : 'Pause after cycle'}</button>`}
     ${live && html`<button class="btn danger" disabled=${busy} onClick=${() => act('stop', {}, 'Stop now? The current cycle is interrupted; the next start recovers its work.')}>■ Stop now</button>`}
     ${d.clock &&
@@ -587,12 +670,13 @@ function CycleDetail({ d }) {
 
 const FEED_ICON = {
   milestone: '★', done: '✓', blocked: '⊘', note: '•', artifact: '▤', warn: '⚠', wait: '◔', control: '›',
-  'run.start': '▶', 'run.end': '■', mode: '↪', 'cycle.end': '✕', wrapup: '↧',
+  'run.start': '▶', 'run.end': '■', mode: '↪', 'cycle.end': '✕', wrapup: '↧', needs_you: '⚑',
 };
 function feedText(e) {
   switch (e.type) {
     case 'run.start': return `Run ${e.run} ${e.resumed ? 'resumed' : 'started'}`;
-    case 'run.end': return `Run ${e.run} ended: ${e.reason}`;
+    case 'run.end': return e.reason === 'needs_you' ? `Run ${e.run} paused: waiting for you` : `Run ${e.run} ended: ${e.reason}`;
+    case 'needs_you': return `Waiting for you: ${e.text}`;
     case 'control': return `You: ${e.action}${e.seconds ? ` ${dur(e.seconds)}` : ''}`;
     case 'wait': return `${e.reason === 'rate_limit' ? 'Rate-limit wait' : 'Cooldown'}: ${dur(e.seconds)}`;
     case 'mode': return `Mode ${e.from} → ${e.to}`;
@@ -606,7 +690,7 @@ function Feed({ d }) {
   const groups = {
     all: (e) => !['cycle.start', 'round'].includes(e.type) && !(e.type === 'cycle.end' && e.exit === 'ok') && !(e.type === 'wait' && e.reason === 'between_cycles'),
     milestones: (e) => ['milestone', 'done', 'artifact', 'wrapup'].includes(e.type),
-    problems: (e) => ['blocked', 'warn'].includes(e.type) || (e.type === 'cycle.end' && e.exit !== 'ok') || (e.type === 'wait' && e.reason !== 'between_cycles'),
+    problems: (e) => ['blocked', 'warn', 'needs_you'].includes(e.type) || (e.type === 'cycle.end' && e.exit !== 'ok') || (e.type === 'wait' && e.reason !== 'between_cycles'),
     notes: (e) => e.type === 'note',
   };
   const items = d.events.filter(groups[filter]).reverse().slice(0, 120);
@@ -629,6 +713,9 @@ function Feed({ d }) {
   </section>`;
 }
 
+const SRC_LABEL = { file: 'from FEEDBACK.md', orchestrator: 'from the orchestrator', dashboard: 'from the dashboard', cli: 'from the CLI' };
+const histVerb = (o) => (o.op === 'status' ? ` → ${STATUS_LABEL[o.status]}` : o.op === 'decide' ? (o.decision === 'approved' ? ' approved' : ' disapproved') : ' noted');
+
 function FeedbackItem({ d, f, seen }) {
   const [noting, setNoting] = useState(false);
   const [note, setNote] = useState('');
@@ -637,13 +724,14 @@ function FeedbackItem({ d, f, seen }) {
     api.post(`/api/goals/${d.id}/feedback/${f.id}`, body).then(() => loadDetail()).catch((e) => toast({ kind: 'bad', title: `Could not update ${f.id}`, body: e.message }));
   const lastCycle = f.history.findLast((o) => o.cycle)?.cycle;
   return html`<li class="fb ${updated ? 'updated' : ''}">
-    <div class="head"><span class="id">${f.id}</span><span class="st ${f.status}">${STATUS_LABEL[f.status]}</span>${updated && html`<span class="new-dot" title="updated since you last looked"></span>`}</div>
-    <div class="text">${f.text}</div>
-    <div class="meta"><span>${f.src === 'file' ? 'from FEEDBACK.md' : `from ${f.src}`} · ${ago(f.created_at)}</span>${lastCycle && html`<span>last touched in c${lastCycle}</span>`}</div>
+    <div class="head"><span class="id">${f.id}</span>${f.kind === 'approval' && html`<span class="kind approval">approval</span>`}<span class="st ${f.status}">${f.kind === 'approval' && !f.decision && f.status === 'blocked' ? 'waiting for you' : STATUS_LABEL[f.status]}</span>${f.decision && html`<span class="decision ${f.decision}">${f.decision === 'approved' ? '✓ approved' : '✕ disapproved'}</span>`}${updated && html`<span class="new-dot" title="updated since you last looked"></span>`}</div>
+    <div class="text">${f.text}${f.ref ? html` <span class="chip">${f.ref}</span>` : ''}</div>
+    <div class="meta"><span>${SRC_LABEL[f.src] ?? `from ${f.src}`} · ${ago(f.created_at)}</span>${lastCycle && html`<span>last touched in c${lastCycle}</span>`}</div>
+    ${f.kind === 'approval' && !f.decision && !['done', 'wont_do'].includes(f.status) && html`<${ApprovalButtons} goalId=${d.id} f=${f} />`}
     ${f.history.length > 1 &&
     html`<details open=${updated}>
       <summary>${f.history.length - 1} update${f.history.length > 2 ? 's' : ''}</summary>
-      <ul class="hist">${f.history.slice(1).map((o, i) => html`<li key=${i}>${o.cycle ? `c${o.cycle} · ` : ''}${o.by}${o.op === 'status' ? ` → ${STATUS_LABEL[o.status]}` : ' noted'}${o.note || o.text ? `: ${o.note ?? o.text}` : ''} <span class="faint">· ${ago(o.ts)}</span></li>`)}</ul>
+      <ul class="hist">${f.history.slice(1).map((o, i) => html`<li key=${i}>${o.cycle ? `c${o.cycle} · ` : ''}${o.by === 'user' ? 'you' : o.by}${histVerb(o)}${o.note || o.text ? `: ${o.note ?? o.text}` : ''} <span class="faint">· ${ago(o.ts)}</span></li>`)}</ul>
     </details>`}
     <div class="actions">
       <select aria-label=${`Status of ${f.id}`} value=${f.status} onChange=${(e) => post({ status: e.currentTarget.value })}>
@@ -771,6 +859,7 @@ function GoalDetail({ id }) {
       <${ClockBar} g=${d} big=${true} />
       <${Controls} d=${d} />
       <${Banners} d=${d} />
+      <${NeedsYou} d=${d} />
     </div>
     ${d.cycles === 0 && !d.live && html`<${FirstRun} d=${d} />`}
     <${Stats} d=${d} />
@@ -816,8 +905,9 @@ function App() {
   const s = useStore();
   const id = useRoute();
   useEffect(() => {
-    document.title = s.detail?.name ? `${s.detail.name} · Epoptes` : 'Epoptes';
-  }, [s.detail?.name]);
+    const waiting = s.state?.goals.filter((g) => g.needs || g.pending_approvals?.length).length ?? 0;
+    document.title = `${waiting ? `⚑ ${waiting} · ` : ''}${s.detail?.name ? `${s.detail.name} · Epoptes` : 'Epoptes'}`;
+  }, [s.detail?.name, s.state]);
   return html`<${Topbar} />
     ${s.offline && html`<div class="offline pill bad">Dashboard server unreachable. Runs keep going; reconnecting…</div>`}
     <main>${id ? html`<${GoalDetail} id=${id} />` : html`<${GoalList} />`}</main>

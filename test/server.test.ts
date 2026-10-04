@@ -95,6 +95,22 @@ test('feedback from the dashboard streams to clients', async () => {
   assert.equal(d.json.feedback[0].status, 'wont_do');
 });
 
+test('approvals are answered from the dashboard', async () => {
+  const { addFeedback } = await import('../src/feedback.ts');
+  const { goalPaths } = await import('../src/paths.ts');
+  const id = addFeedback(goalPaths(project), 'use a paid map API', 'orchestrator', { kind: 'approval', ref: 'M2-1' });
+  await new Promise((r) => setTimeout(r, 300)); // let the watcher poll the file
+  let d = await req('GET', '/api/goals/ui-test');
+  assert.deepEqual(d.json.pending_approvals, [{ id, text: 'use a paid map API', ref: 'M2-1' }]);
+  assert.equal(d.json.feedback.find((f: any) => f.id === id).status, 'blocked');
+  assert.equal((await post(`/api/goals/ui-test/feedback/F-1`, { decision: 'approved' })).status, 400, 'only approvals take a decision');
+  const r = await post(`/api/goals/ui-test/feedback/${id}`, { decision: 'rejected', note: 'use the free one' });
+  assert.deepEqual(r.json, { ok: true, resumed: false }, 'an idle goal is not started');
+  d = await req('GET', '/api/goals/ui-test');
+  const f = d.json.feedback.find((x: any) => x.id === id);
+  assert.deepEqual([f.decision, f.status, d.json.pending_approvals.length], ['rejected', 'new', 0]);
+});
+
 test('controls report errors instead of crashing', async () => {
   const r = await post('/api/goals/ui-test/control', { action: 'pause' });
   assert.equal(r.status, 400);

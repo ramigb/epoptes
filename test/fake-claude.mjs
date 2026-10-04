@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Stands in for `claude -p` in runner tests (set EPOPTES_CLAUDE_BIN to this file). Costs no tokens.
-// FAKE_CLAUDE = ok (default) | slow | error | ratelimit | trickle (slow stream, for watching the dashboard). FAKE_DONE_AT = cycle number that marks the goal DONE.
+// FAKE_CLAUDE = ok (default) | slow | error | ratelimit | trickle (slow stream, for watching the dashboard)
+//   | approval (asks for an approval, then waits for the human). FAKE_DONE_AT = cycle number that marks the goal DONE.
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -70,7 +71,11 @@ if (mode === 'trickle') {
   if (Number(process.env.FAKE_DONE_AT) === cycle) execFileSync('epoptes', ['event', 'done', 'demo finished']);
   process.exit(0);
 }
-if (mode === 'slow') {
+if (mode === 'approval') {
+  for (const line of fixture) out(line);
+  execFileSync('epoptes', ['approval', 'buy a $5 font licence', '--ref', 'M1-2']);
+  execFileSync('epoptes', ['wait-for-human', 'approve or reject F-1 (the font)']);
+} else if (mode === 'slow') {
   out(fixture[0]);
   process.on('SIGINT', () => process.exit(130));
   setTimeout(() => process.exit(0), 60_000);

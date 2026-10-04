@@ -10,7 +10,7 @@ import { agentsFromDir } from './adapters/claude-code.ts';
 import { readClock, readClockState } from './clock.ts';
 import * as control from './control.ts';
 import { emit } from './events.ts';
-import { addFeedback, ingestInbox, noteFeedback, readFeedback, setFeedbackStatus, STATUSES, type FeedbackStatus } from './feedback.ts';
+import { addFeedback, ingestInbox, noteFeedback, pendingApprovals, readFeedback, setFeedbackStatus, STATUSES, type FeedbackItem, type FeedbackStatus } from './feedback.ts';
 import { exists, hm, parseDuration, readJson, touch } from './fsx.ts';
 import { loadGoal } from './goal.ts';
 import { lintGoal } from './lint.ts';
@@ -41,7 +41,12 @@ Steering
   feedback [goal] [--open]        list feedback (--open: only items that still need attention)
   feedback <F-n> <status> [note]  set status: ${STATUSES.join(', ')}
   feedback <F-n> note "<text>"    comment on an item
+  feedback <F-n> approve|reject [note]  answer an approval request
   event <type> "<text>"           milestone | blocked | note | artifact | round | wrapup | done
+
+Inside cycles (orchestrators)
+  approval "<what>" [--ref <task>]  ask the human before doing something on the approval list
+  wait-for-human "<what>"         end the run after this cycle as "waiting for you" (nothing else can move)
 
 Later
 Skill
@@ -63,6 +68,17 @@ Reports
 const EVENT_TYPES = ['milestone', 'blocked', 'note', 'artifact', 'round', 'wrapup', 'done'];
 
 const inCycle = () => Boolean(process.env.EPOPTES_CYCLE);
+
+/** One line per item in `epoptes feedback`; approvals say whether the human has answered. */
+function feedbackLine(f: FeedbackItem): string {
+  let tag = '';
+  if (f.kind === 'approval') tag = f.decision ? `[approval: ${f.decision.toUpperCase()}${decisionNote(f)}] ` : '[approval: waiting for the human; do not do it yet] ';
+  return `${f.id.padEnd(6)} ${f.status.padEnd(12)} ${tag}${f.text}${f.ref ? ` (${f.ref})` : ''}`;
+}
+const decisionNote = (f: FeedbackItem) => {
+  const op = f.history.findLast((o) => o.op === 'decide');
+  return op && op.op === 'decide' && op.note ? ` "${op.note}"` : '';
+};
 const envCycle = () => (process.env.EPOPTES_CYCLE ? Number(process.env.EPOPTES_CYCLE) : null);
 const tilde = (p: string) => (p.startsWith(os.homedir()) ? '~' + p.slice(os.homedir().length) : p);
 const ago = (iso: string | null) => (iso ? hm((Date.now() - Date.parse(iso)) / 1000) : '–');
@@ -80,6 +96,7 @@ function statusText(project: string): string {
   if (cs && c) {
     out.push(`clock ${hm(cs.active)} active of ${hm(c.timebox_s)} · wrap-up in ${hm(cs.toWrapup)} · end in ${hm(cs.toEnd)} · hard stop in ${hm(cs.toHard)}${c.paused_at ? ' · paused' : ''}`);
   } else out.push('clock not started');
+  if (s.state === 'needs_input') out.push(`WAITING FOR YOU (${ago(s.needs?.since ?? null)}): ${s.needs?.reason ?? 'the orchestrator needs you'}`);
   if (s.cycle_started_at) out.push(`cycle ${s.cycle} running for ${ago(s.cycle_started_at)}`);
   if (s.waiting_until) out.push(`waiting (${s.wait_reason}) until ${new Date(s.waiting_until).toLocaleTimeString()}`);
   if (exists(p.done)) out.push('DONE marker set');
@@ -92,6 +109,7 @@ function statusText(project: string): string {
   if (fb.length) {
     const n = (st: FeedbackStatus[]) => fb.filter((f) => st.includes(f.status)).length;
     out.push(`feedback ${n(['new'])} new · ${n(['seen', 'in_progress'])} open · ${n(['blocked'])} blocked · ${n(['done', 'wont_do'])} closed`);
+    for (const f of pendingApprovals(fb)) out.push(`  approval ${f.id} waits for you: ${f.text}  (epoptes feedback ${f.id} approve|reject ["note"])`);
   }
   if (s.limits) {
     const w = Object.entries(s.limits.windows).map(([k, v]) => `${k} ${Math.round(v.utilization * 100)}%`).join(' · ');
@@ -157,6 +175,7 @@ async function main(argv: string[]) {
       port: { type: 'string' },
       lan: { type: 'boolean' },
       agent: { type: 'string' },
+      ref: { type: 'string' },
     },
   });
   const [cmd, ...rest] = positionals;
@@ -264,6 +283,10 @@ async function main(argv: string[]) {
         if (what === 'note') {
           noteFeedback(p, id, text.join(' '), by, envCycle());
           console.log(`${id}: note added`);
+        } else if (what === 'approve' || what === 'reject') {
+          if (inCycle()) throw new Error('only the human answers approvals');
+          const r = await control.decide(p.project, id, what === 'approve' ? 'approved' : 'rejected', text.join(' ') || undefined);
+          console.log(`${id} ${what === 'approve' ? 'approved' : 'rejected'}${r.resumed ? '; the run resumes' : r.problem ? `; not resumed: ${r.problem}` : ''}`);
         } else {
           setFeedbackStatus(p, id, what as FeedbackStatus, by, envCycle(), text.join(' ') || undefined);
           console.log(`${id} → ${what}`);
@@ -285,11 +308,27 @@ async function main(argv: string[]) {
         ingestInbox(p);
         const items = [...readFeedback(p).values()].filter((f) => !values.open || !['done', 'wont_do'].includes(f.status));
         if (!items.length) console.log(values.open ? 'no open feedback' : 'no feedback yet');
-        for (const f of items) console.log(`${f.id.padEnd(6)} ${f.status.padEnd(12)} ${f.text}`);
+        for (const f of items) console.log(feedbackLine(f));
         return;
       }
       const id = addFeedback(goalPaths(resolveGoal(ref)), text, 'cli');
       console.log(`added ${id}`);
+      return;
+    }
+    case 'approval': {
+      const text = rest.join(' ').trim();
+      if (!text) throw new Error('usage: epoptes approval "<what needs approval>" [--ref <task id>]');
+      const p = goalPaths(resolveGoal(values.goal));
+      const s = reconcile(p);
+      const id = addFeedback(p, text, inCycle() ? 'orchestrator' : 'cli', { kind: 'approval', ref: values.ref });
+      emit(p, { src: inCycle() ? 'orchestrator' : 'user', type: 'blocked', run: process.env.EPOPTES_RUN ?? s.run, cycle: envCycle() ?? (s.cycle || null), text: `needs approval: ${text}`, ref: id });
+      console.log(`${id}: approval requested. Carry on with other work; the decision shows in \`epoptes feedback --open\`.`);
+      return;
+    }
+    case 'wait-for-human': {
+      const text = rest.join(' ').trim();
+      control.waitForHuman(resolveGoal(values.goal), text);
+      console.log('the run ends after this cycle and waits for the human; finish recording state, then exit');
       return;
     }
     case 'event': {

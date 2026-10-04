@@ -114,6 +114,8 @@ main { max-width: 1320px; margin: 0 auto; padding: 24px; }
 .state.rate_limited, .state.cooldown { background: var(--warn-soft); color: var(--warn); }
 .state.failed, .state.crashed { background: var(--bad-soft); color: var(--bad); }
 .state.done { background: var(--done-soft); color: var(--done); }
+.state.needs_input { background: var(--accent-soft); color: var(--accent); }
+.state.needs_input .dot { animation: blink 1.2s ease-in-out infinite; }
 .state.running .dot::after, .state.pausing .dot::after {
   content: ''; position: absolute; inset: 0; border-radius: 50%;
   background: currentColor; animation: pulse 1.6s ease-out infinite;
@@ -294,6 +296,30 @@ tr.flagged td:first-child { box-shadow: inset 3px 0 0 var(--warn); }
 .exit.interrupted { color: var(--idle); }
 .est { border-bottom: 1px dotted var(--faint); cursor: help; white-space: nowrap; }
 td.r { white-space: nowrap; }
+
+/* ---------- waiting for you ---------- */
+.flagmark { color: var(--accent); }
+.needs-line { display: flex; gap: 6px; align-items: baseline; font-size: 13px; font-weight: 550; color: var(--accent); min-width: 0; }
+.needs-line span:nth-child(2) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.needs-line .faint { white-space: nowrap; font-weight: 450; }
+.needs-you { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft), var(--shadow); animation: needsin 0.5s ease-out; }
+@keyframes needsin { from { opacity: 0; transform: translateY(-4px); } }
+.needs-you h2 { color: var(--accent); }
+.needs-reason { margin: 0 0 12px; font-size: 15px; font-weight: 550; overflow-wrap: anywhere; }
+.approvals { list-style: none; margin: 0 0 4px; padding: 0; display: grid; gap: 10px; }
+.approvals li { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; background: var(--panel-2); }
+.approval-text { overflow-wrap: anywhere; }
+.approval-text .id, .fb .kind { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+.approval-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; align-items: center; }
+.btn.approve { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, var(--line)); }
+.btn.reject { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 45%, var(--line)); }
+.btn.ghost { border-color: transparent; background: transparent; color: var(--muted); }
+.approval-note { flex: 1 1 100%; }
+.needs-reply { margin: 12px 0 0; }
+.fb .kind.approval { padding: 0 6px; border-radius: 6px; background: var(--accent-soft); color: var(--accent); }
+.decision { font-size: 11.5px; font-weight: 600; }
+.decision.approved { color: var(--ok); }
+.decision.rejected { color: var(--bad); }
 
 /* ---------- feedback ---------- */
 .fb-form { display: grid; gap: 8px; margin-bottom: 14px; }

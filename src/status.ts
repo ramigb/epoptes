@@ -6,7 +6,7 @@ import type { GoalPaths } from './paths.ts';
 
 export type RunState =
   | 'idle' | 'running' | 'waiting' | 'rate_limited' | 'cooldown' | 'pausing'
-  | 'paused' | 'stopped' | 'crashed' | 'failed' | 'done' | 'timeboxed';
+  | 'paused' | 'needs_input' | 'stopped' | 'crashed' | 'failed' | 'done' | 'timeboxed';
 
 export const LIVE_STATES: RunState[] = ['running', 'waiting', 'rate_limited', 'cooldown', 'pausing'];
 
@@ -31,6 +31,8 @@ export interface Status {
   pause_requested: boolean;
   fails_in_row: number;
   limits: Limits | null;
+  /** set while state is needs_input (`epoptes wait-for-human`) */
+  needs?: { reason: string; since: string } | null;
   updated_at: string;
 }
 
@@ -38,7 +40,7 @@ export function idleStatus(): Status {
   return {
     version: 1, state: 'idle', pid: null, run: null, cycle: 0, mode: null, cycle_started_at: null,
     heartbeat_at: null, waiting_until: null, wait_reason: null, pause_requested: false, fails_in_row: 0,
-    limits: null, updated_at: nowIso(),
+    limits: null, needs: null, updated_at: nowIso(),
   };
 }
 

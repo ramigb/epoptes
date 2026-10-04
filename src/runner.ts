@@ -18,8 +18,8 @@ const KILL_AFTER_MS = 120_000;
 const MIN_TIMEOUT_MIN = 20;
 const MAX_TIMEOUT_MIN = 180;
 
-type EndReason = 'done' | 'timebox' | 'paused' | 'stopped' | 'failed';
-const END_STATE = { done: 'done', timebox: 'timeboxed', paused: 'paused', stopped: 'stopped', failed: 'failed' } as const;
+type EndReason = 'done' | 'timebox' | 'paused' | 'needs_you' | 'stopped' | 'failed';
+const END_STATE = { done: 'done', timebox: 'timeboxed', paused: 'paused', needs_you: 'needs_input', stopped: 'stopped', failed: 'failed' } as const;
 
 const log = (msg: string) => console.log(`[${nowIso()}] ${msg}`);
 
@@ -108,7 +108,7 @@ export async function runGoal(project: string) {
   rm(p.control);
   const shimDir = writeShim(p);
 
-  let status: Status = { ...prev, state: 'waiting', pid: process.pid, run, heartbeat_at: nowIso(), pause_requested: false, fails_in_row: 0, waiting_until: null, wait_reason: null };
+  let status: Status = { ...prev, state: 'waiting', pid: process.pid, run, heartbeat_at: nowIso(), pause_requested: false, fails_in_row: 0, waiting_until: null, wait_reason: null, needs: null };
   const setStatus = (patch: Partial<Status>) => {
     status = { ...status, ...patch };
     writeStatus(p, status);
@@ -127,7 +127,10 @@ export async function runGoal(project: string) {
       wake = () => (clearTimeout(t), (wake = null), resolve());
     });
 
-  const pauseRequested = () => readJson<{ pause_after_cycle?: boolean }>(p.control)?.pause_after_cycle === true;
+  const readControl = () => readJson<{ pause_after_cycle?: boolean; for_human?: { reason: string } }>(p.control);
+  const pauseRequested = () => readControl()?.pause_after_cycle === true;
+  // A pause from `epoptes wait-for-human` ends the run as needs_input, with its reason.
+  const pauseReason = (): EndReason => (readControl()?.for_human ? 'needs_you' : 'paused');
   const onStop = () => {
     if (stopRequested) return;
     stopRequested = true;
@@ -152,8 +155,9 @@ export async function runGoal(project: string) {
     clearInterval(heartbeat);
     const c = readClock(p) ?? backup;
     writeClock(p, pauseClock(c));
-    if (reason === 'paused') rm(p.control);
-    setStatus({ state: END_STATE[reason], pid: null, pause_requested: false, waiting_until: null, wait_reason: null, cycle_started_at: null });
+    const needs = reason === 'needs_you' ? { reason: readControl()?.for_human?.reason ?? 'the orchestrator needs you', since: nowIso() } : null;
+    if (reason === 'paused' || reason === 'needs_you') rm(p.control);
+    setStatus({ state: END_STATE[reason], pid: null, pause_requested: false, waiting_until: null, wait_reason: null, cycle_started_at: null, needs });
     emit(p, { src: 'runner', type: 'run.end', run, cycle: status.cycle || null, reason });
     rm(p.lock);
     log(`run ${run} ended: ${reason}`);
@@ -194,8 +198,8 @@ export async function runGoal(project: string) {
       }
 
       if (stopRequested) return finish('stopped');
-      if (pauseRequested()) return finish('paused');
       if (exists(p.done)) return finish('done');
+      if (pauseRequested()) return finish(pauseReason());
 
       const st = clockState(backup, { wrapupMarker: exists(p.wrapup) });
       if (lastMode && st.mode !== lastMode) emit(p, { src: 'runner', type: 'mode', run, from: lastMode, to: st.mode });
