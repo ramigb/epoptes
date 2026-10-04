@@ -7,7 +7,7 @@ Every item below needs an answer the user agreed to. "Sensible default, confirme
 ## 1. Outcome
 - What exists at the end that doesn't exist now? Name the artifact: an app, a report, a dataset, a set of documents.
 - Who is it for, and what is the quality bar? Anchor it with a comparison ("reads like a McKinsey brief", "a 6-year-old can play it without help").
-- Where does it live? The project directory, and which files or folders are the deliverable.
+- Where does it live? The project directory, and which files or folders are the deliverable. The main one goes in goal.json `output` (a path in the project, like `index.html` or `report/`, or a URL), so the dashboard can link to it when the job is done.
 
 ## 2. Done definition, with checks that can be verified
 Turn "done" into 2–6 checks. Prefer checks a machine can run:

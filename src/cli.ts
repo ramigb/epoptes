@@ -18,7 +18,7 @@ import { epoptesHome, goalPaths } from './paths.ts';
 import { addGoal, readRegistry, resolveGoal } from './registry.ts';
 import { runGoal } from './runner.ts';
 import { reconcile } from './status.ts';
-import { backlogCounts, backlogMilestones, lastResult, money, readHead } from './summary.ts';
+import { backlogCounts, backlogMilestones, lastResult, money, outputOf, readHead } from './summary.ts';
 
 const HELP = `epoptes: create, run, watch and steer long-running Claude Code or Codex harnesses
 
@@ -47,6 +47,7 @@ Steering
   feedback <F-n> scope <s>        for follow-ups: auto (the agent triages) | tweak | new_run
   feedback <F-n> approve|reject [note]  answer an approval request
   event <type> "<text>"           milestone | blocked | note | artifact | round | wrapup | done
+  event output <path|url> [text]  where the main deliverable is (the dashboard links to it)
 
 Inside cycles (orchestrators)
   feedback "<text>"               an agent note: something the next cycle must act on (the human sees it)
@@ -70,7 +71,7 @@ Reports
 
 [goal] is a registered id or a path. Without it: $EPOPTES_GOAL_DIR, then the nearest .epoptes/ above the cwd.`;
 
-const EVENT_TYPES = ['milestone', 'blocked', 'note', 'artifact', 'round', 'wrapup', 'done'];
+const EVENT_TYPES = ['milestone', 'blocked', 'note', 'artifact', 'output', 'round', 'wrapup', 'done'];
 
 const inCycle = () => Boolean(process.env.EPOPTES_CYCLE);
 
@@ -130,6 +131,8 @@ function statusText(project: string): string {
   }
   const r = lastResult(p);
   if (r) out.push(`last cycle c${r.cycle}: ${r.exit} · ${hm(r.duration_s)} · ${r.turns ?? '?'} turns · ${money(r.cost_usd, r.cost_basis)}${r.error ? ` · ${r.error}` : ''}`);
+  const output = outputOf(p, goal);
+  if (output) out.push(`output ${output.target}${output.kind === 'file' && !output.exists ? ' (not there yet)' : ''}`);
   const handoff = readHead(path.join(p.state, 'handoff.md'), 10).filter(Boolean);
   if (handoff.length) out.push('', '== handoff', ...handoff);
   return out.join('\n');
@@ -374,8 +377,8 @@ async function main(argv: string[]) {
       const clock = readClock(p);
       const at = ['milestone', 'wrapup', 'done'].includes(type) && clock ? { active_s: activeS(clock) } : {};
       if (type === 'round') emit(p, { ...base, n: Number(text[0]) || 1 });
-      else if (type === 'artifact') {
-        if (!text[0]) throw new Error('usage: epoptes event artifact <path> ["text"]');
+      else if (type === 'artifact' || type === 'output') {
+        if (!text[0]) throw new Error(`usage: epoptes event ${type} <${type === 'output' ? 'path or URL' : 'path'}> ["text"]`);
         emit(p, { ...base, path: text[0], ...(text[1] ? { text: text.slice(1).join(' ') } : {}) });
       } else {
         if (!text.length) throw new Error(`usage: epoptes event ${type} "<text>"`);

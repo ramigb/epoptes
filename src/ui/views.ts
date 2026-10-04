@@ -9,7 +9,7 @@ import { exists, nowIso, readJson, readJsonl, writeJson } from '../fsx.ts';
 import { loadGoal, type Goal } from '../goal.ts';
 import { epoptesHome } from '../paths.ts';
 import { LIVE_STATES } from '../status.ts';
-import { totalCost, backlogCounts, backlogItems, backlogMilestones } from '../summary.ts';
+import { totalCost, backlogCounts, backlogItems, backlogMilestones, outputOf } from '../summary.ts';
 import type { GoalWatch } from './watch.ts';
 
 type Result = CycleResult & { version: 1; cycle: number; run: string };
@@ -90,6 +90,19 @@ function commits(w: GoalWatch, goal: Goal) {
   return list;
 }
 
+// ---------- output ----------
+
+/** Base URL of the output server (`serveOutput`), or null when it isn't running (e.g. LAN mode). */
+let outputBase: string | null = null;
+export const setOutputBase = (base: string | null) => (outputBase = base);
+
+function output(w: GoalWatch, goal: Goal) {
+  const o = outputOf(w.p, goal, w.events.items);
+  if (!o) return null;
+  const href = o.kind === 'url' ? o.target : outputBase && o.exists ? `${outputBase}/${w.id}/${o.target.split('/').map(encodeURIComponent).join('/')}` : null;
+  return { ...o, href };
+}
+
 // ---------- milestones ----------
 
 /** Backlog milestones, each with when it was reached (its latest `milestone` event naming it, e.g. "M2: …"). */
@@ -157,6 +170,7 @@ export function summary(w: GoalWatch) {
     followup_items: followUpItems(items).length,
     backlog: backlogCounts(p),
     milestones: milestones(w, s?.run ?? null),
+    output: output(w, goal),
     cycles: results.length,
     cost_usd: totalCost(results),
     cost_basis: results.some((r) => r.cost_basis === 'estimate') || !results.length ? 'estimate' : 'billed',

@@ -51,7 +51,8 @@
         "round",
         "wrapup",
         "done",
-        "needs_you"
+        "needs_you",
+        "output"
       ]
     }
   },
@@ -312,7 +313,10 @@
       "if": {
         "properties": {
           "type": {
-            "const": "artifact"
+            "enum": [
+              "artifact",
+              "output"
+            ]
           }
         }
       },

@@ -503,7 +503,19 @@ function Controls({ d }) {
     </span>`}
     ${!live && d.clock && html`<button class="btn small" disabled=${busy} onClick=${() => act('reset', {}, 'Reset the clock? The next start begins a new run with the time box from goal.json.')}>Reset clock</button>`}
     <a class="btn small" href=${`/goals/${d.id}/report.html`} target="_blank" rel="noopener">Report</a>
+    <${OutputLink} o=${d.output} />
   </div>`;
+}
+
+/** The goal's deliverable: a URL, or a project file served on the output origin. */
+function OutputLink({ o, big }) {
+  if (!o) return null;
+  const label = big ? 'Open the output ↗' : 'Output ↗';
+  if (!o.href) {
+    const why = o.kind === 'file' && !o.exists ? `${o.target} doesn't exist yet` : `${o.target} (the output server is off in LAN mode)`;
+    return html`<span class="btn small disabled-link" title=${why}>${label}</span>`;
+  }
+  return html`<a class=${`btn small output-link ${big ? 'primary' : ''}`} href=${o.href} target="_blank" rel="noopener noreferrer" title=${`${o.target}${o.text ? ` · ${o.text}` : ''}`}>${label}</a>`;
 }
 
 function Banners({ d }) {
@@ -517,6 +529,10 @@ function Banners({ d }) {
   const lastCycle = d.cycles_detail.at(-1);
   if (lastCycle && ['error', 'timeout'].includes(lastCycle.exit) && !d.live) {
     out.push(html`<div class="banner bad">Cycle ${lastCycle.cycle} ended with <b>${lastCycle.exit}</b>${lastCycle.error ? html`: <span class="mono">${lastCycle.error}</span>` : ''}. <a href="#" onClick=${(e) => { e.preventDefault(); set({ selectedCycle: lastCycle.cycle, cycleView: null }); api.get(`/api/goals/${d.id}/cycles/${lastCycle.cycle}`).then((cycleView) => set({ cycleView })); }}>See its activity</a>.</div>`);
+  }
+  if (d.state === 'done') {
+    const last = d.events.findLast((e) => e.type === 'done');
+    out.push(html`<div class="banner done-banner"><span>✓ <b>Done</b>${last?.text ? `: ${last.text}` : ''}</span>${d.output ? html`<${OutputLink} o=${d.output} big=${true} />` : ''}</div>`);
   }
   if (d.state === 'crashed') out.push(html`<div class="banner bad">The runner stopped without cleaning up (crashed). The clock was paused at its last heartbeat. Resume to continue.</div>`);
   if (d.state === 'failed') out.push(html`<div class="banner bad">Too many failed cycles in a row. Check the last cycle's error below, then resume.</div>`);

@@ -96,6 +96,7 @@ Inside a cycle, the runner sets `EPOPTES_GOAL_DIR`, `EPOPTES_RUN`, `EPOPTES_CYCL
 | `epoptes approval "<what>" [--ref <task>]` | (orchestrator) ask the human before doing something on the approval list |
 | `epoptes wait-for-human "<what>"` | (orchestrator) end the run after this cycle as "waiting for you"; the clock stops |
 | `epoptes event milestone\|blocked\|note\|artifact\|round\|wrapup\|done "<text>"` | record a semantic event; `wrapup` and `done` also set the run markers |
+| `epoptes event output <path\|url> ["text"]` | where the main deliverable is; the dashboard shows "Open the output" (overrides goal.json `output`) |
 | `epoptes report [goal] [--all] [--stdout]` | Markdown + HTML report from recorded data into `.epoptes/reports/` (`--all`: every goal; `--stdout`: print the Markdown) |
 | `epoptes import-runsh <project>` | import an older run.sh harness (dress2impress style) so it shows in reports and the dashboard |
 | `epoptes ui` | the local dashboard on http://127.0.0.1:4747 |

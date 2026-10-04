@@ -240,6 +240,11 @@ a.btn { text-decoration: none; color: inherit; }
 .banner { padding: 8px 12px; border-radius: 8px; font-size: 13px; background: var(--wait-soft); color: var(--wait); }
 .banner.warn { background: var(--warn-soft); color: var(--warn); }
 .banner.bad { background: var(--bad-soft); color: var(--bad); }
+.banner.done-banner { background: var(--done-soft); color: var(--done); display: flex; align-items: center; gap: 12px; flex-wrap: wrap; justify-content: space-between; }
+.banner.done-banner .btn { text-decoration: none; }
+.disabled-link { opacity: 0.45; cursor: help; }
+.output-link.primary { color: #fff; }
+@media (prefers-color-scheme: dark) { .output-link.primary { color: #1a1206; } }
 
 .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 12px; }
 .stat { padding: 12px 14px; }

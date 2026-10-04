@@ -10,7 +10,8 @@ import { readRegistry } from '../registry.ts';
 import { buildReport, renderAllHtml, renderHtml } from '../report.ts';
 import { goalPaths } from '../paths.ts';
 import { timeUse } from '../timeuse.ts';
-import { cycleView, detail, markSeen, summary } from './views.ts';
+import { serveOutput } from './output.ts';
+import { cycleView, detail, markSeen, setOutputBase, summary } from './views.ts';
 import { GoalWatch, type GoalUpdate } from './watch.ts';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -245,10 +246,21 @@ export function serve({ port, lan, pollMs = 1000 }: ServeOptions) {
 
   return new Promise<http.Server>((resolve, reject) => {
     server.on('error', reject);
-    server.listen(port, lan ? '0.0.0.0' : '127.0.0.1', () => {
+    server.listen(port, lan ? '0.0.0.0' : '127.0.0.1', async () => {
+      // Outputs get their own origin on the next free port. Never in LAN mode: it would put project files on the network.
+      let out: http.Server | null = null;
+      if (!lan) {
+        for (let p = port + 1; p <= port + 10 && !out; p++) {
+          out = await serveOutput({ port: p }).catch(() => null);
+          if (out) setOutputBase(`http://127.0.0.1:${p}`);
+        }
+      }
       server.on('close', () => {
         clearInterval(timer);
         clearInterval(ping);
+        out?.closeAllConnections();
+        out?.close();
+        setOutputBase(null);
       });
       resolve(server);
     });

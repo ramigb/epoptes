@@ -102,6 +102,11 @@
       },
       "default": []
     },
+    "output": {
+      "type": "string",
+      "minLength": 1,
+      "description": "the main deliverable: a path relative to the project (file or folder) or an http(s) URL. The dashboard links to it; `epoptes event output` overrides it at run time"
+    },
     "timebox": {
       "type": "object",
       "required": [

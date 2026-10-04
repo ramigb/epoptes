@@ -89,3 +89,8 @@ Append-only. Each entry: date · decision · why. To change one, add a new entry
 ## 2026-10-04 · Animated favicon
 - **The tab icon is drawn on a canvas** (8–9 fps only while something moves) rather than shipped as sprite files. Why: no assets, it can combine state colour, motion and a badge, and the CSP already allows `data:` images.
 - **Priority on the goal list: needs you > failed > running > rate-limited > between cycles > done > idle.** Why: a background tab should say first whether the human is needed. Each state differs in colour *and* shape or motion (badge, turning arcs, pulse, check), so it doesn't rely on hue alone at 16 px.
+
+## 2026-10-04 · Link to the output
+- **Where the output is:** goal.json `output` (written by the skill from the interview), overridden at run time by the latest `epoptes event output <path|url>`. Why: the human knows the deliverable up front most of the time, and the orchestrator can correct it (e.g. a different folder, or a preview URL).
+- **Project files are served from a second local origin (dashboard port + 1), not the dashboard's.** Why: agent-built pages (games, apps) need their scripts, and on the dashboard's origin they could call its API (start runs, post feedback that goes into prompts). A different port is a different origin; the dashboard answers no CORS preflight. The output server is read-only, serves only registered projects, refuses any dot segment and symlink escapes, and is off in `--lan` mode so project files never reach the network.
+- **No `file://` links:** browsers block them from http pages.

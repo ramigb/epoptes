@@ -2,7 +2,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { CycleResult } from './adapters/types.ts';
+import { readEvents } from './events.ts';
 import { readJson } from './fsx.ts';
+import type { Goal } from './goal.ts';
 import type { GoalPaths } from './paths.ts';
 
 export interface BacklogCounts {
@@ -116,6 +118,26 @@ export function backlogItems(p: GoalPaths): BacklogItem[] {
     if (kind) out.push({ mark: kind, text: kind === 'blocked' && m[1].includes(':') ? `${m[2]} (${m[1].split(':').slice(1).join(':').trim()})` : m[2] });
   }
   return out;
+}
+
+export interface Output {
+  kind: 'url' | 'file';
+  /** the URL, or the path relative to the project */
+  target: string;
+  text: string | null;
+  exists: boolean;
+  /** where it was named: the latest `output` event, or goal.json */
+  from: 'event' | 'goal';
+}
+
+/** The goal's main deliverable: the latest `epoptes event output`, else goal.json `output`. */
+export function outputOf(p: GoalPaths, goal: Goal, events = readEvents(p)): Output | null {
+  const e = events.findLast((x) => x.type === 'output' && typeof x.path === 'string');
+  const target = (e?.path as string | undefined) ?? goal.output;
+  if (!target) return null;
+  if (/^https?:\/\//i.test(target)) return { kind: 'url', target, text: (e?.text as string) ?? null, exists: true, from: e ? 'event' : 'goal' };
+  const rel = path.normalize(target).replace(/^(\.\/)+/, '');
+  return { kind: 'file', target: rel, text: (e?.text as string) ?? null, exists: fs.existsSync(path.join(p.project, rel)), from: e ? 'event' : 'goal' };
 }
 
 export function lastResult(p: GoalPaths): (CycleResult & { cycle: number; run: string }) | null {

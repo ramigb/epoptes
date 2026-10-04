@@ -119,3 +119,35 @@ test('controls report errors instead of crashing', async () => {
   assert.match(r.json.error, /not running/);
   assert.equal((await post('/api/goals/ui-test/control', { action: 'explode' })).status, 400);
 });
+
+test('outputs are served on their own origin, never outside the project or from dotfiles', async () => {
+  fs.mkdirSync(path.join(project, 'site'), { recursive: true });
+  fs.writeFileSync(path.join(project, 'site', 'index.html'), '<h1>game</h1>');
+  fs.writeFileSync(path.join(project, '.env'), 'SECRET=1');
+  fs.writeFileSync(path.join(base, 'outside.txt'), 'nope');
+  fs.symlinkSync(path.join(base, 'outside.txt'), path.join(project, 'link.txt'));
+  const g = JSON.parse(fs.readFileSync(path.join(project, '.epoptes', 'goal.json'), 'utf8'));
+  fs.writeFileSync(path.join(project, '.epoptes', 'goal.json'), JSON.stringify({ ...g, output: 'site/' }));
+  await new Promise((r) => setTimeout(r, 300));
+  const d = await req('GET', '/api/goals/ui-test');
+  assert.equal(d.json.output.href, `http://127.0.0.1:${port + 1}/ui-test/site/`);
+  const get = (p: string, host = `127.0.0.1:${port + 1}`) =>
+    new Promise<{ status: number; body: string }>((resolve, reject) => {
+      http.get({ host: '127.0.0.1', port: port + 1, path: p, headers: { Host: host } }, (res) => {
+        let body = '';
+        res.on('data', (x) => (body += x));
+        res.on('end', () => resolve({ status: res.statusCode!, body }));
+      }).on('error', reject);
+    });
+  assert.deepEqual(await get('/ui-test/site/'), { status: 200, body: '<h1>game</h1>' });
+  for (const p of ['/ui-test/.env', '/ui-test/.epoptes/goal.json', '/ui-test/link.txt', '/ui-test/%2e%2e/outside.txt', '/ui-test/../outside.txt', '/nope/site/']) {
+    assert.equal((await get(p)).status, 404, p);
+  }
+  assert.equal((await get('/ui-test/site/', `evil.example:${port + 1}`)).status, 403);
+  const { emit } = await import('../src/events.ts');
+  const { goalPaths } = await import('../src/paths.ts');
+  emit(goalPaths(project), { src: 'orchestrator', type: 'output', path: 'https://example.com/demo', text: 'deployed preview' });
+  await new Promise((r) => setTimeout(r, 300));
+  const d2 = await req('GET', '/api/goals/ui-test');
+  assert.deepEqual([d2.json.output.kind, d2.json.output.href, d2.json.output.from], ['url', 'https://example.com/demo', 'event']);
+});

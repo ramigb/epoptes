@@ -12,6 +12,7 @@
   ],
   "non_goals": ["Changing any files outside examples/tower-defense", "Dependencies, frameworks, accounts, backend, multiplayer or publishing", "Modifying Epoptes source or existing user changes"],
   "approval_required": ["Spending money or adding paid services", "Publishing, uploads or external writes other than the already-authorized Codex provider", "Deleting or overwriting user data outside the deliverable", "Changing the done definition, model or time box", "Installing dependencies"],
+  "output": "index.html",
   "timebox": { "total_min": 15, "wrapup_min": 2, "grace_min": 0, "pause_on_rate_limit": true },
   "checkpoints": "shadow",
   "adapter": { "type": "codex", "model": "", "effort": "high", "permission_mode": "workspace-write" },

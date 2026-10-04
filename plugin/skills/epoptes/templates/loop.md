@@ -94,6 +94,7 @@ Be concrete; vague briefs waste the most tokens. Point at paths; don't paste fil
 2. Fix every `high` review fix and any failing check. Run every done check from §Rules.
 {{WRAPUP_ITEMS}}
 <!-- template: goal-specific final steps, e.g. "3. README for the user: how to run it, where things are." "4. Final review; append scores." -->
+- If the main deliverable isn't where goal.json `output` says (or it's served at a URL), run `epoptes event output <path or URL> "<one line>"` so the dashboard links to it.
 - Rewrite `state/handoff.md` as the end state plus the top 10 next tasks.
 - Checkpoint, then `epoptes event done "<one-line summary>"`.
 
