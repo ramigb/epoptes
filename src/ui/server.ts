@@ -203,6 +203,11 @@ export function serve({ port, lan, pollMs = 1000 }: ServeOptions) {
           refresh();
           return send(res, 200, { ok: true });
         }
+        if (sub === 'feedback' && body.steer === true) {
+          const r = control.steer(project, String(body.text ?? ''), 'dashboard');
+          refresh();
+          return send(res, 200, r);
+        }
         if (sub === 'feedback') {
           const id = addFeedback(w.p, String(body.text ?? ''), 'dashboard');
           // "Send & resume" from the waiting-for-you banner: the reply is the answer the run waited for.

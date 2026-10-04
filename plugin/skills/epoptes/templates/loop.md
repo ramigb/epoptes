@@ -48,7 +48,7 @@ The runner kills the cycle at the hard stop, so never start work you can't finis
 
 ## 3. The cycle
 1. **Triage.** Pick work in this order:
-   a. broken or interrupted work
+   a. broken or interrupted work, then any `[STEERING]` feedback: the human changed direction, so replan the backlog around it before anything else (the runner also puts a note in front of this prompt)
    b. new feedback: the human's first, then agent notes (`[agent note]`, filed by earlier cycles). For each item: `epoptes feedback F-<n> seen`, add it to the backlog's Feedback section as `- [ ] F-<n> <task>`, then `epoptes feedback F-<n> in_progress` when you dispatch it.
    c. `high` review fixes
    d. the next unchecked tasks of the current milestone, in order, plus at most one `med` fix per round

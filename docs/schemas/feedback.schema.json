@@ -65,6 +65,10 @@
           "ref": {
             "type": "string",
             "description": "backlog task id the item is about"
+          },
+          "steer": {
+            "type": "boolean",
+            "description": "steering: interrupt the running cycle and replan around this item first"
           }
         }
       }

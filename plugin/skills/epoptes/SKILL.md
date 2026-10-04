@@ -84,6 +84,7 @@ Inside a cycle, the runner sets `EPOPTES_GOAL_DIR`, `EPOPTES_RUN`, `EPOPTES_CYCL
 | `epoptes extend [goal] <dur>` | lengthen the time box, e.g. `2h`, `30m` |
 | `epoptes reset-clock [goal]` | clear the clock; the next start is a new run |
 | `epoptes feedback [goal] "<text>"` | add a feedback item (`F-<n>`) |
+| `epoptes feedback [goal] "<text>" --steer` | steering: interrupt the running cycle now; a fresh cycle replans the whole backlog around it first |
 | `epoptes feedback [goal] [--open]` | list feedback (`--open`: only new, seen, in progress, blocked) |
 | `epoptes feedback F-<n> <status> ["note"]` | set a status: `new`, `seen`, `in_progress`, `done`, `blocked`, `wont_do` |
 | `epoptes feedback F-<n> note "<text>"` | comment on an item |

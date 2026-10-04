@@ -137,6 +137,13 @@
           },
           "timeout_s": {
             "type": "integer"
+          },
+          "steer": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "steering items the runner put in front of the prompt"
           }
         }
       }
@@ -178,6 +185,10 @@
               "integer",
               "null"
             ]
+          },
+          "steered": {
+            "type": "boolean",
+            "description": "interrupted by steering feedback"
           }
         }
       }
@@ -244,11 +255,15 @@
               "pause",
               "stop",
               "extend",
-              "reset"
+              "reset",
+              "steer"
             ]
           },
           "seconds": {
             "type": "integer"
+          },
+          "ref": {
+            "type": "string"
           }
         }
       }

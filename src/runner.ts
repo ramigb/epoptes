@@ -7,7 +7,7 @@ import { adapters } from './adapters/index.ts';
 import type { Activity, Cycle, CycleExit } from './adapters/types.ts';
 import { clockState, newClock, runFinished, pauseClock, readClock, resumeClock, writeClock, type Clock, type Mode } from './clock.ts';
 import { emit } from './events.ts';
-import { ingestInbox } from './feedback.ts';
+import { ingestInbox, pendingSteers, readFeedback, type FeedbackItem } from './feedback.ts';
 import { appendJsonl, exists, nowIso, readJson, rm, writeJson } from './fsx.ts';
 import { loadGoal, type Goal } from './goal.ts';
 import { goalPaths, type GoalPaths } from './paths.ts';
@@ -70,6 +70,26 @@ function shadowSnapshot(p: GoalPaths, n: number) {
   }
 }
 
+/**
+ * A note the runner puts in front of loop.md when steering feedback is waiting, so the cycle replans first.
+ * It lives here rather than in loop.md so harnesses generated before steering existed get it too.
+ */
+export function steerPreamble(items: FeedbackItem[], interrupted: boolean): string {
+  if (!items.length) return '';
+  const ids = items.map((f) => f.id).join(', ');
+  const list = items.map((f) => `>   - ${f.id}: ${JSON.stringify(f.text)}`).join('\n');
+  return [
+    `> **Epoptes runner: STEERING.** The human sent steering feedback (${ids})${interrupted ? ' and interrupted the previous cycle to do it' : ''}. It outranks everything else. Before normal work:`,
+    `> 1. Orient as usual.${interrupted ? ' The last cycle was cut off mid-task, so do the interrupted-work check carefully.' : ''}`,
+    `> 2. Read it with \`epoptes feedback --open\`:`,
+    list,
+    `> 3. Replan with the ripple effect: walk every open task and milestone in the backlog, then cut, rewrite, reorder or add tasks so the whole plan follows the new direction (not just one task). Check the current milestone and the wrap-up list still make sense. Record the change in \`state/decisions.md\`.`,
+    `> 4. Run \`epoptes feedback <id> in_progress\`, then \`epoptes feedback <id> note "replanned: <what changed in the plan>"\`, and carry on with the new plan.`,
+    '',
+    '',
+  ].join('\n');
+}
+
 function capWarnings(p: GoalPaths, goal: Goal): string[] {
   const out: string[] = [];
   for (const [file, max] of Object.entries(goal.state_caps)) {
@@ -119,6 +139,7 @@ export async function runGoal(project: string) {
 
   // ---- signals, heartbeat, cancellable sleep ----
   let stopRequested = false;
+  let steerRequested = false; // SIGUSR2 from `epoptes feedback --steer`: interrupt this cycle, start the next at once
   let current: Cycle | null = null;
   let wake: (() => void) | null = null;
   const sleep = (ms: number) =>
@@ -138,8 +159,16 @@ export async function runGoal(project: string) {
     current?.interrupt();
     wake?.();
   };
+  const onSteer = () => {
+    log('steering feedback: interrupting the cycle to replan');
+    if (current) {
+      steerRequested = true;
+      current.interrupt();
+    } else if (status.wait_reason === 'between_cycles') wake?.(); // never cut a rate-limit or cooldown wait short
+  };
   process.on('SIGINT', onStop);
   process.on('SIGTERM', onStop);
+  process.on('SIGUSR2', onSteer);
 
   const heartbeat = setInterval(() => {
     const patch: Partial<Status> = { heartbeat_at: nowIso() };
@@ -178,6 +207,7 @@ export async function runGoal(project: string) {
 
   // ---- the loop ----
   let fails = 0;
+  let lastSteered = false; // the previous cycle was interrupted by steering feedback
   let backoff = goal.rate_limit.backoff_s;
   let lastMode: Mode | null = status.mode;
 
@@ -214,7 +244,8 @@ export async function runGoal(project: string) {
       const timeoutS = Math.max(60, Math.min(timeoutMin * 60, st.toHard));
       const cycleDir = p.cycleDir(n);
       fs.mkdirSync(cycleDir, { recursive: true });
-      const prompt = fs.readFileSync(path.join(p.root, goal.adapter.prompt), 'utf8');
+      const steers = pendingSteers(readFeedback(p));
+      const prompt = steerPreamble(steers, lastSteered) + fs.readFileSync(path.join(p.root, goal.adapter.prompt), 'utf8');
 
       const spec = {
         cwd: p.project,
@@ -241,7 +272,7 @@ export async function runGoal(project: string) {
       };
 
       setStatus({ state: status.pause_requested ? 'pausing' : 'running', cycle: n, cycle_started_at: nowIso() });
-      emit(p, { src: 'runner', type: 'cycle.start', run, cycle: n, mode: st.mode, model: goal.adapter.model, effort: goal.adapter.effort, timeout_s: timeoutS });
+      emit(p, { src: 'runner', type: 'cycle.start', run, cycle: n, mode: st.mode, model: goal.adapter.model, effort: goal.adapter.effort, timeout_s: timeoutS, ...(steers.length ? { steer: steers.map((f) => f.id) } : {}) });
       log(`cycle ${n} start: mode=${st.mode} ${goal.adapter.model}/${goal.adapter.effort} timeout=${timeoutS}s`);
 
       const activityFile = path.join(cycleDir, 'activity.jsonl');
@@ -264,7 +295,7 @@ export async function runGoal(project: string) {
         cycle.interrupt();
         escalate();
       }, timeoutS * 1000);
-      const stopWatch = setInterval(() => stopRequested && escalate(), 1000);
+      const stopWatch = setInterval(() => (stopRequested || steerRequested) && escalate(), 1000);
 
       const result = await cycle.done;
       current = null;
@@ -273,10 +304,13 @@ export async function runGoal(project: string) {
       if (killTimer) clearTimeout(killTimer);
 
       let exit: CycleExit = result.exit;
-      if (stopRequested) exit = 'interrupted';
+      const steered = steerRequested && !stopRequested;
+      steerRequested = false;
+      lastSteered = steered;
+      if (stopRequested || steered) exit = 'interrupted';
       else if (timedOut) exit = 'timeout';
       writeJson(path.join(cycleDir, 'result.json'), { version: 1, cycle: n, run, ...result, exit });
-      emit(p, { src: 'runner', type: 'cycle.end', run, cycle: n, exit, duration_s: result.duration_s, cost_usd: result.cost_usd, turns: result.turns });
+      emit(p, { src: 'runner', type: 'cycle.end', run, cycle: n, exit, duration_s: result.duration_s, cost_usd: result.cost_usd, turns: result.turns, ...(steered ? { steered: true } : {}) });
       log(`cycle ${n} end: ${exit} ${result.duration_s}s turns=${result.turns ?? '?'} ${result.cost_usd == null ? 'cost=unknown' : `cost≈$${result.cost_usd.toFixed(2)}`}${result.error ? ` error=${result.error}` : ''}`);
 
       if (goal.checkpoints === 'shadow') {
@@ -301,6 +335,7 @@ export async function runGoal(project: string) {
       }
       backoff = goal.rate_limit.backoff_s;
 
+      if (steered) continue; // not a failure, and no pause: the steering cycle starts now
       fails = exit === 'ok' ? 0 : fails + 1;
       setStatus({ fails_in_row: fails });
       if (fails >= goal.failures.give_up_after) {
@@ -322,5 +357,6 @@ export async function runGoal(project: string) {
   } finally {
     process.off('SIGINT', onStop);
     process.off('SIGTERM', onStop);
+    process.off('SIGUSR2', onSteer);
   }
 }

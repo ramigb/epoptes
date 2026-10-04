@@ -182,6 +182,35 @@ test('approvals: the run waits for the human, and answering the last one resumes
   for (const op of readJsonl<any>(path.join(g.root, 'feedback.jsonl'))) assert.deepEqual(validate('feedback', op), [], JSON.stringify(op));
 });
 
+test('steering feedback interrupts the running cycle; the next cycle replans around it first', async () => {
+  const g = setup();
+  g.run(['start', g.project], { FAKE_CLAUDE: 'slowfirst', FAKE_DONE_AT: '2' });
+  await until(() => g.read('run/status.json').state === 'running');
+  const t0 = Date.now();
+  assert.match(g.run(['feedback', g.project, 'switch everything to a dark theme', '--steer']), /added F-1 \(steering\): the running cycle is interrupted now/);
+  await until(() => g.read('run/status.json').state === 'done');
+  assert.ok(Date.now() - t0 < 15000, 'the steering cycle starts right away');
+
+  assert.equal(g.read('cycles/000001/result.json').exit, 'interrupted');
+  const ev = g.events();
+  for (const e of ev) assert.deepEqual(validate('event', e), [], JSON.stringify(e));
+  assert.equal(ev.find((e) => e.type === 'cycle.end' && e.cycle === 1).steered, true);
+  assert.deepEqual(ev.find((e) => e.type === 'cycle.start' && e.cycle === 2).steer, ['F-1']);
+  assert.deepEqual(ev.filter((e) => e.type === 'control').map((e) => [e.action, e.ref]), [['start', undefined], ['steer', 'F-1']]);
+  assert.equal(g.read('run/status.json').fails_in_row, 0, 'steering is not a failure');
+  const prompt = g.read('cycles/000002/fake-argv.json').prompt;
+  assert.match(prompt, /^> \*\*Epoptes runner: STEERING\.\*\* The human sent steering feedback \(F-1\) and interrupted the previous cycle/);
+  assert.match(prompt, /F-1: "switch everything to a dark theme"/);
+  assert.match(prompt, /ripple effect/);
+  assert.match(prompt, /Read `epoptes feedback --open`/, 'loop.md follows the preamble');
+  assert.doesNotMatch(g.read('cycles/000001/fake-argv.json').prompt, /STEERING/);
+  assert.match(g.run(['feedback', g.project]), /F-1 +new +\[STEERING: replan around this first\]/);
+
+  // Without a live runner, steering just waits for the next start.
+  assert.match(g.run(['feedback', g.project, 'and bigger buttons', '--steer']), /the next cycle replans around it first/);
+  assert.match(g.run(['status', g.project]), /steering F-2 waits for the next cycle/);
+});
+
 test('gives up after repeated failures and reports a crash', async () => {
   const g = setup({ failures: { cooldown_after: 5, cooldown_min: 0, give_up_after: 2 } });
   g.run(['start', g.project], { FAKE_CLAUDE: 'error' });

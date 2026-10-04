@@ -38,6 +38,7 @@ Runs
 
 Steering
   feedback [goal] "<text>"        add a feedback item (F-<n>)
+           [--steer]              steer: interrupt the running cycle and replan around it now
   feedback [goal] [--open]        list feedback (--open: only items that still need attention)
   feedback <F-n> <status> [note]  set status: ${STATUSES.join(', ')}
   feedback <F-n> note "<text>"    comment on an item
@@ -76,6 +77,7 @@ function feedbackLine(f: FeedbackItem): string {
   let tag = '';
   if (f.kind === 'approval') tag = f.decision ? `[approval: ${f.decision.toUpperCase()}${decisionNote(f)}] ` : '[approval: waiting for the human; do not do it yet] ';
   else if (isAgentNote(f)) tag = f.edited ? '[agent note, edited by the human] ' : '[agent note] ';
+  else if (f.steer) tag = '[STEERING: replan around this first] ';
   return `${f.id.padEnd(6)} ${f.status.padEnd(12)} ${tag}${f.text}${f.ref ? ` (${f.ref})` : ''}`;
 }
 const decisionNote = (f: FeedbackItem) => {
@@ -112,6 +114,7 @@ function statusText(project: string): string {
   if (fb.length) {
     const n = (st: FeedbackStatus[]) => fb.filter((f) => st.includes(f.status)).length;
     out.push(`feedback ${n(['new'])} new · ${n(['seen', 'in_progress'])} open · ${n(['blocked'])} blocked · ${n(['done', 'wont_do'])} closed`);
+    for (const f of fb.filter((x) => x.steer && x.status === 'new')) out.push(`  steering ${f.id} waits for the next cycle: ${f.text}`);
     for (const f of pendingApprovals(fb)) out.push(`  approval ${f.id} waits for you: ${f.text}  (epoptes feedback ${f.id} approve|reject ["note"])`);
   }
   if (s.limits) {
@@ -166,6 +169,7 @@ async function main(argv: string[]) {
     options: {
       'dry-run': { type: 'boolean' },
       'new-run': { type: 'boolean' },
+      steer: { type: 'boolean' },
       open: { type: 'boolean' },
       md: { type: 'boolean' },
       html: { type: 'boolean' },
@@ -315,6 +319,12 @@ async function main(argv: string[]) {
         const items = [...readFeedback(p).values()].filter((f) => !values.open || !['done', 'wont_do'].includes(f.status));
         if (!items.length) console.log(values.open ? 'no open feedback' : 'no feedback yet');
         for (const f of items) console.log(feedbackLine(f));
+        return;
+      }
+      if (values.steer) {
+        if (inCycle()) throw new Error('steering is for the human; file an agent note instead');
+        const r = control.steer(resolveGoal(ref), text, 'cli');
+        console.log(`added ${r.id} (steering)${r.interrupted ? ': the running cycle is interrupted now and a fresh one replans around it' : ': the next cycle replans around it first'}`);
         return;
       }
       // Inside a cycle this is an agent note: something the next cycle must act on, shown to the human too.

@@ -3,7 +3,7 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import { readClock, runFinished, writeClock } from './clock.ts';
 import { emit, readEvents } from './events.ts';
-import { decideApproval, pendingApprovals, readFeedback, type Decision } from './feedback.ts';
+import { addFeedback, decideApproval, pendingApprovals, readFeedback, type Decision, type Src } from './feedback.ts';
 import { exists, nowIso, rm, writeJson } from './fsx.ts';
 import { adapters } from './adapters/index.ts';
 import { loadGoal } from './goal.ts';
@@ -108,6 +108,24 @@ export async function resumeIfAnswered(project: string, { force = false } = {}):
     return { resumed: false, problem: (e as Error).message };
   }
   return { resumed: true };
+}
+
+/**
+ * Steering feedback: adds the item and, if a cycle is running, interrupts it (SIGUSR2 to the runner) so a fresh
+ * cycle starts at once and replans around it. Work on disk is kept; the next cycle recovers it. When no runner is
+ * live, the item waits and the next start replans first.
+ */
+export function steer(project: string, text: string, src: Src): { id: string; interrupted: boolean } {
+  const p = goalPaths(project);
+  const id = addFeedback(p, text, src, { steer: true });
+  const s = reconcile(p);
+  let interrupted = false;
+  if (isLive(s) && s.pid) {
+    process.kill(s.pid, 'SIGUSR2');
+    interrupted = s.state === 'running' || s.state === 'pausing';
+  }
+  emit(p, { src: 'user', type: 'control', run: s.run, cycle: s.cycle || null, action: 'steer', ref: id });
+  return { id, interrupted };
 }
 
 /** Stop now: SIGINT to the runner, which interrupts the cycle; the next cycle recovers the interrupted work. */

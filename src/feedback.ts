@@ -12,7 +12,7 @@ export type FeedbackKind = 'feedback' | 'approval';
 export type Decision = 'approved' | 'rejected';
 
 export type FeedbackOp =
-  | { ts: string; op: 'add'; id: string; text: string; src: Src; kind?: FeedbackKind; ref?: string }
+  | { ts: string; op: 'add'; id: string; text: string; src: Src; kind?: FeedbackKind; ref?: string; steer?: boolean }
   | { ts: string; op: 'status'; id: string; status: FeedbackStatus; by: By; cycle?: number | null; note?: string }
   | { ts: string; op: 'note'; id: string; text: string; by: By; cycle?: number | null }
   | { ts: string; op: 'decide'; id: string; decision: Decision; by: By; note?: string }
@@ -29,6 +29,8 @@ export interface FeedbackItem {
   decision: Decision | null;
   /** the text was changed after it was added (e.g. the human edited an agent note) */
   edited: boolean;
+  /** steering: interrupt the current cycle and replan around this item first */
+  steer: boolean;
   created_at: string;
   updated_at: string;
   history: FeedbackOp[];
@@ -40,7 +42,7 @@ export function fold(ops: FeedbackOp[]): Map<string, FeedbackItem> {
     if (op.op === 'add') {
       const kind = op.kind ?? 'feedback';
       // An approval waits for the human, so it starts blocked rather than as new work.
-      if (!items.has(op.id)) items.set(op.id, { id: op.id, text: op.text, src: op.src, kind, ref: op.ref ?? null, status: kind === 'approval' ? 'blocked' : 'new', decision: null, edited: false, created_at: op.ts, updated_at: op.ts, history: [op] });
+      if (!items.has(op.id)) items.set(op.id, { id: op.id, text: op.text, src: op.src, kind, ref: op.ref ?? null, status: kind === 'approval' ? 'blocked' : 'new', decision: null, edited: false, steer: op.steer === true, created_at: op.ts, updated_at: op.ts, history: [op] });
       continue;
     }
     const it = items.get(op.id);
@@ -65,6 +67,10 @@ export const isOpen = (f: FeedbackItem) => !CLOSED.includes(f.status);
 /** A note the orchestrator filed for a later cycle (auto feedback), as opposed to the human's feedback. */
 export const isAgentNote = (f: FeedbackItem) => f.kind === 'feedback' && f.src === 'orchestrator';
 
+/** Steering items the orchestrator hasn't picked up yet: the next cycle replans around them first. */
+export const pendingSteers = (items: Map<string, FeedbackItem> | FeedbackItem[]) =>
+  [...items.values()].filter((f) => f.steer && f.status === 'new');
+
 /** Approvals the human hasn't answered yet. */
 export const pendingApprovals = (items: Map<string, FeedbackItem> | FeedbackItem[]) =>
   [...items.values()].filter((f) => f.kind === 'approval' && !f.decision && isOpen(f));
@@ -74,6 +80,7 @@ const idNum = (id: string) => Number(id.slice(2)) || 0;
 interface AddExtra {
   kind?: FeedbackKind;
   ref?: string;
+  steer?: boolean;
 }
 
 function addLocked(p: GoalPaths, text: string, src: Src, extra: AddExtra = {}): string {
@@ -81,7 +88,7 @@ function addLocked(p: GoalPaths, text: string, src: Src, extra: AddExtra = {}): 
   const next = ops.reduce((m, o) => Math.max(m, idNum(o.id)), 0) + 1;
   const id = `F-${next}`;
   const kind = extra.kind && extra.kind !== 'feedback' ? { kind: extra.kind } : {};
-  appendJsonl(p.feedback, { ts: nowIso(), op: 'add', id, text, src, ...kind, ...(extra.ref ? { ref: extra.ref } : {}) });
+  appendJsonl(p.feedback, { ts: nowIso(), op: 'add', id, text, src, ...kind, ...(extra.ref ? { ref: extra.ref } : {}), ...(extra.steer ? { steer: true } : {}) });
   return id;
 }
 

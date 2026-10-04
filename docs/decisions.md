@@ -64,3 +64,8 @@ Append-only. Each entry: date · decision · why. To change one, add a new entry
 ## 2026-10-04 · Agent notes (auto feedback)
 - **`epoptes feedback "<text>"` inside a cycle files an agent note** (`src: "orchestrator"`), triaged by the next cycle after the human's feedback. Why: research findings and missing prerequisites used to vanish into a handoff the human never reads; as feedback they're visible, and the human can edit (`op: edit`) or dismiss (`wont_do`) them before the next cycle acts.
 - **Agent notes are not tasks.** The loop template keeps ordinary work in the backlog, so the feedback list doesn't fill with routine items.
+
+## 2026-10-04 · Steering feedback
+- **Steering interrupts the running cycle** (user's choice) via SIGUSR2 to the runner, which interrupts the adapter like stop-now but starts the next cycle at once. SIGUSR1 is reserved by Node for its inspector. Work on disk survives; the next cycle's interrupted-work check recovers it. A steered cycle is not a failure.
+- **The replan instruction comes from the runner, as a note in front of loop.md,** for as long as the steering item is `new`. Why: harnesses generated before this feature get it too, and the note can list the exact items. It asks for a ripple replan (every open task and milestone, not just one task), a decisions.md entry, and a `replanned: …` note on the item.
+- **Rate-limit and cooldown waits are not cut short by steering;** a between-cycles wait is.

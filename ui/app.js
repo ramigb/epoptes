@@ -678,10 +678,10 @@ function feedText(e) {
     case 'run.start': return `Run ${e.run} ${e.resumed ? 'resumed' : 'started'}`;
     case 'run.end': return e.reason === 'needs_you' ? `Run ${e.run} paused: waiting for you` : `Run ${e.run} ended: ${e.reason}`;
     case 'needs_you': return `Waiting for you: ${e.text}`;
-    case 'control': return `You: ${e.action}${e.seconds ? ` ${dur(e.seconds)}` : ''}`;
+    case 'control': return e.action === 'steer' ? `You: steer with ${e.ref}` : `You: ${e.action}${e.seconds ? ` ${dur(e.seconds)}` : ''}`;
     case 'wait': return `${e.reason === 'rate_limit' ? 'Rate-limit wait' : 'Cooldown'}: ${dur(e.seconds)}`;
     case 'mode': return `Mode ${e.from} → ${e.to}`;
-    case 'cycle.end': return `Cycle ${e.cycle} ended: ${e.exit}`;
+    case 'cycle.end': return e.steered ? `Cycle ${e.cycle} interrupted to steer` : `Cycle ${e.cycle} ended: ${e.exit}`;
     case 'artifact': return `${e.path}${e.text ? ` · ${e.text}` : ''}`;
     default: return e.text ?? e.type;
   }
@@ -729,7 +729,7 @@ function FeedbackItem({ d, f, seen }) {
     api.post(`/api/goals/${d.id}/feedback/${f.id}`, body).then(() => loadDetail()).catch((e) => toast({ kind: 'bad', title: `Could not update ${f.id}`, body: e.message }));
   const lastCycle = f.history.findLast((o) => o.cycle)?.cycle;
   return html`<li class="fb ${updated ? 'updated' : ''}">
-    <div class="head"><span class="id">${f.id}</span>${f.kind === 'approval' && html`<span class="kind approval">approval</span>`}${agentNote && html`<span class="kind agent" title="The orchestrator filed this for a later cycle. Edit or dismiss it if it's wrong.">agent note</span>`}<span class="st ${f.status}">${f.kind === 'approval' && !f.decision && f.status === 'blocked' ? 'waiting for you' : STATUS_LABEL[f.status]}</span>${f.decision && html`<span class="decision ${f.decision}">${f.decision === 'approved' ? '✓ approved' : '✕ disapproved'}</span>`}${updated && html`<span class="new-dot" title="updated since you last looked"></span>`}</div>
+    <div class="head"><span class="id">${f.id}</span>${f.kind === 'approval' && html`<span class="kind approval">approval</span>`}${f.steer && html`<span class="kind steer" title="Steering: the next cycle replans around this first">⚡ steer</span>`}${agentNote && html`<span class="kind agent" title="The orchestrator filed this for a later cycle. Edit or dismiss it if it's wrong.">agent note</span>`}<span class="st ${f.status}">${f.kind === 'approval' && !f.decision && f.status === 'blocked' ? 'waiting for you' : STATUS_LABEL[f.status]}</span>${f.decision && html`<span class="decision ${f.decision}">${f.decision === 'approved' ? '✓ approved' : '✕ disapproved'}</span>`}${updated && html`<span class="new-dot" title="updated since you last looked"></span>`}</div>
     ${editing
       ? html`<form class="fb-form" style=${{ margin: '4px 0 0' }} onSubmit=${(e) => {
           e.preventDefault();
@@ -769,15 +769,18 @@ function Feedback({ d }) {
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
   const seen = store.seenAtOpen[d.id]?.feedback_at;
-  const submit = (e) => {
+  const running = d.state === 'running' || d.state === 'pausing';
+  const submit = (e, steer = false) => {
     e?.preventDefault();
     if (!text.trim()) return;
+    if (steer && running && !confirm(`Steer now?\n\nThis interrupts cycle ${d.cycle} (its work on disk is kept) and starts a fresh cycle that replans the backlog around your feedback before doing anything else.`)) return;
     setBusy(true);
     api
-      .post(`/api/goals/${d.id}/feedback`, { text: text.trim() })
-      .then(({ id }) => {
+      .post(`/api/goals/${d.id}/feedback`, { text: text.trim(), ...(steer ? { steer: true } : {}) })
+      .then(({ id, interrupted }) => {
         setText('');
-        toast({ kind: 'info', title: `${id} added`, body: 'The next cycle picks it up.', ms: 3500 });
+        if (steer) toast({ kind: 'info', title: `${id}: steering`, body: interrupted ? `Cycle ${d.cycle} is interrupted; a fresh cycle replans around it now.` : 'The next cycle replans around it first.', ms: 5000 });
+        else toast({ kind: 'info', title: `${id} added`, body: 'The next cycle picks it up.', ms: 3500 });
         loadDetail();
       })
       .catch((e) => toast({ kind: 'bad', title: 'Could not add feedback', body: e.message }))
@@ -789,7 +792,12 @@ function Feedback({ d }) {
     <form class="fb-form" onSubmit=${submit}>
       <textarea rows="3" value=${text} disabled=${busy} placeholder="Tell the harness something. New items outrank the backlog."
         aria-label="New feedback" onInput=${(e) => setText(e.currentTarget.value)} onKeyDown=${(e) => (e.ctrlKey || e.metaKey) && e.key === 'Enter' && submit(e)}></textarea>
-      <div class="row"><span class="faint">Ctrl+Enter to send</span><button class="btn primary small" disabled=${busy || !text.trim()}>Send</button></div>
+      <div class="row"><span class="faint">Ctrl+Enter to send</span>
+        <span class="send-btns">
+          <button type="button" class="btn small steer" disabled=${busy || !text.trim()} onClick=${(e) => submit(e, true)}
+            title=${running ? 'Interrupt the running cycle now and replan the whole backlog around this' : 'The next cycle replans the whole backlog around this before anything else'}>⚡ ${running ? 'Steer now' : 'Steer'}</button>
+          <button class="btn primary small" disabled=${busy || !text.trim()} title="Picked up at the start of the next cycle">Send</button>
+        </span></div>
     </form>
     ${d.feedback.length === 0 ? html`<p class="empty">No feedback yet.</p>` : html`<ul class="fb-list">${d.feedback.map((f) => html`<${FeedbackItem} key=${f.id} d=${d} f=${f} seen=${seen} />`)}</ul>`}
   </section>`;

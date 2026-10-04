@@ -78,6 +78,7 @@ There is no daemon. `epoptes start` spawns one detached runner per goal (`setsid
 | start / resume | CLI spawns the runner; the clock resumes. If the run is over (DONE, or past the hard stop), `start` refuses unless given `--new-run` (dashboard: "Start new run…" with a confirm), because a new run spends tokens and only finds work if feedback or tasks were added. The `control` event says `start` for a new run and `resume` for a continuation |
 | pause after this cycle | CLI writes `control.json {pause_after_cycle: true}`; runner finishes the cycle, pauses the clock, sets `paused`, exits |
 | wait for the human | orchestrator runs `epoptes wait-for-human "<what>"`: `control.json {pause_after_cycle: true, for_human: {reason}}` plus a `needs_you` event. The run ends after the cycle as `needs_input` with `status.needs = {reason, since}` and the clock paused. Resume as usual; answering the last open approval (or "Send & resume" in the dashboard) resumes it by itself |
+| steer | `epoptes feedback "<text>" --steer` (dashboard: ⚡ Steer now) adds `{op: add, steer: true}` and sends SIGUSR2 to a live runner. A running cycle is interrupted (`cycle.end {exit: interrupted, steered: true}`, not counted as a failure) and the next starts at once; a between-cycles wait is cut short, a rate-limit or cooldown wait is not. While a steering item is still `new`, the runner puts a STEERING note in front of the prompt (and `cycle.start` carries `steer: [ids]`) telling the orchestrator to replan the whole backlog around it first. With no live runner, the item waits for the next start |
 | stop now | CLI sends SIGINT to the runner pid; the runner SIGINTs the adapter, kills it after 120 s, records the cycle as `interrupted`, pauses the clock, sets `stopped`, exits. The next cycle recovers interrupted work (loop.md orient step) |
 | extend `<dur>` | CLI adds to `clock.json.timebox_s` (wrap-up and hard stop move with it) |
 | reset-clock | only when no runner is live; clears `clock.json`, `DONE`, `WRAPUP`; next start is a new run |
@@ -112,7 +113,7 @@ Envelope: `{ts, run, cycle, src: runner | orchestrator | user, type, ...payload}
 | runner | `cycle.end` | `exit, duration_s, cost_usd, turns` (full detail in `cycles/N/result.json`) |
 | runner | `wait` | `reason: rate_limit \| cooldown \| between_cycles, seconds` |
 | runner | `mode` | `from, to` |
-| runner / user | `control` | `action: start \| resume \| pause \| stop \| extend \| reset, seconds?` |
+| runner / user | `control` | `action: start \| resume \| pause \| stop \| extend \| reset \| steer, seconds?, ref?` |
 | runner | `warn` | `text` (state cap exceeded, clock restored, feedback file unparsable, …) |
 | orchestrator | `milestone`, `blocked`, `note` | `text`, `ref?` (task or feedback id). `epoptes approval` emits `blocked` with `text: "needs approval: …"` and `ref: F-<n>` |
 | orchestrator / user | `needs_you` | `text`: what the human should do (`epoptes wait-for-human`) |
@@ -231,7 +232,7 @@ epoptes start | pause | stop [goal]
 epoptes extend [goal] <dur>            e.g. 2h, 30m
 epoptes reset-clock [goal]
 epoptes run [goal] --dry-run           check claude + files + guardrails (lint), print the next cycle's command; never starts the clock
-epoptes feedback [goal] "<text>"
+epoptes feedback [goal] "<text>" [--steer]     --steer: interrupt the running cycle and replan around it now
 epoptes feedback [goal] [--open]       list (--open: new, seen, in progress, blocked)
 epoptes feedback <F-n> <status> ["note"]
 epoptes feedback <F-n> approve|reject ["note"]   the human's answer to an approval
