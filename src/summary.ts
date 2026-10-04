@@ -2,7 +2,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { CycleResult } from './adapters/types.ts';
-import { readEvents } from './events.ts';
+import { readEvents, type EpoptesEvent } from './events.ts';
 import { readJson } from './fsx.ts';
 import type { Goal } from './goal.ts';
 import type { GoalPaths } from './paths.ts';
@@ -96,6 +96,47 @@ export function backlogMilestones(p: GoalPaths): Milestone[] {
   return out;
 }
 
+export type ReachedMilestone = Milestone & { reached: { at: string; run: string | null; active_s: number | null } | null };
+
+/** Backlog milestones, each with when it was reached (its latest `milestone` event naming it, e.g. "M2: …"). */
+export function milestonesWithReach(p: GoalPaths, events: EpoptesEvent[], run: string | null): ReachedMilestone[] {
+  return backlogMilestones(p).map((m) => {
+    const re = new RegExp(`^${m.id}\\b`, 'i');
+    const e = events.findLast((x) => x.type === 'milestone' && re.test(String(x.text ?? '')));
+    const reached = e ? { at: e.ts, run: e.run, active_s: e.run === run && typeof e.active_s === 'number' ? e.active_s : null } : null;
+    return { ...m, reached };
+  });
+}
+
+export interface Projection {
+  /** projected active time at which the last milestone lands */
+  end_s: number;
+  /** actual / planned time so far (0.25 = took a quarter of the planned time) */
+  pace: number;
+  /** the milestone the pace is measured at */
+  basis: string;
+}
+
+/**
+ * Where the run is heading, from milestone pace: the latest milestone reached in this run (with its active time)
+ * against its target, applied to the last milestone's target. An unreached current milestone that is already past
+ * its target slows the pace to at least active / its target. Null when there's nothing to measure or project.
+ */
+export function projectFinish(ms: ReachedMilestone[], active: number): Projection | null {
+  const last = ms.filter((m) => m.target_s != null).at(-1);
+  if (!last || last.reached) return null;
+  const basis = ms.filter((m) => m.target_s && m.reached?.active_s != null).at(-1);
+  const overdue = ms.find((m) => m.current && !m.reached && m.target_s && active > m.target_s);
+  let pace = basis ? basis.reached!.active_s! / basis.target_s! : 0;
+  let at = basis?.id ?? '';
+  if (overdue && active / overdue.target_s! > pace) {
+    pace = active / overdue.target_s!;
+    at = overdue.id;
+  }
+  if (!at) return null;
+  return { end_s: Math.max(active, Math.round(last.target_s! * pace)), pace, basis: at };
+}
+
 export interface BacklogItem {
   mark: 'todo' | 'doing' | 'done' | 'blocked' | 'cut';
   text: string;
@@ -138,6 +179,21 @@ export function outputOf(p: GoalPaths, goal: Goal, events = readEvents(p)): Outp
   if (/^https?:\/\//i.test(target)) return { kind: 'url', target, text: (e?.text as string) ?? null, exists: true, from: e ? 'event' : 'goal' };
   const rel = path.normalize(target).replace(/^(\.\/)+/, '');
   return { kind: 'file', target: rel, text: (e?.text as string) ?? null, exists: fs.existsSync(path.join(p.project, rel)), from: e ? 'event' : 'goal' };
+}
+
+/** `R-3 [low] …` / `R-4 [med] …`: review polish that never holds a goal open. */
+const MINOR_FIX = /^R-\d+\s+\[(low|med)\]/i;
+
+/**
+ * What's left to do in the backlog: open tasks (todo or in progress) that aren't `low`/`med` review fixes, and
+ * blocked ones. Null when there's no backlog or it has no tasks at all (nothing to judge by).
+ */
+export function openWork(p: GoalPaths): { open: number; blocked: number; minor: number } | null {
+  const items = backlogItems(p);
+  if (!items.length) return null;
+  const live = items.filter((t) => t.mark === 'todo' || t.mark === 'doing');
+  const minor = live.filter((t) => MINOR_FIX.test(t.text)).length;
+  return { open: live.length - minor, blocked: items.filter((t) => t.mark === 'blocked').length, minor };
 }
 
 export function lastResult(p: GoalPaths): (CycleResult & { cycle: number; run: string }) | null {

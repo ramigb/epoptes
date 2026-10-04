@@ -8,7 +8,8 @@ import { gatherGoal, rebuildIndex } from './brain.ts';
 import type { Activity, Cycle, CycleExit } from './adapters/types.ts';
 import { clockState, newClock, newFollowUpClock, runFinished, pauseClock, readClock, resumeClock, writeClock, type Clock, type Mode } from './clock.ts';
 import { emit, readEvents } from './events.ts';
-import { followUpItems, ingestInbox, pendingSteers, readFeedback, type FeedbackItem } from './feedback.ts';
+import { followUpItems, ingestInbox, isOpen, pendingApprovals, pendingSteers, readFeedback, type FeedbackItem } from './feedback.ts';
+import { openWork } from './summary.ts';
 import { appendJsonl, exists, nowIso, readJson, rm, touch, writeJson } from './fsx.ts';
 import { loadGoal, type Goal } from './goal.ts';
 import { goalPaths, type GoalPaths } from './paths.ts';
@@ -88,6 +89,21 @@ export function steerPreamble(items: FeedbackItem[], interrupted: boolean): stri
     list,
     `> 3. Replan with the ripple effect: walk every open task and milestone in the backlog, then cut, rewrite, reorder or add tasks so the whole plan follows the new direction (not just one task). Check the current milestone and the wrap-up list still make sense. Record the change in \`state/decisions.md\`.`,
     `> 4. Run \`epoptes feedback <id> in_progress\`, then \`epoptes feedback <id> note "replanned: <what changed in the plan>"\`, and carry on with the new plan.`,
+    '',
+    '',
+  ].join('\n');
+}
+
+/**
+ * The note in front of loop.md when the backlog has run out of real work in build mode: check done, then wrap up.
+ * Without it an orchestrator with hours left on the clock tends to invent tasks to fill them.
+ */
+export function backlogClearPreamble(w: { blocked: number; minor: number }): string {
+  return [
+    `> **Epoptes runner: BACKLOG CLEAR.** No open tasks are left in the backlog${w.minor ? ` except ${w.minor} low/med review fix${w.minor > 1 ? 'es' : ''}` : ''}${w.blocked ? `, and ${w.blocked} blocked` : ''}, and no feedback is waiting. Unused time is fine: the time box is a limit, not a target. This cycle:`,
+    '> 1. Orient as usual, then run every done check from goal.json.',
+    '> 2. All pass → `epoptes event wrapup "<why>"` and do the wrap-up checklist. One fails → add only the tasks that make it pass (say which check each is for), and do them.',
+    `> 3. Don't add tasks for anything else. Ideas go in the handoff's next-tasks list for the human.${w.blocked ? ' If what\'s left is blocked on the human, `epoptes wait-for-human "<what you need>"` after wrapping up what you can.' : ''}`,
     '',
     '',
   ].join('\n');
@@ -293,7 +309,13 @@ export async function runGoal(project: string, { followUp = false } = {}) {
       const timeoutS = Math.round(Math.max(60, Math.min(timeoutMin * 60, st.toHard)));
       const cycleDir = p.cycleDir(n);
       fs.mkdirSync(cycleDir, { recursive: true });
-      const steers = pendingSteers(readFeedback(p));
+      const fb = readFeedback(p);
+      const steers = pendingSteers(fb);
+      // Build mode with nothing real left to do: steer the cycle to the done checks and wrap-up, not new work.
+      const work = st.mode === 'build' && !exists(p.wrapup) ? openWork(p) : null;
+      const waitingFeedback = [...fb.values()].some((f) => isOpen(f) && f.status !== 'blocked' && !pendingApprovals([f]).length);
+      const clear = Boolean(work && work.open === 0 && !waitingFeedback && !steers.length);
+      if (clear) preamble += backlogClearPreamble(work!);
       const prompt = steerPreamble(steers, lastSteered) + preamble + fs.readFileSync(path.join(p.root, goal.adapter.prompt), 'utf8');
 
       const spec = {
@@ -321,7 +343,7 @@ export async function runGoal(project: string, { followUp = false } = {}) {
       };
 
       setStatus({ state: status.pause_requested ? 'pausing' : 'running', cycle: n, cycle_started_at: nowIso() });
-      emit(p, { src: 'runner', type: 'cycle.start', run, cycle: n, mode: st.mode, model: goal.adapter.model, effort: goal.adapter.effort, timeout_s: timeoutS, ...(steers.length ? { steer: steers.map((f) => f.id) } : {}) });
+      emit(p, { src: 'runner', type: 'cycle.start', run, cycle: n, mode: st.mode, model: goal.adapter.model, effort: goal.adapter.effort, timeout_s: timeoutS, ...(steers.length ? { steer: steers.map((f) => f.id) } : {}), ...(clear ? { backlog_clear: true } : {}) });
       log(`cycle ${n} start: mode=${st.mode} ${goal.adapter.model}/${goal.adapter.effort} timeout=${timeoutS}s`);
 
       const activityFile = path.join(cycleDir, 'activity.jsonl');

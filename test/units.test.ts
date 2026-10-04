@@ -220,3 +220,25 @@ test('time use: phases from events, roles and tools from activity', async () => 
     Edit: { seconds: 28, calls: 1 }, 'background commands': { seconds: 60, calls: 1 },
   });
 });
+
+test('open work ignores low/med review fixes; projection follows milestone pace', async () => {
+  const { openWork, projectFinish } = await import('../src/summary.ts');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'epoptes-work-'));
+  fs.mkdirSync(path.join(dir, '.epoptes', 'state'), { recursive: true });
+  const write = (lines: string[]) => fs.writeFileSync(path.join(dir, '.epoptes', 'state', 'backlog.md'), lines.join('\n'));
+  write(['## Review fixes', '- [ ] R-1 [low] ui: nicer shadow', '- [ ] R-2 [med] copy: shorter intro', '## M1 · A', '- [x] M1-1 a', '- [blocked: needs approval F-2] M1-2 b']);
+  assert.deepEqual(openWork(goalPaths(dir)), { open: 0, blocked: 1, minor: 2 });
+  write(['- [ ] R-3 [high] crash on load', '- [x] M1-1 a']);
+  assert.deepEqual(openWork(goalPaths(dir)), { open: 1, blocked: 0, minor: 0 });
+  write(['# nothing yet']);
+  assert.equal(openWork(goalPaths(dir)), null);
+
+  const m = (id: string, target_s: number | null, active_s: number | null) => ({ id, title: id, target_s, todo: 0, doing: 0, done: 0, blocked: 0, cut: 0, current: false, reached: active_s == null ? null : { at: '', run: 'r1', active_s } });
+  // M1 planned for 2h, done in 30 min: the run is on a quarter of the plan, so a 10h plan lands at ~2h30m.
+  assert.deepEqual(projectFinish([m('M1', 7200, 1800), m('M2', 18000, null), m('M3', 36000, null)], 1900), { end_s: 9000, pace: 0.25, basis: 'M1' });
+  assert.equal(projectFinish([m('M1', 7200, null), m('M2', 36000, null)], 100), null, 'no reached milestone with a time yet');
+  assert.equal(projectFinish([m('M1', 7200, 1800)], 1900), null, 'nothing left to project');
+  // M2 is current and already past its target: that slower pace wins.
+  const late = [m('M1', 2400, 2100), { ...m('M2', 4800, null), current: true }, m('M3', 6600, null)];
+  assert.deepEqual(projectFinish(late, 5640), { end_s: 7755, pace: 1.175, basis: 'M2' });
+});

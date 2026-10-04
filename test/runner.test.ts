@@ -377,3 +377,27 @@ test('brain: lessons and digests reach ~/.epoptes/brain when a run ends, and `ep
   assert.match(g.run(['brain', 'lessons', '--kind', 'code']), /no harness lessons yet for code goals/);
   for (const e of g.events()) assert.deepEqual(validate('event', e), [], JSON.stringify(e));
 });
+
+test('backlog clear: with no real work left the runner steers the cycle to the done checks, not new tasks', async () => {
+  const g = setup();
+  const backlog = (lines: string[]) => fs.writeFileSync(path.join(g.root, 'state', 'backlog.md'), lines.join('\n'));
+  backlog(['## Review fixes', '- [ ] R-1 [low] nicer shadow', '## M1 · A (target 0:10)', '- [x] M1-1 a', '- [x] M1-2 b']);
+  g.run(['start', g.project], { FAKE_DONE_AT: '1' });
+  await until(() => g.read('run/status.json').state === 'done');
+  const p1 = g.read('cycles/000001/fake-argv.json').prompt;
+  assert.match(p1, /^> \*\*Epoptes runner: BACKLOG CLEAR\.\*\* No open tasks are left in the backlog except 1 low\/med review fix, and no feedback is waiting/);
+  assert.match(p1, /time box is a limit, not a target/);
+  assert.equal(g.events().find((e) => e.type === 'cycle.start').backlog_clear, true);
+
+  // Open work or waiting feedback: no note.
+  backlog(['## M1 · A', '- [x] M1-1 a', '- [ ] M1-2 b']);
+  g.run(['start', g.project, '--new-run'], { FAKE_DONE_AT: '2' });
+  await until(() => g.read('run/status.json').state === 'done' && g.read('run/status.json').cycle === 2);
+  assert.doesNotMatch(g.read('cycles/000002/fake-argv.json').prompt, /BACKLOG CLEAR/);
+  backlog(['## M1 · A', '- [x] M1-1 a']);
+  g.run(['feedback', g.project, 'one more thing']);
+  g.run(['start', g.project, '--new-run'], { FAKE_DONE_AT: '3' });
+  await until(() => g.read('run/status.json').state === 'done' && g.read('run/status.json').cycle === 3);
+  assert.doesNotMatch(g.read('cycles/000003/fake-argv.json').prompt, /BACKLOG CLEAR/);
+  for (const e of g.events()) assert.deepEqual(validate('event', e), [], JSON.stringify(e));
+});

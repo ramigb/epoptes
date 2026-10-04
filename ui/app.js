@@ -279,6 +279,8 @@ function ClockBar({ g, big }) {
   const wrapStart = ((c.timebox_s - c.wrapup_s) / total) * 100;
   const cls = c.paused ? 'paused' : g.wrapup_marker && c.clock_mode === 'build' ? 'wrapup' : c.clock_mode;
   const marks = milestoneMarks(g.milestones ?? [], active, total);
+  const proj = g.projection;
+  const projTip = proj && `On pace to finish around ${dur(proj.end_s)} of active time: ${proj.basis} ${proj.pace > 1 ? 'is running at' : 'took'} ${Math.round(proj.pace * 100)}% of its planned time, and the same pace is applied to the last milestone's target.`;
   return html`<div class="clockbar ${big ? 'big' : ''} ${marks.length ? 'has-ms' : ''}">
     <div class="track-wrap">
       <div class="track" role="progressbar" aria-valuemin="0" aria-valuemax=${c.timebox_s} aria-valuenow=${Math.round(active)} aria-label="Active time">
@@ -286,11 +288,13 @@ function ClockBar({ g, big }) {
         <div class="fill ${cls}" style=${{ width: `${w}%` }}></div>
       </div>
       ${marks.map((m) => html`<span key=${m.id} class="ms-tick ${m.state}" style=${{ left: `${m.pos}%` }} title=${m.tip}></span>`)}
+      ${proj && html`<span class="proj-tick ${proj.end_s > c.timebox_s ? 'over' : ''}" style=${{ left: `${Math.min(100, (proj.end_s / total) * 100)}%` }} title=${projTip}></span>`}
       ${marks.filter((m) => m.reachedPos != null).map((m) => html`<span key=${`r${m.id}`} class="ms-hit ${m.state}" style=${{ left: `${m.reachedPos}%` }} title=${m.tip}></span>`)}
     </div>
     ${big && marks.length > 0 && html`<div class="ms-labels" aria-hidden="true">${marks.map((m) => html`<span key=${m.id} class="${m.state} ${m.current ? 'current' : ''}" style=${{ left: `${m.pos}%` }}>${m.id}${m.state === 'overdue' ? ' overdue' : m.state === 'late' ? ' (late)' : ''}</span>`)}</div>`}
     <div class="labels">
       <span class="num">${dur(active)} active${c.paused ? ' · clock paused' : ''}</span>
+      ${big && proj && html`<span class="num proj-label ${proj.end_s > c.timebox_s ? 'over' : ''}" title=${projTip}><span class="proj-key" aria-hidden="true"></span>on pace to finish at ~${dur(proj.end_s)}${proj.end_s > c.timebox_s ? ' · over the time box' : ''}</span>`}
       <span class="num">${c.to_end > 0 ? `${dur(c.timebox_s - active)} left of ${dur(c.timebox_s)}` : `over by ${dur(active - c.timebox_s)}`}</span>
     </div>
   </div>`;

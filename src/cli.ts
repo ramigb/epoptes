@@ -9,7 +9,7 @@ import { adapters } from './adapters/index.ts';
 import { agentsFromDir } from './adapters/claude-code.ts';
 import { activeS, readClock, readClockState } from './clock.ts';
 import * as control from './control.ts';
-import { emit } from './events.ts';
+import { emit, readEvents } from './events.ts';
 import { addFeedback, editFeedback, followUpItems, ingestInbox, isAgentNote, noteFeedback, pendingApprovals, readFeedback, setFeedbackStatus, setScope, STATUSES, type FeedbackItem, type FeedbackStatus, type Scope } from './feedback.ts';
 import { exists, hm, parseDuration, readJson, touch } from './fsx.ts';
 import { loadGoal } from './goal.ts';
@@ -18,7 +18,7 @@ import { epoptesHome, goalPaths } from './paths.ts';
 import { addGoal, readRegistry, resolveGoal } from './registry.ts';
 import { runGoal } from './runner.ts';
 import { reconcile } from './status.ts';
-import { backlogCounts, backlogMilestones, lastResult, money, outputOf, readHead } from './summary.ts';
+import { backlogCounts, backlogMilestones, lastResult, milestonesWithReach, money, outputOf, projectFinish, readHead } from './summary.ts';
 
 const HELP = `epoptes: create, run, watch and steer long-running Claude Code or Codex harnesses
 
@@ -119,6 +119,8 @@ function statusText(project: string): string {
   if (exists(p.wrapup)) out.push('WRAPUP marker set (early finish)');
 
   const b = backlogCounts(p);
+  const proj = cs && c && c.kind !== 'followup' && !exists(p.done) ? projectFinish(milestonesWithReach(p, readEvents(p), s.run), cs.active) : null;
+  if (proj && c) out.push(`pace ${proj.basis} ${proj.pace > 1 ? 'is running at' : 'took'} ${Math.round(proj.pace * 100)}% of its planned time · on pace to finish at ~${hm(proj.end_s)} of ${hm(c.timebox_s)}${proj.end_s > c.timebox_s ? ' (over the time box)' : ''}`);
   if (b) out.push(`backlog ${b.done}/${b.todo + b.doing + b.done + b.blocked} done · ${b.doing} in progress · ${b.blocked} blocked · ${b.cut} cut${b.milestone ? ` · milestone ${b.milestone}` : ''}`);
   ingestInbox(p);
   const fb = [...readFeedback(p).values()];

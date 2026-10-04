@@ -205,6 +205,11 @@ main { max-width: 1320px; margin: 0 auto; padding: 24px; }
 .ms-tick.ontime { background: var(--ok); }
 .ms-tick.late, .ms-tick.overdue { background: var(--warn); }
 .ms-tick.current { background: var(--ink); }
+.proj-tick { position: absolute; top: -5px; bottom: -5px; width: 0; margin-left: -1px; border-left: 2px dashed var(--done); cursor: help; }
+.proj-tick.over { border-left-color: var(--warn); }
+.proj-label { color: var(--ink); cursor: help; }
+.proj-key { display: inline-block; width: 0; height: 10px; border-left: 2px dashed var(--done); margin-right: 6px; vertical-align: -1px; }
+.proj-label.over .proj-key { border-left-color: var(--warn); }
 .ms-hit { position: absolute; top: 50%; width: 10px; height: 10px; margin: -5px 0 0 -5px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 2px var(--bg); }
 .ms-hit.late { background: var(--warn); }
 .ms-labels { position: relative; height: 14px; font-size: 11px; color: var(--faint); }

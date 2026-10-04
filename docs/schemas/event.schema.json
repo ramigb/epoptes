@@ -151,6 +151,10 @@
               "type": "string"
             },
             "description": "steering items the runner put in front of the prompt"
+          },
+          "backlog_clear": {
+            "type": "boolean",
+            "description": "the runner told the cycle the backlog has no real work left (check done, then wrap up)"
           }
         }
       }
