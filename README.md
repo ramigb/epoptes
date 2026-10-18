@@ -90,7 +90,7 @@ An empty model uses your Codex CLI configuration; you can also specify a Codex m
 
 Codex uses its native sandbox, configuration and rules. `.epoptes/settings.json` is Claude-only: omit it for Codex goals. The skill adapts `loop.md` to do work and checks sequentially; role files are guidance, and their Claude models, tool lists and turn caps are not translated into native Codex subagents. Adapt an existing Claude loop before changing its adapter.
 
-The dashboard and reports show Codex commands, file changes, messages and token usage. Codex JSONL provides no dollar costs or reset timestamps: costs display as unknown, rate limits use the configured backoff, and `cycle.max_budget_usd` must be `null`. With an empty model, token usage is labelled `codex-configured` because the stream doesn't identify the actual model. See the official [non-interactive mode documentation](https://developers.openai.com/codex/noninteractive) and [skill locations](https://developers.openai.com/codex/skills).
+The dashboard and reports show Codex commands, file changes, messages and token usage. Codex JSONL provides no dollar costs or reset timestamps: costs display as unknown, rate limits use the configured backoff, and `cycle.max_budget_usd` must be `null`. Your Codex plan usage (5h and 7d windows) is read from the session log Codex writes for each cycle and shown on Codex goals. With an empty model, token usage is labelled `codex-configured` because the stream doesn't identify the actual model. See the official [non-interactive mode documentation](https://developers.openai.com/codex/noninteractive) and [skill locations](https://developers.openai.com/codex/skills).
 
 ### Using pi
 
@@ -114,7 +114,7 @@ An empty model uses pi's `defaultProvider`/`defaultModel`; otherwise use pi's `p
 
 pi has **no sandbox and no approval prompts**: its tools run with your permissions. Keep `.epoptes/settings.json` for its deny list. The adapter loads a small Epoptes guard extension that blocks `Bash(…)`, `Read(…)`, `Edit(…)` and `Write(…)` deny matches, including inside `&&`, `;` and `|` chains, and reports each blocked attempt as a warning. Allow rules have no effect. The guard is a tripwire, not a boundary: for untrusted goals, run pi in a container or VM. Extra pi flags (for example `["--exclude-tools", "write"]`) go in `adapter.args`.
 
-pi reports tokens and a cost estimate from its model catalog, so the dashboard and reports show dollar estimates (`≈`). `cycle.max_budget_usd` works: Epoptes stops the cycle when the estimate passes it, which is worth setting for pay-per-token providers. Rate-limit errors (429, "rate limit", overloaded) that pi's own retries don't clear use the runner's backoff. Like Codex, pi has no subagents, so the skill writes `loop.md` to work sequentially.
+pi reports tokens and a cost estimate from its model catalog, so the dashboard and reports show dollar estimates (`≈`), live while a cycle runs. pi bills per token, so a pi goal's top bar shows the job's API spend instead of plan usage. `cycle.max_budget_usd` works: Epoptes stops the cycle when the estimate passes it, which is worth setting for pay-per-token providers. Rate-limit errors (429, "rate limit", overloaded) that pi's own retries don't clear use the runner's backoff. Like Codex, pi has no subagents, so the skill writes `loop.md` to work sequentially.
 
 ## How it works
 - **A goal is a directory.** Everything lives in `<project>/.epoptes/`: `goal.json` (objective, done checks, time box, models), `loop.md` (the orchestrator's per-cycle instructions), role files in `agents/`, and memory in `state/`. It also holds the logs of events, feedback and cycles. The file format is the contract: the CLI, runner, dashboard and skill only read and write these files ([docs/spec.md](docs/spec.md)).
@@ -200,7 +200,8 @@ Harnesses generated before 0.3 keep working. Some of the new behaviour comes fro
 The rest comes from the loop template: approval requests, "waiting for you", harness lessons, the output event, the scope rule and per-milestone early finish. To get these, regenerate the harness with the skill, or ask Claude to update that goal's `.epoptes/loop.md` from the current template. You can also add `"output"` to an old `goal.json` by hand.
 
 ## Costs and usage limits
-- The dashboard and reports show **tokens by model, cache-read share and cost per cycle**, and flag cycles that cost more than twice the median.
+- The dashboard and reports show **tokens by model, cache-read share and cost per cycle**, and flag cycles that cost more than twice the median. Cache share (and, on pi, cost) count the running cycle too.
+- The top bar shows the plan usage of the CLI a goal runs on (Claude or Codex). Epoptes only reads it during its own cycles, so an older reading is dimmed and says how old it is.
 - On a Claude subscription, costs are **API-equivalent estimates, not bills**, and are always shown with `≈`.
 - You're responsible for your account and its usage limits. When Claude Code reports a rate limit, Epoptes waits until the limit resets (and pauses the clock), then continues. It never works around limits or switches accounts.
 - For hard caps per cycle, set `cycle.max_budget_usd` in `goal.json` (Claude Code, and pi, where Epoptes enforces it from pi's estimate). Codex requires `null` and reports token usage without dollar estimates.
