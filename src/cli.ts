@@ -139,7 +139,7 @@ function statusText(project: string): string {
   }
   if (s.limits) {
     const w = Object.entries(s.limits.windows).map(([k, v]) => `${k} ${Math.round(v.utilization * 100)}%`).join(' · ');
-    out.push(`usage ${s.limits.status}${w ? ` · ${w}` : ''} (as of ${ago(s.limits.at)} ago)`);
+    out.push(`${s.limits.source === 'codex' ? 'Codex' : 'Claude'} usage ${s.limits.status}${w ? ` · ${w}` : ''} (as of ${ago(s.limits.at)} ago)`);
   }
   const r = lastResult(p);
   if (r) out.push(`last cycle c${r.cycle}: ${r.exit} · ${hm(r.duration_s)} · ${r.turns ?? '?'} turns · ${money(r.cost_usd, r.cost_basis)}${r.error ? ` · ${r.error}` : ''}`);

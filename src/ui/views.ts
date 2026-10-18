@@ -9,7 +9,7 @@ import { exists, nowIso, readJson, readJsonl, writeJson } from '../fsx.ts';
 import { loadGoal, type Goal } from '../goal.ts';
 import { inJob, jobsOf, type Job } from '../jobs.ts';
 import { epoptesHome } from '../paths.ts';
-import { LIVE_STATES } from '../status.ts';
+import { LIVE_STATES, type LiveUsage, type Status } from '../status.ts';
 import { totalCost, backlogCounts, backlogItems, milestonesWithReach, outputOf, projectFinish } from '../summary.ts';
 import type { GoalWatch } from './watch.ts';
 
@@ -117,6 +117,15 @@ const median = (xs: number[]) => {
   return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
 };
 
+/** The running cycle's usage so far; status.json keeps it only while a cycle is live. */
+const liveUsage = (s: Status | null | undefined) => (s?.live_usage && s.cycle_started_at && LIVE_STATES.includes(s.state) ? s.live_usage : null);
+
+/** Finished cycles plus the running one, when its CLI prices usage as it goes. */
+function costSoFar(results: { cost_usd: number | null }[], live: LiveUsage | null) {
+  const priced = live?.cost_usd != null ? [...results, { cost_usd: live.cost_usd }] : results;
+  return priced.length ? totalCost(priced) : null;
+}
+
 export function summary(w: GoalWatch) {
   const p = w.p;
   let goal: Goal;
@@ -157,7 +166,9 @@ export function summary(w: GoalWatch) {
     wait_reason: s?.wait_reason ?? null,
     cycle_started_at: s?.cycle_started_at ?? null,
     heartbeat_at: s?.heartbeat_at ?? null,
-    limits: s?.limits ?? null,
+    adapter: goal.adapter.type,
+    limits: s?.limits ? { ...s.limits, source: s.limits.source ?? 'claude-code' } : null,
+    live_usage: liveUsage(s),
     needs: s?.state === 'needs_input' ? (s.needs ?? { reason: 'the orchestrator needs you', since: s.updated_at }) : null,
     pending_approvals: pending.map((f) => ({ id: f.id, text: f.text, ref: f.ref })),
     done_marker: exists(p.done),
@@ -171,7 +182,7 @@ export function summary(w: GoalWatch) {
     projection: cs && c?.kind !== 'followup' && !runFinished(p) ? projectFinish(ms, cs.active) : null,
     output: output(w, goal),
     cycles: results.length,
-    cost_usd: totalCost(results),
+    cost_usd: costSoFar(results, liveUsage(s)),
     cost_basis: results.some((r) => r.cost_basis === 'estimate') || !results.length ? 'estimate' : 'billed',
     last_exit: results.at(-1)?.exit ?? null,
     notify: goal.notify,
@@ -205,7 +216,7 @@ export function detail(w: GoalWatch, { all = false } = {}) {
     ...base,
     job_scope: all ? 'all' : 'job',
     cycles: results.length,
-    cost_usd: totalCost(results),
+    cost_usd: costSoFar(results, liveUsage(w.status)),
     cost_basis: results.some((r) => r.cost_basis === 'estimate') || !results.length ? 'estimate' : 'billed',
     goal: { objective: goal.objective, done: goal.done, non_goals: goal.non_goals, approval_required: goal.approval_required, timebox: goal.timebox, checkpoints: goal.checkpoints, adapter: goal.adapter, cycle: goal.cycle },
     seen: readSeen(w.id),

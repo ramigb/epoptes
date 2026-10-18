@@ -227,7 +227,7 @@ export async function runGoal(project: string, { followUp = false } = {}) {
     writeClock(p, pauseClock(c));
     const needs = reason === 'needs_you' ? { reason: readControl()?.for_human?.reason ?? 'the orchestrator needs you', since: nowIso() } : null;
     if (reason === 'paused' || reason === 'needs_you') rm(p.control);
-    setStatus({ state: END_STATE[reason], pid: null, pause_requested: false, waiting_until: null, wait_reason: null, cycle_started_at: null, needs });
+    setStatus({ state: END_STATE[reason], pid: null, pause_requested: false, waiting_until: null, wait_reason: null, cycle_started_at: null, live_usage: null, needs });
     emit(p, { src: 'runner', type: 'run.end', run, cycle: status.cycle || null, reason });
     rm(p.lock);
     // After run.end, so the digest sees how the run ended. Feed the brain (~/.epoptes/brain): token-free, and never allowed to break the run's ending.
@@ -342,7 +342,7 @@ export async function runGoal(project: string, { followUp = false } = {}) {
         },
       };
 
-      setStatus({ state: status.pause_requested ? 'pausing' : 'running', cycle: n, cycle_started_at: nowIso() });
+      setStatus({ state: status.pause_requested ? 'pausing' : 'running', cycle: n, cycle_started_at: nowIso(), live_usage: null });
       emit(p, { src: 'runner', type: 'cycle.start', run, cycle: n, mode: st.mode, model: goal.adapter.model, effort: goal.adapter.effort, timeout_s: timeoutS, ...(steers.length ? { steer: steers.map((f) => f.id) } : {}), ...(clear ? { backlog_clear: true } : {}) });
       log(`cycle ${n} start: mode=${st.mode} ${goal.adapter.model}/${goal.adapter.effort} timeout=${timeoutS}s`);
 
@@ -350,6 +350,7 @@ export async function runGoal(project: string, { followUp = false } = {}) {
       const cycle = adapter.start(spec, {
         activity: (a: Activity) => appendJsonl(activityFile, a),
         limits: (l) => setStatus({ limits: l }),
+        usage: (u) => setStatus({ live_usage: { ...u, at: nowIso() } }),
         warn: (text) => emit(p, { src: 'runner', type: 'warn', run, cycle: n, text }),
       });
       current = cycle;
@@ -392,7 +393,7 @@ export async function runGoal(project: string, { followUp = false } = {}) {
         }
       }
       for (const text of capWarnings(p, goal)) emit(p, { src: 'runner', type: 'warn', run, cycle: n, text });
-      setStatus({ cycle_started_at: null });
+      setStatus({ cycle_started_at: null, live_usage: null });
 
       if (stopRequested) return finish('stopped');
 

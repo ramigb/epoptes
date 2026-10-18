@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import * as control from '../control.ts';
 import { addFeedback, editFeedback, noteFeedback, setFeedbackStatus, setScope, type FeedbackStatus, type Scope } from '../feedback.ts';
 import { readRegistry } from '../registry.ts';
+import type { Limits } from '../status.ts';
 import { buildReport, renderAllHtml, renderHtml } from '../report.ts';
 import { goalPaths } from '../paths.ts';
 import { timeUse } from '../timeuse.ts';
@@ -158,10 +159,12 @@ export function serve({ port, lan, pollMs = 1000 }: ServeOptions) {
 
       if (req.method === 'GET' && url.pathname === '/api/state') {
         const goals = [...watches.values()].map(summary);
-        const limits = goals
-          .map((g) => ('limits' in g ? g.limits : null))
-          .filter(Boolean)
-          .sort((a, b) => (a!.at < b!.at ? 1 : -1))[0] ?? null;
+        // Plan usage belongs to an account per CLI: the newest reading for each (pi bills per token, so it has none).
+        const limits: Record<string, Limits & { source: string }> = {};
+        for (const g of goals) {
+          const l = 'limits' in g ? g.limits : null;
+          if (l && !(limits[l.source] && limits[l.source].at > l.at)) limits[l.source] = l;
+        }
         return send(res, 200, { goals, limits, lan });
       }
 

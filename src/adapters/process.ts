@@ -4,10 +4,12 @@ import path from 'node:path';
 import readline from 'node:readline';
 import { nowIso } from '../fsx.ts';
 import type { Limits } from '../status.ts';
-import type { Activity, Adapter, Cycle, CycleHooks, CycleResult, CycleSpec } from './types.ts';
+import type { Activity, Adapter, Cycle, CycleHooks, CycleResult, CycleSpec, UsageSoFar } from './types.ts';
+
+const USAGE_EVERY_MS = 2000;
 
 interface Parser {
-  feed(message: unknown): { activity: Activity[]; warn: string[]; limits: Limits | null };
+  feed(message: unknown): { activity: Activity[]; warn: string[]; limits: Limits | null; usage?: UsageSoFar | null };
   result(meta: { startedAt: string; endedAt: string; code: number | null; signal: string | null; stderrTail: string }): CycleResult;
 }
 
@@ -24,6 +26,7 @@ export function startCli(spec: CycleSpec, hooks: CycleHooks, { bin, args, env, s
   child.stdin?.end(stdin);
 
   const rl = readline.createInterface({ input: child.stdout! });
+  let usageAt = 0;
   rl.on('line', (line) => {
     raw.write(line + '\n');
     let m: unknown;
@@ -32,10 +35,15 @@ export function startCli(spec: CycleSpec, hooks: CycleHooks, { bin, args, env, s
     } catch {
       return;
     }
-    const { activity, warn, limits } = parser.feed(m);
+    const { activity, warn, limits, usage } = parser.feed(m);
     for (const a of activity) hooks.activity(a);
     for (const w of warn) hooks.warn(w);
     if (limits) hooks.limits(limits);
+    // status.json is rewritten on each update, so the running totals are sent at most every few seconds.
+    if (usage && hooks.usage && Date.now() - usageAt >= USAGE_EVERY_MS) {
+      usageAt = Date.now();
+      hooks.usage(usage);
+    }
   });
   child.stderr!.on('data', (d: Buffer) => {
     errFile.write(d);

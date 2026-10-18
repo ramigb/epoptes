@@ -329,22 +329,46 @@ function milestoneMarks(milestones, active, total) {
 
 // ---------------------------------------------------------------- top bar
 
-function Topbar() {
+const CLI_NAME = { 'claude-code': 'Claude', codex: 'Codex', pi: 'pi' };
+
+/** One CLI account's plan windows (Claude Code, Codex), e.g. "Claude 5h 31% 7d 9%". */
+function PlanUsage({ source, l }) {
+  // A reading can be days old (the last cycle on that CLI); a window that has reset since says nothing now.
+  const windows = Object.entries(l.windows).filter(([, w]) => !w.resets_at || Date.parse(w.resets_at) > Date.now());
+  if (!windows.length) return null;
+  const name = CLI_NAME[source] ?? source;
+  const hot = windows.some(([, w]) => w.utilization >= 0.8) || !['allowed', 'allowed_warning'].includes(l.status);
+  return html`<span class="pill ${hot ? 'warn' : ''} hide-sm" title=${`${name} plan usage, as of ${ago(l.at)}. Shared by every ${name} goal.`}>
+    <b>${name}</b>
+    ${windows.map(([k, w]) => html`<span key=${k}>${k.replace('_', ' ').replace('five hour', '5h').replace('seven day', '7d')} ${pct(w.utilization)}</span>`)}
+  </span>`;
+}
+
+/** On a goal's page, the usage of the CLI that goal runs on; on the list, every CLI's plan that has reported. */
+function Usage({ id }) {
   const s = useStore();
-  const limits = s.state?.limits;
-  const limited = s.state?.goals.some((g) => g.state === 'rate_limited');
+  const limits = s.state?.limits ?? {};
+  const goal = id && id !== 'brain' ? s.state?.goals.find((g) => g.id === id) : null;
+  if (!goal) return Object.entries(limits).map(([src, l]) => html`<${PlanUsage} key=${src} source=${src} l=${l} />`);
+  if (goal.adapter === 'pi') {
+    return html`<span class="pill hide-sm" title="pi bills the provider per token, so there are no plan windows. This job's spend so far, including the running cycle.">
+      <b>pi</b> API <${Money} usd=${goal.cost_usd} basis=${goal.cost_basis} />
+    </span>`;
+  }
+  return limits[goal.adapter] ? html`<${PlanUsage} source=${goal.adapter} l=${limits[goal.adapter]} />` : null;
+}
+
+function Topbar({ id }) {
+  const s = useStore();
+  const goal = id && id !== 'brain' ? s.state?.goals.find((g) => g.id === id) : null;
+  const limited = goal ? goal.state === 'rate_limited' : s.state?.goals.some((g) => g.state === 'rate_limited');
   const [perm, setPerm] = useState(typeof Notification === 'undefined' ? 'unsupported' : Notification.permission);
-  const windows = limits ? Object.entries(limits.windows) : [];
-  const hot = windows.some(([, w]) => w.utilization >= 0.8) || (limits && !['allowed', 'allowed_warning'].includes(limits.status));
   return html`<header class="topbar">
     <a class="brand" href="#/" aria-label="Epoptes: all goals"><${Logo} />epoptes</a>
     ${s.state?.lan && html`<span class="pill bad" title="Anyone on your network can control runs">LAN mode</span>`}
     <span class="spacer"></span>
     ${limited && html`<span class="pill warn">rate-limited</span>`}
-    ${windows.length > 0 &&
-    html`<span class="pill ${hot ? 'warn' : ''} hide-sm" title=${`Account usage, as of ${ago(limits.at)}. Shared by every goal.`}>
-      ${windows.map(([k, w]) => html`<span key=${k}>${k.replace('_', ' ').replace('five hour', '5h').replace('seven day', '7d')} ${pct(w.utilization)}</span>`)}
-    </span>`}
+    <${Usage} id=${id} />
     ${perm === 'default' &&
     html`<button class="iconbtn" onClick=${() => Notification.requestPermission().then(setPerm)} title="Desktop notifications for milestones, blocks and DONE">🔔 Notify me</button>`}
     ${perm === 'granted' && html`<span class="pill hide-sm" title="Desktop notifications are on">🔔 on</span>`}
@@ -470,7 +494,7 @@ function GoalCard({ g }) {
       ${g.job?.named && html`<span title="the current job of this harness">job <b>${g.job.title}</b></span>`}
       <span>cycle <b class="num">${g.cycle || '–'}</b>${g.round ? html` · round <b>${g.round}</b>` : ''}</span>
       ${b && html`<span>backlog <b class="num">${b.done}/${total}</b></span>`}
-      ${g.cycles > 0 && html`<span><${Money} usd=${g.cost_usd} basis=${g.cost_basis} /></span>`}
+      ${(g.cycles > 0 || g.live_usage?.cost_usd != null) && html`<span><${Money} usd=${g.cost_usd} basis=${g.cost_basis} /></span>`}
       ${g.cycle_started_at && g.state === 'running' && html`<span>this cycle <b class="num">${dur((now - Date.parse(g.cycle_started_at)) / 1000)}</b></span>`}
     </div>
   </a>`;
@@ -569,18 +593,20 @@ function Banners({ d }) {
 
 function Stats({ d }) {
   const all = d.cycles_detail;
+  const live = d.live_usage; // the running cycle, until its result lands in cycles_detail
   let read = 0;
   let totalIn = 0;
-  for (const r of all) for (const u of Object.values(r.models)) {
+  for (const models of [...all.map((r) => r.models), live?.models ?? {}]) for (const u of Object.values(models)) {
     read += u.cache_read;
     totalIn += u.input + u.cache_read + u.cache_write;
   }
+  const liveNote = live ? ' (including the running cycle so far)' : '';
   const b = d.backlog;
   const bt = b ? b.todo + b.doing + b.done + b.blocked : 0;
   return html`<div class="stats">
     <div class="panel stat"><div class="k">Cycles</div><div class="v num">${all.length}${d.round ? html` <small>round ${d.round} now</small>` : ''}</div></div>
-    <div class="panel stat"><div class="k">Cost</div><div class="v"><${Money} usd=${all.length ? d.cost_usd : null} basis=${d.cost_basis} /></div></div>
-    <div class="panel stat"><div class="k">Cache-read share</div><div class="v num">${totalIn ? pct(read / totalIn) : '–'}</div></div>
+    <div class="panel stat" title=${live && live.cost_usd == null ? 'This CLI prices a cycle when it ends; the running cycle is not counted yet.' : `Cost${liveNote}`}><div class="k">Cost</div><div class="v"><${Money} usd=${all.length || live?.cost_usd != null ? d.cost_usd : null} basis=${d.cost_basis} /></div></div>
+    <div class="panel stat" title=${`Cached input as a share of all input${liveNote}`}><div class="k">Cache-read share</div><div class="v num">${totalIn ? pct(read / totalIn) : '–'}</div></div>
     <div class="panel stat"><div class="k">Median cycle</div><div class="v"><${Money} usd=${d.cost_median || null} basis=${d.cost_basis} /></div></div>
     <div class="panel stat"><div class="k">Backlog</div><div class="v num">${b ? html`${b.done}<small>/${bt} done</small>` : '–'}</div></div>
   </div>`;
@@ -1268,7 +1294,7 @@ function App() {
     const waiting = goals.filter((g) => g.needs || g.pending_approvals?.length).length;
     if (id !== 'brain') document.title = `${waiting ? `⚑ ${waiting} · ` : ''}${s.detail?.name ? `${s.detail.name} · Epoptes` : 'Epoptes'}`;
   }, [s.detail?.name, s.state, id]);
-  return html`<${Topbar} />
+  return html`<${Topbar} id=${id} />
     ${s.offline && html`<div class="offline pill bad">Dashboard server unreachable. Runs keep going; reconnecting…</div>`}
     <main>${id === 'brain' ? html`<${Brain} />` : id ? html`<${GoalDetail} id=${id} />` : html`<${GoalList} />`}</main>
     <${Toasts} />`;

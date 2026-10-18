@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import { pauseClock, readClock, writeClock, type Mode } from './clock.ts';
 import { emit } from './events.ts';
 import { nowIso, readJson, rm, writeJson } from './fsx.ts';
+import type { ModelUsage } from './adapters/types.ts';
 import type { GoalPaths } from './paths.ts';
 
 export type RunState =
@@ -14,6 +15,15 @@ export interface Limits {
   status: string;
   resets_at: string | null;
   windows: Record<string, { utilization: number; resets_at: string | null }>;
+  at: string;
+  /** the adapter whose account these are ('claude-code', 'codex'); older status files without it are Claude Code's */
+  source?: string;
+}
+
+/** Token use of the cycle in progress, so far. cost_usd is null when the CLI only prices a cycle at its end. */
+export interface LiveUsage {
+  models: Record<string, ModelUsage>;
+  cost_usd: number | null;
   at: string;
 }
 
@@ -31,6 +41,7 @@ export interface Status {
   pause_requested: boolean;
   fails_in_row: number;
   limits: Limits | null;
+  live_usage?: LiveUsage | null;
   /** set while state is needs_input (`epoptes wait-for-human`) */
   needs?: { reason: string; since: string } | null;
   updated_at: string;
@@ -40,7 +51,7 @@ export function idleStatus(): Status {
   return {
     version: 1, state: 'idle', pid: null, run: null, cycle: 0, mode: null, cycle_started_at: null,
     heartbeat_at: null, waiting_until: null, wait_reason: null, pause_requested: false, fails_in_row: 0,
-    limits: null, needs: null, updated_at: nowIso(),
+    limits: null, live_usage: null, needs: null, updated_at: nowIso(),
   };
 }
 

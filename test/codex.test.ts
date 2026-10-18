@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { codex, CodexStreamParser } from '../src/adapters/codex.ts';
+import { codex, CodexStreamParser, readCodexLimits } from '../src/adapters/codex.ts';
 import { startCli } from '../src/adapters/process.ts';
 import type { CycleSpec } from '../src/adapters/types.ts';
 import { validate } from '../src/schema.ts';
@@ -42,6 +42,34 @@ test('Codex JSONL maps activity, cached tokens and completion to the shared sche
   parser.feed({ type: 'turn.completed', usage: { input_tokens: 20, cached_input_tokens: 5, output_tokens: 2 } });
   assert.equal(parser.result(meta).models['test-model'].cache_read, 85);
   assert.equal(parser.result(meta).turns, 2);
+});
+
+test('Codex plan usage comes from the session log of the cycle\'s thread', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'epoptes-codex-home-'));
+  const day = path.join(home, 'sessions', '2026', '10', '18');
+  fs.mkdirSync(day, { recursive: true });
+  fs.mkdirSync(path.join(home, 'sessions', '2026', '10', '17'), { recursive: true });
+  const rl = (used: number) => JSON.stringify({ type: 'event_msg', payload: { type: 'token_count', rate_limits: {
+    limit_id: 'codex', primary: { used_percent: used, window_minutes: 300, resets_at: 1792294935 }, secondary: { used_percent: 8, window_minutes: 10080, resets_at: 1792881735 } } } });
+  fs.writeFileSync(path.join(day, 'rollout-2026-10-18T02-35-37-thread-9.jsonl'), [JSON.stringify({ type: 'session_meta' }), rl(40), rl(48), '{"type":"event_msg","payload":{"rate_limits'].join('\n'));
+  fs.writeFileSync(path.join(day, 'rollout-2026-10-18T03-00-00-other.jsonl'), rl(99));
+
+  const l = readCodexLimits('thread-9', home)!;
+  assert.equal(l.source, 'codex');
+  assert.equal(l.status, 'allowed');
+  assert.deepEqual(l.windows.five_hour, { utilization: 0.48, resets_at: new Date(1792294935 * 1000).toISOString() });
+  assert.equal(l.windows.seven_day.utilization, 0.08);
+  assert.equal(readCodexLimits('missing', home), null);
+  assert.equal(readCodexLimits('thread-9', path.join(home, 'nope')), null);
+
+  fs.appendFileSync(path.join(day, 'rollout-2026-10-18T02-35-37-thread-9.jsonl'), `\n${rl(100)}\n`);
+  assert.equal(readCodexLimits('thread-9', home)!.status, 'rejected');
+
+  // The parser reads it once the thread is known, at the end of each turn.
+  const parser = new CodexStreamParser(process.cwd(), '', home);
+  assert.equal(parser.feed({ type: 'thread.started', thread_id: 'thread-9' }).limits?.windows.five_hour.utilization, 1);
+  assert.equal(parser.feed({ type: 'item.started', item: { type: 'command_execution', command: 'ls' } }).limits, null, 'at most every 30 s mid-turn');
+  assert.equal(parser.feed({ type: 'turn.completed', usage: {} }).limits?.source, 'codex');
 });
 
 test('Codex errors, missing completion, nonzero exit and rate limits remain failures', () => {

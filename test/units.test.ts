@@ -121,6 +121,7 @@ test('stream parser: subagents, tools, limits and the last result', () => {
 
   assert.equal(warns.length, 1, 'requested auto but the stream reports default');
   assert.equal(limits!.status, 'allowed');
+  assert.equal(limits!.source, 'claude-code');
   assert.ok('five_hour' in limits!.windows);
 
   const res = parser.result({ startedAt: '2026-09-28T07:53:25.000Z', endedAt: '2026-09-28T07:53:41.000Z', code: 0, signal: null, stderrTail: '' });
@@ -152,6 +153,21 @@ test('role files become --agents JSON', () => {
   fs.writeFileSync(path.join(dir, 'qa.md'), '---\nname: qa\ndescription: "Runs checks"\nmodel: haiku\neffort: low\nmaxTurns: 25\ntools: Read, Bash(npm run *)\n---\n\nRun the checks.\n');
   assert.deepEqual(agentsFromDir(dir), { qa: { description: 'Runs checks', prompt: 'Run the checks.', model: 'haiku', effort: 'low', maxTurns: 25, tools: ['Read', 'Bash(npm run *)'] } });
   assert.deepEqual(parseFrontmatter('no frontmatter'), { data: {}, body: 'no frontmatter' });
+});
+
+test('stream parser: usage so far counts each API message once, across subagents', () => {
+  const parser = new StreamParser('/work');
+  const msg = (id: string, model: string, parent: string | null, u: Record<string, number>) =>
+    ({ type: 'assistant', parent_tool_use_id: parent, message: { id, model, role: 'assistant', content: [{ type: 'text', text: 'x' }], usage: u } });
+  const a = { input_tokens: 2, output_tokens: 8, cache_read_input_tokens: 100, cache_creation_input_tokens: 10 };
+  let usage = null;
+  for (const m of [msg('m1', 'opus', null, a), msg('m1', 'opus', null, a), msg('m2', 'haiku', 'toolu_1', { input_tokens: 1, cache_read_input_tokens: 50 }), { type: 'user' }]) {
+    usage = parser.feed(m).usage ?? usage;
+  }
+  assert.deepEqual(usage, {
+    models: { opus: { input: 2, output: 8, cache_read: 100, cache_write: 10, cost_usd: null }, haiku: { input: 1, output: 0, cache_read: 50, cache_write: 0, cost_usd: null } },
+    cost_usd: null,
+  });
 });
 
 test('backlog markers', () => {

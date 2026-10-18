@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { nowIso, readJson, writeJson } from '../fsx.ts';
 import { guardRules } from './pi-guard.ts';
 import { startCli } from './process.ts';
-import type { Activity, Adapter, Cycle, CycleResult, CycleSpec, ModelUsage } from './types.ts';
+import type { Activity, Adapter, Cycle, CycleResult, CycleSpec, ModelUsage, UsageSoFar } from './types.ts';
 
 const BIN = process.env.EPOPTES_PI_BIN ?? 'pi';
 const GUARD = fileURLToPath(new URL(import.meta.url.endsWith('.ts') ? './pi-guard.ts' : './pi-guard.js', import.meta.url));
@@ -42,6 +42,7 @@ export class PiStreamParser {
   feed(m: any) {
     const activity: Activity[] = [];
     const warn: string[] = [];
+    let usage: UsageSoFar | null = null;
     const add = (kind: Activity['kind'], summary: string, extra = {}) =>
       activity.push({ ts: nowIso(), agent: 'orchestrator', kind, summary: clip(summary), ...extra });
     if (m?.type === 'session') {
@@ -74,6 +75,7 @@ export class PiStreamParser {
         into.cache_write += u.cacheWrite ?? 0;
         into.cost_usd = (into.cost_usd ?? 0) + (u.cost?.total ?? 0);
         this.cost += u.cost?.total ?? 0;
+        usage = { models: structuredClone(this.models), cost_usd: this.cost };
       }
       const text = (msg.content ?? []).filter((c: any) => c?.type === 'text').map((c: any) => c.text).join(' ');
       if (text.trim()) add('text', text);
@@ -95,7 +97,7 @@ export class PiStreamParser {
       this.aborted = Boolean(m.aborted);
       add('result', `${this.aborted ? 'aborted' : this.error ? 'failed' : 'settled'} · ${this.turns} turns · ≈$${this.cost.toFixed(2)}`);
     }
-    return { activity, warn, limits: null };
+    return { activity, warn, limits: null, usage };
   }
 
   result(meta: { startedAt: string; endedAt: string; code: number | null; signal: string | null; stderrTail: string }): CycleResult {

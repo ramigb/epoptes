@@ -110,7 +110,7 @@
         "object",
         "null"
       ],
-      "description": "latest account usage report from the adapter",
+      "description": "latest plan usage report from the adapter (Claude Code streams it; Codex's comes from its session log)",
       "properties": {
         "status": {
           "type": "string"
@@ -139,6 +139,59 @@
               }
             }
           }
+        },
+        "at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "source": {
+          "type": "string",
+          "description": "the adapter whose account this is: claude-code or codex; missing means claude-code"
+        }
+      }
+    },
+    "live_usage": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "description": "token use of the running cycle so far, for CLIs that report it mid-cycle (claude-code: tokens; pi: tokens and cost). Cleared when the cycle ends.",
+      "properties": {
+        "models": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "input": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "output": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "cache_read": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "cache_write": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "cost_usd": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              }
+            }
+          }
+        },
+        "cost_usd": {
+          "type": [
+            "number",
+            "null"
+          ]
         },
         "at": {
           "type": "string",

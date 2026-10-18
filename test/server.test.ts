@@ -53,6 +53,8 @@ test('state and detail views', async () => {
   assert.equal(d.json.state, 'idle');
   assert.deepEqual(d.json.cycles_detail, []);
   assert.equal((await req('GET', '/api/goals/nope')).status, 404);
+  assert.deepEqual(s.json.limits, {});
+  assert.equal(s.json.goals[0].adapter, 'claude-code');
   const time = await req('GET', '/api/goals/ui-test/time');
   assert.deepEqual([time.status, time.json.cycles, time.json.phases.working], [200, 0, 0]);
 });

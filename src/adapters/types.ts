@@ -1,5 +1,5 @@
 // The shared runner interface for installed coding CLIs.
-import type { Limits } from '../status.ts';
+import type { Limits, LiveUsage } from '../status.ts';
 
 export interface Activity {
   ts: string;
@@ -51,9 +51,13 @@ export interface CycleSpec {
   env: Record<string, string | undefined>;
 }
 
+export type UsageSoFar = Omit<LiveUsage, 'at'>;
+
 export interface CycleHooks {
   activity(a: Activity): void;
   limits(l: Limits): void;
+  /** the running cycle's usage so far, for CLIs that report it before the end */
+  usage?(u: UsageSoFar): void;
   warn(text: string): void;
 }
 

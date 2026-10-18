@@ -6,7 +6,7 @@ import path from 'node:path';
 import { nowIso, readJson, writeJson } from '../fsx.ts';
 import { startCli } from './process.ts';
 import type { Limits } from '../status.ts';
-import type { Activity, Adapter, Cycle, CycleHooks, CycleResult, CycleSpec, ModelUsage } from './types.ts';
+import type { Activity, Adapter, Cycle, CycleHooks, CycleResult, CycleSpec, ModelUsage, UsageSoFar } from './types.ts';
 
 const BIN = process.env.EPOPTES_CLAUDE_BIN ?? 'claude';
 const RATE_LIMIT_TEXT = /rate.?limit|usage limit|overloaded|too many requests|\b(429|529)\b/i;
@@ -64,7 +64,7 @@ export function normalizeLimits(info: any): Limits {
   for (const [name, w] of Object.entries<any>(info?.unifiedWindows ?? {})) {
     windows[name] = { utilization: Number(w?.utilization ?? 0), resets_at: isoFromEpoch(w?.resetsAt) };
   }
-  return { status: String(info?.status ?? 'unknown'), resets_at: isoFromEpoch(info?.resetsAt), windows, at: nowIso() };
+  return { status: String(info?.status ?? 'unknown'), resets_at: isoFromEpoch(info?.resetsAt), windows, at: nowIso(), source: 'claude-code' };
 }
 
 function toolSummary(name: string, input: any, cwd: string): { summary: string; path?: string } {
@@ -97,6 +97,8 @@ export class StreamParser {
   lastResult: any = null;
   lastLimits: Limits | null = null;
   private labels = new Map<string, string>();
+  // Per API message id: a message streams as several assistant lines that repeat its usage.
+  private calls = new Map<string, { model: string; usage: any }>();
   private cwd: string;
   private requestedMode: string | null;
 
@@ -114,11 +116,28 @@ export class StreamParser {
     return l;
   }
 
-  /** Returns the activity lines for one message, plus warnings and a limits update if any. */
-  feed(m: any): { activity: Activity[]; warn: string[]; limits: Limits | null } {
+  /**
+   * Token totals so far, from the assistant messages seen. Input and cache counts are exact; output lags (each message
+   * repeats its first usage) and the cost is only known from the final result.
+   */
+  private usageSoFar(): UsageSoFar {
+    const models: Record<string, ModelUsage> = {};
+    for (const { model, usage: u } of this.calls.values()) {
+      const into = (models[model] ??= { input: 0, output: 0, cache_read: 0, cache_write: 0, cost_usd: null });
+      into.input += u.input_tokens ?? 0;
+      into.output += u.output_tokens ?? 0;
+      into.cache_read += u.cache_read_input_tokens ?? 0;
+      into.cache_write += u.cache_creation_input_tokens ?? 0;
+    }
+    return { models, cost_usd: null };
+  }
+
+  /** Returns the activity lines for one message, plus warnings, a limits update and usage so far if any. */
+  feed(m: any): { activity: Activity[]; warn: string[]; limits: Limits | null; usage: UsageSoFar | null } {
     const out: Activity[] = [];
     const warn: string[] = [];
     let limits: Limits | null = null;
+    let usage: UsageSoFar | null = null;
     const ts = typeof m?.timestamp === 'string' ? m.timestamp : nowIso();
 
     if (m?.type === 'system' && m.subtype === 'init') {
@@ -135,6 +154,10 @@ export class StreamParser {
       out.push({ ts, agent: this.label(m.tool_use_id), kind: 'agent.end', summary: clip(`${m.status ?? 'ended'}: ${m.summary ?? ''}`) });
     } else if (m?.type === 'assistant' && Array.isArray(m.message?.content)) {
       const agent = m.parent_tool_use_id ? this.label(m.parent_tool_use_id, m.subagent_type) : 'orchestrator';
+      if (m.message.id && m.message.usage) {
+        this.calls.set(m.message.id, { model: String(m.message.model ?? this.init?.model ?? 'claude'), usage: m.message.usage });
+        usage = this.usageSoFar();
+      }
       for (const b of m.message.content) {
         if (b?.type === 'tool_use') {
           if (b.name === 'Agent' || b.name === 'Task') {
@@ -154,7 +177,7 @@ export class StreamParser {
       const cost = typeof m.total_cost_usd === 'number' ? ` · ≈$${m.total_cost_usd.toFixed(2)}` : '';
       out.push({ ts, agent: 'orchestrator', kind: 'result', summary: clip(`${m.subtype ?? 'result'} · ${m.num_turns ?? '?'} turns${cost}`) });
     }
-    return { activity: out, warn, limits };
+    return { activity: out, warn, limits, usage };
   }
 
   /** Builds the cycle result from the last `result` event (cumulative totals) and the exit code. */

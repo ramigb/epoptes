@@ -6,7 +6,11 @@ import { test } from 'node:test';
 import { pi, PiStreamParser } from '../src/adapters/pi.ts';
 import { deniedBy, guardRules } from '../src/adapters/pi-guard.ts';
 import type { CycleSpec } from '../src/adapters/types.ts';
+import { goalPaths } from '../src/paths.ts';
 import { validate } from '../src/schema.ts';
+import { idleStatus, writeStatus } from '../src/status.ts';
+import { detail, summary as dashboardSummary } from '../src/ui/views.ts';
+import { GoalWatch } from '../src/ui/watch.ts';
 
 const meta = { startedAt: '2026-10-18T10:00:00Z', endedAt: '2026-10-18T10:00:05Z', code: 0, signal: null, stderrTail: '' };
 const usage = (total: number) => ({ input: 100, output: 10, cacheRead: 80, cacheWrite: 5, totalTokens: 195, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total } });
@@ -26,8 +30,14 @@ test('pi JSON events map activity, usage and cost to the shared schemas', () => 
     assistant('stop', [{ type: 'text', text: 'All checks pass.' }]),
     { type: 'turn_end', toolResults: [] }, { type: 'agent_end', messages: [], willRetry: false }, { type: 'agent_settled', aborted: false },
   ];
-  const activity = messages.flatMap((m) => parser.feed(m).activity);
+  const fed = messages.map((m) => parser.feed(m));
+  const activity = fed.flatMap((r) => r.activity);
   for (const a of activity) assert.deepEqual(validate('activity', a), []);
+  // Usage and cost so far come with every priced response, so the dashboard can show them mid-cycle.
+  const live = fed.map((r) => r.usage).filter(Boolean);
+  assert.equal(live.length, 2);
+  assert.equal(live[0]!.cost_usd, 0.25);
+  assert.deepEqual(live[1], { models: { 'deepseek/v4': { input: 200, output: 20, cache_read: 160, cache_write: 10, cost_usd: 0.5 } }, cost_usd: 0.5 });
   assert.equal(activity.find((a) => a.tool === 'Bash')?.summary, 'npm test');
   assert.equal(activity.find((a) => a.tool === 'Edit')?.path, path.join('src', 'a.ts'));
   assert.equal(activity.find((a) => a.tool === 'mcp__docs__search')?.summary, 'pi json');
@@ -142,4 +152,34 @@ test('the skill template deny list blocks the destructive commands through the p
   const skill = fs.readFileSync(new URL('../plugin/skills/epoptes/SKILL.md', import.meta.url), 'utf8');
   const description = /^description: (.*)$/m.exec(skill)![1];
   assert.ok(description.length <= 1024, 'pi skips skills with descriptions over 1024 characters');
+});
+
+test('the dashboard counts the running cycle\'s cost and cache reads before its result lands', (t) => {
+  const project = fs.mkdtempSync(path.join(os.tmpdir(), 'epoptes-pi-ui-'));
+  const previousHome = process.env.EPOPTES_HOME;
+  process.env.EPOPTES_HOME = path.join(project, 'home');
+  t.after(() => {
+    if (previousHome === undefined) delete process.env.EPOPTES_HOME;
+    else process.env.EPOPTES_HOME = previousHome;
+  });
+  const p = goalPaths(project);
+  fs.mkdirSync(p.state, { recursive: true });
+  fs.writeFileSync(p.goal, JSON.stringify({ version: 1, id: 'pi-ui', name: 'pi', kind: 'other', objective: 'test', done: [{ id: 'D1', check: 'done', verify: { type: 'manual' } }], timebox: { total_min: 15 }, adapter: { type: 'pi' } }));
+  const models = { 'deepseek/v4': { input: 100, output: 10, cache_read: 300, cache_write: 0, cost_usd: 0.25 } };
+  const now = new Date().toISOString();
+  writeStatus(p, { ...idleStatus(), state: 'running', pid: process.pid, run: 'r1', cycle: 1, cycle_started_at: now, heartbeat_at: now, live_usage: { models, cost_usd: 0.25, at: now } });
+
+  const watch = (w = new GoalWatch('pi-ui', project)) => (w.poll(), w);
+  const card = dashboardSummary(watch());
+  assert.equal(card.adapter, 'pi');
+  assert.equal(card.cycles, 0);
+  assert.equal(card.cost_usd, 0.25);
+  assert.deepEqual(card.live_usage?.models, models);
+  assert.equal(detail(watch()).cost_usd, 0.25);
+
+  // Between cycles the runner clears it; a stale copy on an idle goal is ignored either way.
+  writeStatus(p, { ...idleStatus(), live_usage: { models, cost_usd: 0.25, at: now } });
+  const idle = dashboardSummary(watch());
+  assert.equal(idle.live_usage, null);
+  assert.equal(idle.cost_usd, null);
 });
