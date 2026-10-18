@@ -91,6 +91,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 }
 .pill.warn { background: var(--warn-soft); color: var(--warn); }
 .pill.bad { background: var(--bad-soft); color: var(--bad); }
+.pill.stale { opacity: 0.6; }
 .iconbtn {
   display: inline-flex; align-items: center; gap: 6px;
   border: 1px solid var(--line); background: var(--panel); border-radius: 8px;

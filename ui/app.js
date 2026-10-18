@@ -331,16 +331,23 @@ function milestoneMarks(milestones, active, total) {
 
 const CLI_NAME = { 'claude-code': 'Claude', codex: 'Codex', pi: 'pi' };
 
-/** One CLI account's plan windows (Claude Code, Codex), e.g. "Claude 5h 31% 7d 9%". */
+const STALE_USAGE_MS = 15 * 60 * 1000;
+
+/** One CLI account's plan windows (Claude Code, Codex), e.g. "Claude 5h 31% 7d 9%"; an old reading says how old. */
 function PlanUsage({ source, l }) {
+  const now = useNow(60_000);
   // A reading can be days old (the last cycle on that CLI); a window that has reset since says nothing now.
-  const windows = Object.entries(l.windows).filter(([, w]) => !w.resets_at || Date.parse(w.resets_at) > Date.now());
+  const windows = Object.entries(l.windows).filter(([, w]) => !w.resets_at || Date.parse(w.resets_at) > now);
   if (!windows.length) return null;
   const name = CLI_NAME[source] ?? source;
+  // Epoptes only hears about the plan during its own cycles; use outside them doesn't show until the next one.
+  const stale = now - Date.parse(l.at) > STALE_USAGE_MS;
   const hot = windows.some(([, w]) => w.utilization >= 0.8) || !['allowed', 'allowed_warning'].includes(l.status);
-  return html`<span class="pill ${hot ? 'warn' : ''} hide-sm" title=${`${name} plan usage, as of ${ago(l.at)}. Shared by every ${name} goal.`}>
+  const tip = `${name} plan usage, as of ${ago(l.at)}. Shared by every ${name} goal.${stale ? ` Epoptes reads it only while a ${name} cycle runs, so use since then isn't counted.` : ''}`;
+  return html`<span class="pill ${hot ? 'warn' : ''} ${stale ? 'stale' : ''} hide-sm" title=${tip}>
     <b>${name}</b>
     ${windows.map(([k, w]) => html`<span key=${k}>${k.replace('_', ' ').replace('five hour', '5h').replace('seven day', '7d')} ${pct(w.utilization)}</span>`)}
+    ${stale && html`<span>· ${ago(l.at)}</span>`}
   </span>`;
 }
 
