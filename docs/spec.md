@@ -45,6 +45,18 @@ Claude `.epoptes/settings.json` and agent frontmatter are not native Codex confi
 
 References: official [non-interactive mode](https://developers.openai.com/codex/noninteractive), [configuration reference](https://developers.openai.com/codex/config-reference), and [skills](https://developers.openai.com/codex/skills). Command flags also checked against local `codex-cli 0.159.2` help; runtime tests use a fake CLI and make no inference calls.
 
+## pi adapter
+
+Set `adapter.type` to `pi`. Its defaults are `model: ""` (pi's configured default), `effort: "high"` (passed as `--thinking`), `permission_mode: "default"` (the only value: pi has no sandbox or approval modes), `prompt: "loop.md"` and `args: []`. `cycle.max_budget_usd` is allowed.
+
+The adapter launches `pi --mode json --session-dir <cycle dir> -e <epoptes>/adapters/pi-guard.(ts|js)`, optionally with `--model` and `--thinking`, then extra arguments. The prompt goes on stdin (pi uses piped stdin as the first prompt). Every cycle starts a new session whose file lands in the cycle directory. It uses pi's own credentials, settings, context files and skills. `EPOPTES_PI_BIN` overrides the executable for tests.
+
+The guard is a pi extension. The adapter writes the `.epoptes/settings.json` deny entries pi has tools for (`Bash`, `Read`, `Edit`, `Write`, `Grep`, `Glob`, `LS`) into `<cycle>/pi-guard.json` and points `EPOPTES_PI_GUARD` at it; a `tool_call` handler blocks matches with a reason the model sees. Bash patterns are tested against the whole command and each part split on `&&`, `||`, `;`, `|` and newlines, after dropping leading `VAR=value`; a trailing ` *` also matches the bare command. Path patterns follow Claude's forms (`./` project-relative, `~/` home, `//` absolute, `*` and `**`). Allow entries are ignored. A blocked call shows up as a `warn` event.
+
+Events used: `session` (id), `tool_execution_start` (ticker; pi tool names map to `Bash`, `Read`, `Edit`, `Write`, `Grep`, `Glob`, `LS`), `tool_execution_end` (guard blocks), assistant `message_end` (usage, cost, text, `stopReason`, `errorMessage`), `turn_end` (turns), `auto_retry_start`/`auto_retry_end` and `agent_settled`. JSON mode exits 0 even when the final response failed, so a cycle is `ok` only with exit 0, a settled, non-aborted run, and a last assistant response that isn't `error`/`aborted`; an error followed by a successful retry is fine. pi's `usage.input` already excludes `cacheRead`. `cost_usd` is the sum of pi's per-response `usage.cost.total` with `cost_basis: "estimate"`. When it passes `cycle.max_budget_usd`, the adapter interrupts pi and the cycle ends as `error`. Rate limits are detected from the error text; pi gives no reset time, so the runner's backoff applies. Usage with no explicit model is keyed by the model id pi reports.
+
+Verified against local pi 1.3.0 (`@earendil-works/pi-coding-agent`) with a local OpenAI-compatible fake server: the stdin prompt, the event shapes, cached-token accounting, the guard blocking `cd . && git push`, 429 retries ending as `rate_limited`, and the budget stop. Runner tests use a fake CLI and make no inference calls.
+
 ## goal.json — schema `goal.schema.json`
 Written by the skill, edited by you. The runner re-reads it before every cycle, so changes apply from the next cycle. The time box is copied into `run/clock.json` when a run starts; `extend` and `reset-clock` act on the clock, not on goal.json.
 
@@ -58,7 +70,7 @@ Written by the skill, edited by you. The runner re-reads it before every cycle, 
 | `output` | optional: the main deliverable, a project-relative path (file or folder) or an http(s) URL. `epoptes event output <path\|url>` overrides it at run time (latest wins) |
 | `timebox` | `total_min`, `wrapup_min`, `grace_min`, `pause_on_rate_limit` |
 | `checkpoints` | `git` (orchestrator commits), `shadow` (runner commits the workspace to `.epoptes/snapshots.git` after each cycle, no tokens, never touches your repo), `none` |
-| `adapter` | `type` (`claude-code` or `codex`), `prompt` (default `loop.md`), `model`, `effort`, `permission_mode`, `args[]` |
+| `adapter` | `type` (`claude-code`, `codex` or `pi`), `prompt` (default `loop.md`), `model`, `effort`, `permission_mode`, `args[]` |
 | `cycle` | `timeout_min` (clamped 20–180), `pause_between_s`, `max_budget_usd` (null = none) |
 | `failures` | `cooldown_after`, `cooldown_min`, `give_up_after` (consecutive failed cycles) |
 | `rate_limit` | `backoff_s`, `backoff_max_s` (doubles per consecutive hit) |
@@ -190,7 +202,7 @@ The runner starts each cycle in `<project>/` with:
 ## Adapter interface
 ```ts
 interface Adapter {
-  id: string;                                   // "claude-code" or "codex"
+  id: string;                                   // "claude-code", "codex" or "pi"
   check(): Promise<{ ok: boolean; version?: string; problem?: string }>;
   command(spec: CycleSpec): { bin: string; args: string[]; env: Record<string, string>; stdin?: string }; // also --dry-run
   start(spec: CycleSpec, hooks: CycleHooks): Cycle;

@@ -1,5 +1,6 @@
 import { claudeCode } from './claude-code.ts';
 import { codex } from './codex.ts';
+import { pi } from './pi.ts';
 import type { Adapter } from './types.ts';
 
-export const adapters: Record<string, Adapter> = { 'claude-code': claudeCode, codex };
+export const adapters: Record<string, Adapter> = { 'claude-code': claudeCode, codex, pi };

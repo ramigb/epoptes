@@ -171,7 +171,8 @@
         "type": {
           "enum": [
             "claude-code",
-            "codex"
+            "codex",
+            "pi"
           ]
         },
         "prompt": {
@@ -217,6 +218,41 @@
                   "danger-full-access"
                 ],
                 "default": "workspace-write"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "pi"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "model": {
+                "default": ""
+              },
+              "permission_mode": {
+                "enum": [
+                  "default"
+                ],
+                "default": "default",
+                "description": "pi has no sandbox or approval modes; the adapter enforces the settings.json deny list with a pi extension."
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "enum": [
+                  "codex",
+                  "pi"
+                ]
               }
             }
           },

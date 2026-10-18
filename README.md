@@ -9,7 +9,7 @@
 
 *Epoptes (Greek ἐπόπτης, "the overseer") was a title for Zeus and Helios, who watch over everything.*
 
-Epoptes runs **long, autonomous Claude Code or Codex sessions** (an overnight build, a research sweep, a stack of documents, a data clean-up) and lets you watch and steer them. You describe the goal in a chat, and the agent interviews you and writes the harness. Epoptes then runs it as a series of fresh-context cycles until the goal is done or its time box ends, with a live dashboard, feedback while it runs, and a report at the end.
+Epoptes runs **long, autonomous Claude Code, Codex or pi sessions** (an overnight build, a research sweep, a stack of documents, a data clean-up) and lets you watch and steer them. You describe the goal in a chat, and the agent interviews you and writes the harness. Epoptes then runs it as a series of fresh-context cycles until the goal is done or its time box ends, with a live dashboard, feedback while it runs, and a report at the end.
 
 It grew out of a 12-hour autonomous game build. Its rules for keeping long runs cheap and on track are built in:
 - a fresh context every cycle
@@ -21,7 +21,7 @@ It grew out of a 12-hour autonomous game build. Its rules for keeping long runs 
 
 ## What you need
 - **Node.js 22.18 or newer**
-- **[Claude Code](https://docs.claude.com/claude-code) or [Codex CLI](https://developers.openai.com/codex/cli), installed and logged in.** Epoptes runs your own CLI and never handles logins or keys.
+- **[Claude Code](https://docs.claude.com/claude-code), [Codex CLI](https://developers.openai.com/codex/cli) or [pi](https://pi.dev), installed and logged in.** Epoptes runs your own CLI and never handles logins or keys.
 - **Linux, macOS or WSL2**
 
 ## Install
@@ -92,9 +92,33 @@ Codex uses its native sandbox, configuration and rules. `.epoptes/settings.json`
 
 The dashboard and reports show Codex commands, file changes, messages and token usage. Codex JSONL provides no dollar costs or reset timestamps: costs display as unknown, rate limits use the configured backoff, and `cycle.max_budget_usd` must be `null`. With an empty model, token usage is labelled `codex-configured` because the stream doesn't identify the actual model. See the official [non-interactive mode documentation](https://developers.openai.com/codex/noninteractive) and [skill locations](https://developers.openai.com/codex/skills).
 
+### Using pi
+
+[pi](https://pi.dev) reads the same Agent Skills location as Codex:
+```sh
+epoptes skill install --agent pi       # links into ~/.agents/skills
+```
+Then, in pi, ask: "use the epoptes skill to build a pi harness for <goal>" (or force it with `/skill:epoptes`).
+
+In `.epoptes/goal.json`, use:
+```json
+"adapter": {
+  "type": "pi",
+  "model": "openrouter/<vendor>/<model>",
+  "effort": "high",
+  "permission_mode": "default"
+},
+"cycle": { "max_budget_usd": 2 }
+```
+An empty model uses pi's `defaultProvider`/`defaultModel`; otherwise use pi's `provider/id` form (`pi --list-models <search>`). `effort` becomes `--thinking`. Each cycle runs a fresh `pi --mode json` with `loop.md` on stdin, using pi's own credentials: for OpenRouter, `/login openrouter` in pi or `OPENROUTER_API_KEY`. To keep the key out of plain files, set the provider's key in `~/.pi/agent/auth.json` to a secret-manager command such as `!op read op://…` (1Password CLI). Each cycle's pi session file is kept in its `.epoptes/cycles/<n>/` folder, so `pi --session <file>` reopens any cycle.
+
+pi has **no sandbox and no approval prompts**: its tools run with your permissions. Keep `.epoptes/settings.json` for its deny list. The adapter loads a small Epoptes guard extension that blocks `Bash(…)`, `Read(…)`, `Edit(…)` and `Write(…)` deny matches, including inside `&&`, `;` and `|` chains, and reports each blocked attempt as a warning. Allow rules have no effect. The guard is a tripwire, not a boundary: for untrusted goals, run pi in a container or VM. Extra pi flags (for example `["--exclude-tools", "write"]`) go in `adapter.args`.
+
+pi reports tokens and a cost estimate from its model catalog, so the dashboard and reports show dollar estimates (`≈`). `cycle.max_budget_usd` works: Epoptes stops the cycle when the estimate passes it, which is worth setting for pay-per-token providers. Rate-limit errors (429, "rate limit", overloaded) that pi's own retries don't clear use the runner's backoff. Like Codex, pi has no subagents, so the skill writes `loop.md` to work sequentially.
+
 ## How it works
 - **A goal is a directory.** Everything lives in `<project>/.epoptes/`: `goal.json` (objective, done checks, time box, models), `loop.md` (the orchestrator's per-cycle instructions), role files in `agents/`, and memory in `state/`. It also holds the logs of events, feedback and cycles. The file format is the contract: the CLI, runner, dashboard and skill only read and write these files ([docs/spec.md](docs/spec.md)).
-- **A run is a detached process,** one per goal. It starts `claude -p` or `codex exec` with `loop.md`, cycle after cycle:
+- **A run is a detached process,** one per goal. It starts `claude -p`, `codex exec` or `pi --mode json` with `loop.md`, cycle after cycle:
   - Each cycle orients from the state files, does a slice of work (through subagents when configured), verifies it, records it and exits.
   - Between cycles, the runner checks the time box, your controls, rate limits and failures.
   - Closing the dashboard or the terminal never stops a run.
@@ -161,7 +185,7 @@ epoptes clock                          one line with the time left and the curre
 epoptes report [goal] [--all] [--job <id>|all]   Markdown + HTML report (default: the current job)
 epoptes import-runsh <project>         import an older run.sh harness (dress2impress style)
 epoptes ui [--port N] [--lan]          the dashboard (outputs are served on the next port)
-epoptes skill install [--agent codex]   install the skill (Claude Code by default)
+epoptes skill install [--agent codex|pi]   install the skill (Claude Code by default)
 epoptes skill path                     print the shared skill directory
 ```
 `[goal]` is a registered id or a path. Leave it out inside a goal's folder.
@@ -179,15 +203,15 @@ The rest comes from the loop template: approval requests, "waiting for you", har
 - The dashboard and reports show **tokens by model, cache-read share and cost per cycle**, and flag cycles that cost more than twice the median.
 - On a Claude subscription, costs are **API-equivalent estimates, not bills**, and are always shown with `≈`.
 - You're responsible for your account and its usage limits. When Claude Code reports a rate limit, Epoptes waits until the limit resets (and pauses the clock), then continues. It never works around limits or switches accounts.
-- For Claude Code hard caps per cycle, set `cycle.max_budget_usd` in `goal.json`. Codex requires `null` and reports token usage without dollar estimates.
+- For hard caps per cycle, set `cycle.max_budget_usd` in `goal.json` (Claude Code, and pi, where Epoptes enforces it from pi's estimate). Codex requires `null` and reports token usage without dollar estimates.
 
 ## Safety and privacy
 - **Local only.** The dashboard binds to `127.0.0.1`. It rejects other hosts (DNS rebinding) and cross-site writes (CSRF), because feedback ends up in agents' prompts. `--lan` is an explicit opt-in with a warning and no login.
-- **No telemetry,** no accounts, no keys handled by Epoptes. It runs the `claude` or `codex` you're already logged into; the CLI's own data settings still apply.
+- **No telemetry,** no accounts, no keys handled by Epoptes. It runs the `claude`, `codex` or `pi` you're already logged into; the CLI's own data settings still apply.
 - **Transcripts and logs stay on your machine,** gitignored under `.epoptes/cycles/` and `.epoptes/run/`. So does the brain (`~/.epoptes/brain/`).
 - **Outputs open on a separate local origin** (the dashboard's port + 1, read-only): an agent-built page runs normally but can't reach the dashboard's controls. It serves only files inside registered projects, never dotfiles such as `.env` or `.epoptes/`, and it's off in `--lan` mode.
 - **Guardrails in every generated harness:**
-  - Claude Code's permissions allow/deny list, or Codex's native sandbox and rules
+  - Claude Code's permissions allow/deny list, Codex's native sandbox and rules, or for pi the deny list enforced by the Epoptes guard
   - no `git push`, no history rewrites, no destructive cleans
   - secrets never in goal files (use your secret manager, e.g. the 1Password CLI)
   - an approval list the orchestrator must never act on by itself
@@ -196,13 +220,13 @@ The rest comes from the loop template: approval requests, "waiting for you", har
 
 ## Development
 ```sh
-npm test            # node --test: unit tests, runner tests with fake Claude/Codex CLIs, server and report tests
+npm test            # node --test: unit tests, runner tests with fake Claude/Codex/pi CLIs, server and report tests
 npm run typecheck
 npm run build       # dist/ for the npm package (the checkout runs src/ directly)
 ```
 - `src/`: the CLI, runner, adapters (`adapters/`), dashboard and output servers (`ui/`), reports, the importer, time use (`timeuse.ts`) and the brain (`brain.ts`).
 - `ui/`: the dashboard (Preact via `htm`, no build step).
-- `plugin/`: the shared Claude Code/Codex skill and templates.
+- `plugin/`: the shared Claude Code/Codex/pi skill and templates.
 - `docs/`: the spec, JSON Schemas and decisions.
 
 Usage notes go in [NOTES.md](NOTES.md), and are triaged into [ROADMAP.md](ROADMAP.md).

@@ -41,6 +41,47 @@ if (argv[0] === 'exec') {
   process.exit(0);
 }
 
+// And for `pi --mode json`. FAKE_PI_COST = dollars per response, for budget tests.
+if (argv[0] === '--mode' && argv[1] === 'json') {
+  let prompt = '';
+  for await (const chunk of process.stdin) prompt += chunk;
+  const guard = JSON.parse(fs.readFileSync(process.env.EPOPTES_PI_GUARD, 'utf8'));
+  fs.writeFileSync(path.join(process.env.EPOPTES_GOAL_DIR, 'cycles', String(cycle).padStart(6, '0'), 'fake-argv.json'), JSON.stringify({ argv, prompt, guard }));
+  const out = (m) => console.log(JSON.stringify(m));
+  const model = argv.includes('--model') ? arg('--model') : 'configured/model';
+  const cost = Number(process.env.FAKE_PI_COST ?? 0.01);
+  const usage = { input: 20, output: 10, cacheRead: 80, cacheWrite: 0, totalTokens: 110, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: cost } };
+  const assistant = (content, stopReason, extra = {}) => ({ role: 'assistant', content, api: 'openai-completions', provider: 'fake', model, usage, stopReason, timestamp: Date.now(), ...extra });
+  out({ type: 'session', version: 3, id: `pi-${cycle}`, timestamp: new Date().toISOString(), cwd: process.cwd() });
+  out({ type: 'agent_start' });
+  out({ type: 'turn_start' });
+  if (mode === 'slow') {
+    await new Promise((r) => setTimeout(r, 60000));
+  } else if (mode === 'error' || mode === 'ratelimit') {
+    const errorMessage = mode === 'ratelimit' ? '429 Rate limit exceeded' : 'something broke';
+    out({ type: 'message_end', message: assistant([], 'error', { errorMessage }) });
+    out({ type: 'turn_end', message: assistant([], 'error', { errorMessage }), toolResults: [] });
+    out({ type: 'agent_end', messages: [], willRetry: false });
+    out({ type: 'agent_settled', aborted: false });
+    process.exit(0); // like pi: a failed response still exits 0 in JSON mode
+  }
+  const call = { type: 'toolCall', id: 'call_1', name: 'bash', arguments: { command: 'epoptes event note' } };
+  out({ type: 'message_end', message: assistant([call], 'toolUse') });
+  out({ type: 'tool_execution_start', toolCallId: 'call_1', toolName: 'bash', args: call.arguments });
+  execFileSync('epoptes', ['event', 'note', `fake pi cycle ${cycle} ran`]);
+  out({ type: 'tool_execution_end', toolCallId: 'call_1', toolName: 'bash', result: { content: [{ type: 'text', text: '' }] }, isError: false });
+  out({ type: 'tool_execution_start', toolCallId: 'call_2', toolName: 'write', args: { path: path.join(process.cwd(), 'out.txt'), content: 'x' } });
+  out({ type: 'tool_execution_end', toolCallId: 'call_2', toolName: 'write', result: { content: [{ type: 'text', text: 'ok' }] }, isError: false });
+  out({ type: 'turn_end', message: assistant([call], 'toolUse'), toolResults: [] });
+  out({ type: 'turn_start' });
+  out({ type: 'message_end', message: assistant([{ type: 'text', text: 'Completed the work.' }], 'stop') });
+  out({ type: 'turn_end', message: assistant([], 'stop'), toolResults: [] });
+  out({ type: 'agent_end', messages: [], willRetry: false });
+  out({ type: 'agent_settled', aborted: false });
+  if (Number(process.env.FAKE_DONE_AT) === cycle) execFileSync('epoptes', ['event', 'done', 'fake pi finished']);
+  process.exit(0);
+}
+
 // Record what we were started with, so tests can check flags and generated files.
 const settings = JSON.parse(fs.readFileSync(arg('--settings'), 'utf8'));
 const agents = JSON.parse(fs.readFileSync(arg('--agents'), 'utf8'));

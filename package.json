@@ -1,7 +1,7 @@
 {
   "name": "@ramigbcom/epoptes",
   "version": "0.3.0",
-  "description": "Create, run, watch and steer long-running Claude Code and Codex harnesses",
+  "description": "Create, run, watch and steer long-running Claude Code, Codex and pi harnesses",
   "type": "module",
   "license": "MIT",
   "bin": {
@@ -39,6 +39,7 @@
     "claude",
     "claude-code",
     "codex",
+    "pi-coding-agent",
     "agents",
     "harness",
     "autonomous",

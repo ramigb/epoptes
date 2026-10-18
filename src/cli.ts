@@ -21,7 +21,7 @@ import { runGoal } from './runner.ts';
 import { reconcile } from './status.ts';
 import { backlogCounts, backlogMilestones, lastResult, milestonesWithReach, money, outputOf, projectFinish, readHead } from './summary.ts';
 
-const HELP = `epoptes: create, run, watch and steer long-running Claude Code or Codex harnesses
+const HELP = `epoptes: create, run, watch and steer long-running Claude Code, Codex or pi harnesses
 
 Goals
   add [dir]                       validate <dir>/.epoptes/goal.json and register it
@@ -64,7 +64,7 @@ Brain
   brain lessons [--kind k]        print the harness lessons (optionally for one goal kind)
 
 Skill
-  skill install [--agent codex]    link the skill for Claude Code (default) or Codex
+  skill install [--agent codex|pi] link the skill for Claude Code (default), Codex or pi
   skill path                      print where the skill lives
 
 Dashboard
@@ -175,6 +175,7 @@ async function dryRun(project: string) {
   console.log(`next cycle runs in ${tilde(p.project)}:\n  ${cmd.bin} ${cmd.args.map((a) => (/[\s<>*]/.test(a) ? JSON.stringify(a) : a)).join(' ')}`);
   if (adapter.id === 'claude-code') console.log(`generated files: ${tilde(dir)}/{agents,settings}.json`);
   else console.log('prompt: sent on stdin; roles in agents/*.md are guidance, not native agent configuration');
+  if (adapter.id === 'pi') console.log(`deny list: ${tilde(dir)}/pi-guard.json, enforced by the epoptes guard extension`);
   const lint = lintGoal(p, goal);
   problems.push(...lint.problems);
   if (lint.warnings.length) console.log(`\nwarnings:\n  ${lint.warnings.join('\n  ')}`);
@@ -267,10 +268,12 @@ async function main(argv: string[]) {
     case 'skill': {
       const src = fileURLToPath(new URL('../plugin/skills/epoptes', import.meta.url));
       if (rest[0] === 'path') return console.log(src);
-      if (rest[0] !== 'install') throw new Error('usage: epoptes skill install [--agent claude-code|codex] | epoptes skill path');
+      if (rest[0] !== 'install') throw new Error('usage: epoptes skill install [--agent claude-code|codex|pi] | epoptes skill path');
       const agent = values.agent ?? 'claude-code';
-      if (!['claude-code', 'codex'].includes(agent)) throw new Error('--agent must be claude-code or codex');
-      const dest = path.join(os.homedir(), agent === 'codex' ? '.agents' : '.claude', 'skills', 'epoptes');
+      const names: Record<string, string> = { 'claude-code': 'Claude Code', codex: 'Codex', pi: 'pi' };
+      if (!Object.hasOwn(names, agent)) throw new Error('--agent must be claude-code, codex or pi');
+      // Codex and pi both read the shared Agent Skills location.
+      const dest = path.join(os.homedir(), agent === 'claude-code' ? '.claude' : '.agents', 'skills', 'epoptes');
       let current: string | null = null;
       try {
         current = fs.readlinkSync(dest);
@@ -281,7 +284,7 @@ async function main(argv: string[]) {
       if (current) fs.rmSync(dest);
       fs.mkdirSync(path.dirname(dest), { recursive: true });
       fs.symlinkSync(src, dest, process.platform === 'win32' ? 'junction' : 'dir');
-      console.log(`installed: ${tilde(dest)} → ${src}\nIn ${agent === 'codex' ? 'Codex' : 'Claude Code'}: "use the epoptes skill to build a harness for <goal>"`);
+      console.log(`installed: ${tilde(dest)} → ${src}\nIn ${names[agent]}: "use the epoptes skill to build a harness for <goal>"`);
       return;
     }
     case 'start': {

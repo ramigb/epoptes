@@ -30,7 +30,7 @@ function setup(extra: Record<string, unknown> = {}) {
     ...extra,
   };
   fs.writeFileSync(path.join(root, 'goal.json'), JSON.stringify(goal));
-  const env = { ...process.env, EPOPTES_HOME: path.join(base, 'home'), EPOPTES_CLAUDE_BIN: fake, EPOPTES_CODEX_BIN: fake, EPOPTES_CYCLE: '', EPOPTES_GOAL_DIR: '' };
+  const env = { ...process.env, EPOPTES_HOME: path.join(base, 'home'), EPOPTES_CLAUDE_BIN: fake, EPOPTES_CODEX_BIN: fake, EPOPTES_PI_BIN: fake, EPOPTES_CYCLE: '', EPOPTES_GOAL_DIR: '' };
   const run = (args: string[], more: Record<string, string> = {}) =>
     execFileSync(process.execPath, [cli, ...args], { env: { ...env, ...more }, encoding: 'utf8' });
   run(['add', project]);
@@ -339,6 +339,55 @@ test('Codex failures and rate limits use the runner failure and backoff paths', 
   await until(() => g.read('run/status.json').state === 'paused', 20000);
 });
 
+test('pi runs fresh cycles through DONE with the deny list as a guard, records cost and resumes after stopping', async () => {
+  const g = setup({ adapter: { type: 'pi', model: 'openrouter/test-model', effort: 'low' } });
+  const dry = g.run(['run', g.project, '--dry-run']);
+  assert.match(dry, /--mode json --session-dir \S+ -e \S+pi-guard\.ts --model openrouter\/test-model --thinking low/);
+  assert.match(dry, /deny list: .*pi-guard\.json/);
+  assert.match(dry, /\nok\n$/);
+  g.run(['start', g.project], { FAKE_CLAUDE: 'slow' });
+  await until(() => g.read('run/status.json').state === 'running');
+  g.run(['stop', g.project]);
+  await until(() => g.read('run/status.json').state === 'stopped');
+  assert.equal(g.read('cycles/000001/result.json').exit, 'interrupted');
+  g.run(['start', g.project], { FAKE_DONE_AT: '3' });
+  await until(() => g.read('run/status.json').state === 'done');
+  for (const n of [2, 3]) {
+    const dir = `cycles/${String(n).padStart(6, '0')}`;
+    const r = g.read(`${dir}/result.json`);
+    assert.equal(r.adapter, 'pi');
+    assert.equal(r.exit, 'ok');
+    assert.equal(r.session_id, `pi-${n}`);
+    assert.equal(r.turns, 2);
+    assert.equal(r.cost_usd, 0.02);
+    assert.equal(r.models['openrouter/test-model'].cache_read, 160);
+    assert.deepEqual(validate('cycle-result', r), []);
+    const argv = g.read(`${dir}/fake-argv.json`);
+    assert.match(argv.prompt, /epoptes feedback/);
+    assert.ok(argv.guard.rules.some((x: any) => x.rule === 'Bash(git push *)'), 'settings.json deny rules reach the guard');
+    const activity = readJsonl<any>(path.join(g.root, dir, 'activity.jsonl'));
+    assert.ok(activity.some((a) => a.tool === 'Write' && a.path === 'out.txt'));
+  }
+  assert.match(g.run(['report', g.project, '--stdout']), /test-model/);
+});
+
+test('pi failed responses, rate limits and budget overruns use the runner failure and backoff paths', async () => {
+  const g = setup({ adapter: { type: 'pi' }, failures: { cooldown_after: 5, give_up_after: 1 } });
+  g.run(['start', g.project], { FAKE_CLAUDE: 'error' });
+  await until(() => g.read('run/status.json').state === 'failed');
+  assert.match(g.read('cycles/000001/result.json').error, /something broke/);
+  g.run(['start', g.project], { FAKE_CLAUDE: 'ratelimit' });
+  await until(() => g.read('run/status.json').state === 'rate_limited');
+  assert.equal(g.read('cycles/000002/result.json').exit, 'rate_limited');
+  g.run(['stop', g.project]);
+  await until(() => g.read('run/status.json').state === 'stopped');
+
+  const b = setup({ adapter: { type: 'pi' }, cycle: { pause_between_s: 0, max_budget_usd: 0.5 }, failures: { cooldown_after: 5, give_up_after: 1 } });
+  b.run(['start', b.project], { FAKE_PI_COST: '1' });
+  await until(() => b.read('run/status.json').state === 'failed');
+  assert.match(b.read('cycles/000001/result.json').error, /passed max_budget_usd \$0\.5/);
+});
+
 test('the skill installs for Codex without overwriting existing directories', () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'epoptes-skill-'));
   const env = { ...process.env, HOME: home, USERPROFILE: home };
@@ -347,7 +396,8 @@ test('the skill installs for Codex without overwriting existing directories', ()
   assert.ok(fs.existsSync(path.join(home, '.agents', 'skills', 'epoptes', 'SKILL.md')));
   assert.match(run(['--agent', 'codex']), /already installed/);
   assert.match(run([]), /In Claude Code/);
-  assert.throws(() => run(['--agent', 'unknown']), /must be claude-code or codex/);
+  assert.throws(() => run(['--agent', 'unknown']), /must be claude-code, codex or pi/);
+  assert.match(run(['--agent', 'pi']), /already installed/, 'pi reads the same Agent Skills link as Codex');
   fs.unlinkSync(path.join(home, '.agents', 'skills', 'epoptes'));
   fs.mkdirSync(path.join(home, '.agents', 'skills', 'epoptes'));
   assert.throws(() => run(['--agent', 'codex']), /cannot be read as a link/);

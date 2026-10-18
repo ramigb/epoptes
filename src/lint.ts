@@ -59,20 +59,22 @@ export function lintGoal(p: GoalPaths, goal: Goal): LintResult {
     }
   }
 
-  if (goal.adapter.type === 'claude-code') {
+  if (goal.adapter.type === 'codex') {
+    if (fs.existsSync(p.settings)) warnings.push('Codex ignores .epoptes/settings.json; configure permissions with its sandbox and native Codex rules');
+    if (goal.adapter.permission_mode === 'danger-full-access') warnings.push('Codex danger-full-access disables sandbox protection; prefer workspace-write');
+  } else {
+    // pi enforces only the deny list (through the epoptes guard extension); it has no approvals to apply allow entries to.
+    const pi = goal.adapter.type === 'pi';
     const settings = readJson<{ permissions?: { allow?: string[]; deny?: string[] } }>(p.settings);
-    if (!settings) warnings.push('no .epoptes/settings.json: cycles run without an allow/deny list');
+    if (!settings) warnings.push(pi ? 'no .epoptes/settings.json: pi cycles run every command with no deny list' : 'no .epoptes/settings.json: cycles run without an allow/deny list');
     else {
       const deny = settings.permissions?.deny ?? [];
       const missing = REQUIRED_DENY.filter((d) => !deny.includes(d));
       if (missing.length) warnings.push(`settings.json deny list is missing ${missing.join(', ')}`);
       const allow = settings.permissions?.allow ?? [];
       const risky = allow.filter((a) => a === 'Bash' || a === 'Bash(*)' || /^Bash\((git push|sudo|rm -rf)/.test(a));
-      if (risky.length) warnings.push(`settings.json allows ${risky.join(', ')}; allow narrow commands instead`);
+      if (risky.length && !pi) warnings.push(`settings.json allows ${risky.join(', ')}; allow narrow commands instead`);
     }
-  } else {
-    if (fs.existsSync(p.settings)) warnings.push('Codex ignores .epoptes/settings.json; configure permissions with its sandbox and native Codex rules');
-    if (goal.adapter.permission_mode === 'danger-full-access') warnings.push('Codex danger-full-access disables sandbox protection; prefer workspace-write');
   }
 
   try {
