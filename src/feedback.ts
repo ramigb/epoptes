@@ -152,6 +152,15 @@ export function noteFeedback(p: GoalPaths, id: string, text: string, by: By, cyc
 const BULLET = /^(\s*[-*]\s+)(.*\S)\s*$/;
 const MARKED = /→\s*F-\d+\s*$/;
 
+/** Bullets in FEEDBACK.md not yet moved into the feedback log; the next cycle turns each into an F-<n>. */
+export function pendingInbox(p: GoalPaths): string[] {
+  if (!fs.existsSync(p.inbox)) return [];
+  return fs.readFileSync(p.inbox, 'utf8').split('\n').flatMap((l) => {
+    const m = BULLET.exec(l);
+    return m && !MARKED.test(m[2]) ? [m[2]] : [];
+  });
+}
+
 /**
  * Moves new bullets from FEEDBACK.md into feedback.jsonl and marks each one `→ F-<n>`.
  * Returns the new ids. Costs no model tokens.

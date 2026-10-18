@@ -2,6 +2,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { parseFrontmatter } from './adapters/claude-code.ts';
+import { pendingInbox } from './feedback.ts';
 import { readJson } from './fsx.ts';
 import type { Goal } from './goal.ts';
 import type { GoalPaths } from './paths.ts';
@@ -103,6 +104,8 @@ export function lintGoal(p: GoalPaths, goal: Goal): LintResult {
       // not created yet
     }
   }
+  const pending = pendingInbox(p).length;
+  if (pending) warnings.push(`FEEDBACK.md has ${pending} new bullet${pending === 1 ? '' : 's'}; each becomes feedback for the orchestrator at the next cycle, so leave it empty unless the human wrote them`);
   if (!goal.approval_required.length) warnings.push('approval_required is empty: nothing will ever wait for you');
   if (goal.done.every((d) => d.verify.type === 'manual')) warnings.push('every done check is manual, so the run can never finish on its own');
   return { problems, warnings };

@@ -291,6 +291,15 @@ test('dry run checks the setup and never starts the clock', () => {
   assert.doesNotMatch(failed, /abcdefghijklmnop/, 'never prints the secret itself');
   assert.match(failed, /deny list is missing Bash\(git push \*\)/);
   assert.match(failed, /allows Bash\(\*\)/);
+
+  // Bullets left in FEEDBACK.md would become feedback on the first cycle; already-ingested ones are fine.
+  fs.writeFileSync(path.join(g.root, 'FEEDBACK.md'), '# Feedback inbox\n\n- handled → F-1\n- is it fun?\n- does it feel right?\n');
+  try {
+    g.run(['run', g.project, '--dry-run']);
+  } catch (e) {
+    failed = (e as { stdout: string }).stdout;
+  }
+  assert.match(failed, /FEEDBACK\.md has 2 new bullets/);
   assert.equal(fs.existsSync(path.join(g.root, 'run', 'clock.json')), false);
 });
 

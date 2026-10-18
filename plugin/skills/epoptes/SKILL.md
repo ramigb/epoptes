@@ -45,6 +45,7 @@ Show the one-screen summary from interview.md. Wait for an explicit yes. If the 
    - For pi, set `adapter.type: "pi"` and `permission_mode: "default"`. Use `model: ""` for the user's pi default, or a model they confirmed in pi's `provider/id` form (e.g. `openrouter/<vendor>/<model>`; `pi --list-models <search>` lists them). `effort` is pi's thinking level (`off`, `minimal`, `low`, `medium`, `high`, `xhigh`). Keep settings.json for its **deny** list: pi has no sandbox or approvals, so Epoptes enforces the deny rules with a guard extension, and allow rules have no effect. `cycle.max_budget_usd` works (Epoptes stops the cycle when pi's cost estimate passes it); suggest one for pay-per-token providers like OpenRouter.
    - Rename, add or remove role files to match the design. Codex and pi role files are guidance only: adapt loop.md to perform work and checks sequentially, reading role instructions when needed. Do not rely on Claude Agent, SendMessage, per-role models, tools or maxTurns. Native Codex subagents require separate user-configured Codex agents, and pi has no built-in subagents; Epoptes does not translate role frontmatter.
    - Seed `state/backlog.md` with the first milestones and tasks, and `state/decisions.md` with what the interview settled.
+   - Leave `FEEDBACK.md` exactly as the template has it. Every bullet in it becomes live feedback for the orchestrator when the run starts, so never seed ideas, examples or review questions there.
 3. Apply [reference/guardrails.md](reference/guardrails.md): the permissions for this goal kind, no git push or history rewrites, and secrets kept out of every file.
 4. For a new directory without git: set `checkpoints` to `shadow`, not `git`, unless the user wants a repo.
 
@@ -57,7 +58,7 @@ Run `epoptes add <project>`. Then tell the user:
 - how to start it (`epoptes start <id>`, or Start in the dashboard, `epoptes ui` → http://127.0.0.1:4747)
 - how to give feedback while it runs
 
-Offer to start it; don't start it without a yes.
+Offer to start it; don't start it without a yes. Then see [Starting a run](#starting-a-run).
 
 ## A new job in an existing harness
 One project keeps one harness; each new piece of work (a feature, a fix sweep, a new chapter) is a **job** in it. What carries over: roles, models, permissions, `state/lessons.md`, `state/decisions.md`, and the harness's history. What's per job: the objective, done checks, time box, output, milestones and backlog.
@@ -69,7 +70,14 @@ One project keeps one harness; each new piece of work (a feature, a fix sweep, a
    - update the job-specific parts of `loop.md`: the objective, quality bar, done checks, non-goals, approval list, review timing and wrap-up items. If loop.md predates the current template (no `epoptes approval`, `epoptes lesson` or the scope rule), refresh it from [templates/loop.md](templates/loop.md) while you're at it, keeping its goal-specific text.
    - seed `state/backlog.md` with the new milestones (`## M1 · … (target h:mm)`) and tasks. Milestone ids restart at M1.
    - close or keep open feedback as agreed.
-5. **Check and hand over:** `epoptes run --dry-run` until it prints `ok`, then offer to start (`epoptes start`); no `--new-run` is needed.
+5. **Check and hand over:** `epoptes run --dry-run` until it prints `ok`, then offer to start (`epoptes start`); no `--new-run` is needed. See [Starting a run](#starting-a-run).
+
+## Starting a run
+`epoptes start` launches a detached runner and returns at once; the run goes on without you, even if this chat ends. After starting:
+1. Run `epoptes status <id>` once to confirm it is running.
+2. Tell the user the dashboard (`epoptes ui` → http://127.0.0.1:4747) and how to give feedback, then **end your turn**.
+
+Don't sleep, poll or tail the run to watch it, and don't triage, close or answer feedback items yourself: the orchestrator handles feedback, and approvals are the human's. Check in only when the user asks.
 
 For a small change to a finished job (a colour, a size, wording), don't start a job: add feedback and use `epoptes start --follow-up`.
 
