@@ -19,7 +19,7 @@ It grew out of a 12-hour autonomous game build. Its rules for keeping long runs 
 - cheap models for mechanical work
 - a time and round cap per cycle
 
-> **Status:** early (0.3). A personal tool that's improved from daily use. File formats may still change; see [ROADMAP.md](ROADMAP.md).
+> **Status:** early (0.6). A personal tool that's improved from daily use. File formats may still change; see [ROADMAP.md](ROADMAP.md).
 
 ## What you need
 - **Node.js 22.18 or newer**
