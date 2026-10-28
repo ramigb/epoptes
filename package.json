@@ -1,6 +1,6 @@
 {
   "name": "@ramigbcom/epoptes",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Create, run, watch and steer long-running Claude Code, Codex and pi harnesses",
   "type": "module",
   "license": "MIT",
@@ -23,7 +23,7 @@
     "epoptes": "node src/cli.ts",
     "test": "node --test test/*.test.ts",
     "typecheck": "tsc --noEmit",
-    "build": "tsc",
+    "build": "node -e \"fs.rmSync('dist', { recursive: true, force: true })\" && tsc",
     "prepack": "npm run build"
   },
   "dependencies": {
