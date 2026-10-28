@@ -91,10 +91,13 @@ export function lintGoal(p: GoalPaths, goal: Goal): LintResult {
   }
 
   try {
-    for (const f of fs.readdirSync(p.agents).filter((x) => x.endsWith('.md') && goal.adapter.type === 'claude-code')) {
+    // pi has no subagents; the other three get the role files as native agents.
+    for (const f of fs.readdirSync(p.agents).filter((x) => x.endsWith('.md') && goal.adapter.type !== 'pi')) {
       const { data } = parseFrontmatter(fs.readFileSync(path.join(p.agents, f), 'utf8'));
       if (!data.description) problems.push(`agents/${f} has no description (the orchestrator picks roles by it)`);
       if (!data.model) warnings.push(`agents/${f} sets no model; it will inherit the orchestrator's`);
+      else if (goal.adapter.type === 'codex' && /^(haiku|sonnet|opus|fable|claude-)/.test(data.model)) problems.push(`agents/${f} model "${data.model}" is a Claude model; use a Codex model id, or no model to inherit`);
+      else if (goal.adapter.type === 'antigravity' && !['inherit', 'flash', 'pro'].includes(data.model)) warnings.push(`agents/${f} model "${data.model}": agy subagents take inherit, flash or pro`);
     }
   } catch {
     // no role files is allowed

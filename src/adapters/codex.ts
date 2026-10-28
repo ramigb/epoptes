@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { nowIso } from '../fsx.ts';
 import type { Limits } from '../status.ts';
+import { agentsFromDir } from './claude-code.ts';
 import { startCli } from './process.ts';
 import type { Activity, Adapter, CycleResult, CycleSpec, ModelUsage } from './types.ts';
 
@@ -97,6 +98,7 @@ export class CodexStreamParser {
 
   feed(m: any) {
     const activity: Activity[] = [];
+    const warn: string[] = [];
     const add = (kind: Activity['kind'], summary: string, extra = {}) =>
       activity.push({ ts: nowIso(), agent: 'orchestrator', kind, summary: clip(summary), ...extra });
     if (m?.type === 'thread.started') {
@@ -124,7 +126,11 @@ export class CodexStreamParser {
       add('result', this.error);
     } else if (m?.type === 'item.started' || m?.type === 'item.completed') {
       const item = m.item;
-      if (item?.type === 'command_execution' && m.type === 'item.started') {
+      // Codex reports a role file it can't load (bad model, missing file) as an error item and carries on without it.
+      if (item?.type === 'error' && m.type === 'item.completed') warn.push(clip(String(item.message ?? 'Codex error'), 300));
+      else if (item?.type === 'collab_tool_call' && m.type === 'item.started') {
+        add('tool', [item.tool, item.prompt].filter(Boolean).join(' · '), { tool: 'Agent' });
+      } else if (item?.type === 'command_execution' && m.type === 'item.started') {
         add('tool', item.command ?? '', { tool: 'Bash' });
       } else if (item?.type === 'file_change' && m.type === 'item.completed') {
         for (const change of item.changes ?? []) {
@@ -140,7 +146,7 @@ export class CodexStreamParser {
         add('text', item.text ?? '');
       }
     }
-    return { activity, warn: [], limits: this.limits(m?.type === 'turn.completed') };
+    return { activity, warn, limits: this.limits(m?.type === 'turn.completed') };
   }
 
   result(meta: { startedAt: string; endedAt: string; code: number | null; signal: string | null; stderrTail: string }): CycleResult {
@@ -167,10 +173,25 @@ function commandFor(spec: CycleSpec) {
   }
   const env: Record<string, string> = {};
   for (const [k, v] of Object.entries(spec.env)) if (v !== undefined) env[k] = v;
+  // Role files become Codex custom agents for this cycle only: a TOML per role, registered with -c, nothing written to the project.
+  const roles: string[] = [];
+  const roleDir = path.join(spec.cycleDir, 'codex-agents');
+  for (const [name, a] of Object.entries(agentsFromDir(spec.agentsDir))) {
+    if (!/^[A-Za-z0-9_-]+$/.test(name)) throw new Error(`role name "${name}" must be letters, digits, - or _ for Codex`);
+    fs.mkdirSync(roleDir, { recursive: true });
+    const file = path.join(roleDir, `${name}.toml`);
+    // JSON strings are valid TOML basic strings.
+    fs.writeFileSync(file, [
+      a.model && `model = ${JSON.stringify(a.model)}`,
+      a.effort && `model_reasoning_effort = ${JSON.stringify(a.effort)}`,
+      `developer_instructions = ${JSON.stringify(a.prompt)}`,
+    ].filter(Boolean).join('\n') + '\n');
+    roles.push('-c', `agents.${name}.description=${JSON.stringify(a.description)}`, '-c', `agents.${name}.config_file=${JSON.stringify(file)}`);
+  }
   return {
     bin: BIN,
     args: ['exec', '--json', '--skip-git-repo-check', '--sandbox', spec.permissionMode,
-      '-c', 'approval_policy="never"',
+      '-c', 'approval_policy="never"', ...roles,
       ...(spec.model ? ['--model', spec.model] : []),
       ...(spec.effort ? ['-c', `model_reasoning_effort=${JSON.stringify(spec.effort)}`] : []),
       ...spec.args, '-'],

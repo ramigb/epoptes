@@ -31,7 +31,7 @@ What should it explicitly **not** do or touch? Examples: other folders, producti
 Confirm the runtime (Claude Code, Codex, pi or Antigravity; for pi, also the provider and model; for Antigravity, the model from `agy models`). Propose a team from design.md for this goal kind, then confirm or adjust:
 - **orchestrator:** the model and effort for the per-cycle planner.
 - **workers:** 1–3 doer roles named for the work (builder, researcher, writer, analyst…).
-- **checker:** a mechanical role that runs checks and reports facts (Haiku/low for Claude Code; the cycle model for Codex, pi and Antigravity).
+- **checker:** a mechanical role that runs checks and reports facts (Haiku/low for Claude Code; a cheaper Codex model at low effort; `flash` on Antigravity; the cycle model on pi).
 - **reviewer (optional):** a read-only role that scores against the rubric.
 - Claude Code and pi: any per-cycle budget cap (`cycle.max_budget_usd`)? Recommend one for pay-per-token providers such as OpenRouter. Codex reports tokens but no dollar costs or dollar caps; pi's costs are its own estimate from its model catalog. Mention that on a subscription, costs are API-equivalent estimates, not bills.
 

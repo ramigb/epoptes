@@ -87,6 +87,10 @@ test('Codex errors, missing completion, nonzero exit and rate limits remain fail
   const retried = new CodexStreamParser(process.cwd(), 'test-model');
   for (const m of [{ type: 'turn.started' }, { type: 'error', message: 'Reconnecting... 1/5' }, { type: 'turn.completed' }]) retried.feed(m);
   assert.equal(retried.result(meta).exit, 'ok', 'a transient error before completion does not fail the cycle');
+  // Recorded from codex-cli 0.165.0: a role file it can't load, and a subagent wait.
+  const roles = new CodexStreamParser(process.cwd(), 'test-model');
+  assert.match(roles.feed({ type: 'item.completed', item: { id: 'item_0', type: 'error', message: 'Ignoring malformed agent role definition: agents.checker.config_file must point to an existing file' } }).warn[0], /malformed agent role/);
+  assert.deepEqual(roles.feed({ type: 'item.started', item: { id: 'item_1', type: 'collab_tool_call', tool: 'wait', receiver_thread_ids: [], prompt: null, status: 'in_progress' } }).activity.map((a) => [a.tool, a.summary]), [['Agent', 'wait']]);
   assert.equal(totalCost([{ cost_usd: 1 }, { cost_usd: null }]), null);
   assert.equal(totalCost([{ cost_usd: 1 }, { cost_usd: 2 }]), 3);
 });

@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { antigravity, AgyStreamParser } from '../src/adapters/antigravity.ts';
@@ -74,4 +76,17 @@ test('Antigravity goal defaults and command: modes, model, effort and the prompt
   assert.deepEqual(antigravity.command({ ...spec, permissionMode: 'skip-permissions', model: '', effort: '', args: [] }).args, ['--output-format', 'stream-json', '--dangerously-skip-permissions', `-p=${spec.prompt}`]);
   assert.throws(() => antigravity.command({ ...spec, permissionMode: 'default' }), /permission_mode/);
   assert.throws(() => antigravity.command({ ...spec, budgetUsd: 1 }), /max_budget_usd/);
+});
+
+test('role files become agy subagents in the cycle folder, with Claude tool names mapped to agy tools', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'epoptes-agy-'));
+  fs.mkdirSync(path.join(dir, 'agents'));
+  fs.writeFileSync(path.join(dir, 'agents', 'qa.md'), '---\nname: qa\ndescription: Runs "checks"\nmodel: flash\neffort: low\ntools: Read, Bash(npm run *), Grep, Agent\n---\nRun the checks.\n');
+  fs.writeFileSync(path.join(dir, 'agents', 'builder.md'), '---\nname: builder\ndescription: Builds\n---\nBuild.\n');
+  const spec: CycleSpec = { cwd: dir, goalDir: dir, cycleDir: path.join(dir, 'c1'), prompt: 'go', model: '', effort: '', permissionMode: 'accept-edits', args: [], budgetUsd: null, agentsDir: path.join(dir, 'agents'), settingsFile: null, env: {} };
+  assert.deepEqual(antigravity.command(spec).args.slice(-3), ['--add-dir', spec.cycleDir, '-p=go']);
+  const read = (n: string) => fs.readFileSync(path.join(spec.cycleDir, '.agents', 'agents', `${n}.md`), 'utf8');
+  assert.equal(read('qa'), '---\nname: "qa"\ndescription: "Runs \\"checks\\""\nmodel: "flash"\nmainAgent: false\ntools: ["view_file", "read_file", "run_command", "grep_search"]\n---\nRun the checks.\n');
+  assert.match(read('builder'), /^---\nname: "builder"\ndescription: "Builds"\nmainAgent: false\ntools: \[.*"write_to_file".*\]\n---\nBuild\.\n$/, 'no tools listed means all of them, as in Claude Code');
+  assert.ok(!antigravity.command({ ...spec, agentsDir: path.join(dir, 'none') }).args.includes('--add-dir'));
 });

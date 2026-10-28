@@ -323,7 +323,12 @@ test('dry run checks the setup and never starts the clock', () => {
 test('Codex runs fresh cycles through DONE, records usage and resumes after stopping', async () => {
   const g = setup({ adapter: { type: 'codex', model: 'test-model', effort: 'low' } });
   fs.unlinkSync(path.join(g.root, 'settings.json'));
+  assert.throws(() => g.run(['run', g.project, '--dry-run']), (e: any) => /scribe\.md model "haiku" is a Claude model/.test(e.stdout));
+  fs.writeFileSync(path.join(g.root, 'agents', 'scribe.md'), '---\nname: scribe\ndescription: Writes "files"\nmodel: test-mini\neffort: low\n---\nWrite the file.\n');
   const dry = g.run(['run', g.project, '--dry-run']);
+  assert.ok(dry.includes('-c "agents.scribe.description=\\"Writes \\\\\\"files\\\\\\"\\""'), dry);
+  assert.match(dry, /agents\.scribe\.config_file=\S+codex-agents\/scribe\.toml/);
+  assert.match(dry, /roles as native agents: \S+codex-agents\/\*\.toml/);
   assert.match(dry, /exec --json/);
   assert.match(dry, /--sandbox workspace-write/);
   assert.doesNotMatch(dry, /--agents|--settings|--permission-mode/);
@@ -340,6 +345,7 @@ test('Codex runs fresh cycles through DONE, records usage and resumes after stop
     const r = g.read(`${dir}/result.json`);
     assert.equal(r.adapter, 'codex');
     assert.equal(r.exit, 'ok');
+    assert.equal(fs.readFileSync(path.join(g.root, dir, 'codex-agents', 'scribe.toml'), 'utf8'), 'model = "test-mini"\nmodel_reasoning_effort = "low"\ndeveloper_instructions = "Write the file."\n');
     assert.equal(r.run, 'r1');
     assert.equal(r.models['test-model'].cache_read, 80);
     assert.equal(r.cost_usd, null);
@@ -400,7 +406,8 @@ test('pi runs fresh cycles through DONE with the deny list as a guard, records c
 test('Antigravity runs fresh cycles through DONE with the prompt in -p, records usage and fails on errors', async () => {
   const g = setup({ adapter: { type: 'antigravity', model: 'gemini-3.8-flash-low' }, failures: { cooldown_after: 5, give_up_after: 1 } });
   const dry = g.run(['run', g.project, '--dry-run']);
-  assert.match(dry, / --output-format stream-json --mode accept-edits --model gemini-3\.8-flash-low "-p=<loop\.md>"/);
+  assert.match(dry, / --output-format stream-json --mode accept-edits --model gemini-3\.8-flash-low --add-dir \S+ "-p=<loop\.md>"/);
+  assert.match(dry, /scribe\.md model "haiku": agy subagents take inherit, flash or pro/);
   assert.match(dry, /ignores \.epoptes\/settings\.json/);
   assert.match(dry, /command\(epoptes\)/);
   g.run(['start', g.project], { FAKE_DONE_AT: '2' });
@@ -410,6 +417,8 @@ test('Antigravity runs fresh cycles through DONE with the prompt in -p, records 
     const r = g.read(`${dir}/result.json`);
     assert.equal(r.adapter, 'antigravity');
     assert.equal(r.exit, 'ok');
+    assert.match(fs.readFileSync(path.join(g.root, dir, '.agents', 'agents', 'scribe.md'), 'utf8'), /^---\nname: "scribe"\ndescription: "Writes files"\nmodel: "haiku"\nmainAgent: false\ntools: \["view_file", /);
+    assert.deepEqual(g.read(`${dir}/fake-argv.json`).argv.slice(-2), ['--add-dir', path.join(g.root, dir)]);
     assert.equal(r.session_id, `agy-${n}`);
     assert.equal(r.cost_usd, null);
     assert.deepEqual(r.models['gemini-3.8-flash-low'], { input: 40, output: 30, cache_read: 160, cache_write: 0, cost_usd: null });

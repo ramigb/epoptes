@@ -1,8 +1,10 @@
 // Adapter for the user's installed and logged-in Antigravity CLI (`agy -p --output-format stream-json`).
 // Event facts this relies on are recorded in docs/spec.md (verified on agy 1.4.9).
 import { execFile } from 'node:child_process';
+import fs from 'node:fs';
 import path from 'node:path';
 import { nowIso } from '../fsx.ts';
+import { agentsFromDir } from './claude-code.ts';
 import { startCli } from './process.ts';
 import type { Activity, Adapter, CycleResult, CycleSpec, ModelUsage, UsageSoFar } from './types.ts';
 
@@ -17,6 +19,30 @@ const TOOL_NAMES: Record<string, string> = {
   replace_file_content: 'Edit', multi_replace_file_content: 'Edit', sed_file: 'Edit', grep_search: 'Grep',
   find_by_name: 'Glob', list_dir: 'LS', search_web: 'WebSearch', read_url_content: 'WebFetch', invoke_subagent: 'Agent',
 };
+
+// Claude tool names in role files → agy's. agy gives a subagent no tools unless listed; Claude's default is all of them.
+// A name missing from agy's subagent registry stops the subagent from starting (command_status and send_command_input are).
+const AGY_TOOLS: Record<string, string[]> = {
+  Read: ['view_file', 'read_file'], LS: ['list_dir'], Glob: ['find_by_name'], Grep: ['grep_search'],
+  Bash: ['run_command'], Edit: ['replace_file_content', 'multi_replace_file_content'],
+  Write: ['write_to_file', 'write_file'], WebSearch: ['search_web'], WebFetch: ['read_url_content'],
+};
+
+/** Role files → agy custom subagents in <cycle>/.agents/agents, a folder the cycle adds to its workspace. */
+function writeRoles(spec: CycleSpec): boolean {
+  const roles = Object.entries(agentsFromDir(spec.agentsDir));
+  if (!roles.length) return false;
+  const dir = path.join(spec.cycleDir, '.agents', 'agents');
+  fs.mkdirSync(dir, { recursive: true });
+  for (const [name, a] of roles) {
+    const tools = [...new Set(((a.tools as string[] | undefined) ?? Object.keys(AGY_TOOLS)).flatMap((t) => AGY_TOOLS[t.replace(/\(.*$/, '')] ?? []))];
+    // JSON strings are valid YAML double-quoted scalars. effort and maxTurns have no agy equivalent.
+    const front = [`name: ${JSON.stringify(name)}`, `description: ${JSON.stringify(a.description)}`, a.model && `model: ${JSON.stringify(a.model)}`,
+      'mainAgent: false', `tools: [${tools.map((t) => JSON.stringify(t)).join(', ')}]`].filter(Boolean);
+    fs.writeFileSync(path.join(dir, `${name}.md`), `---\n${front.join('\n')}\n---\n${a.prompt}\n`);
+  }
+  return true;
+}
 
 export class AgyStreamParser {
   private cwd: string;
@@ -61,7 +87,7 @@ export class AgyStreamParser {
           const file = path.isAbsolute(p) ? path.relative(this.cwd, p) || '.' : p;
           add('tool', file, { tool, path: file });
         } else {
-          add('tool', String(args.CommandLine ?? Object.values(args).find((v) => typeof v === 'string') ?? tool), { tool });
+          add('tool', String(args.CommandLine ?? args.TypeName ?? Object.values(args).find((v) => typeof v === 'string') ?? tool), { tool });
         }
       } else if (s.step_type === 'agent_response') {
         this.text += s.text_delta ?? '';
@@ -130,6 +156,7 @@ function commandFor(spec: CycleSpec) {
       ...(spec.permissionMode === 'skip-permissions' ? ['--dangerously-skip-permissions'] : ['--mode', spec.permissionMode]),
       ...(spec.model ? ['--model', spec.model] : []),
       ...(spec.effort ? ['--effort', spec.effort] : []),
+      ...(writeRoles(spec) ? ['--add-dir', spec.cycleDir] : []),
       ...spec.args, `-p=${spec.prompt}`],
     env,
   };

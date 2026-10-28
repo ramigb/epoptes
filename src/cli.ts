@@ -216,7 +216,8 @@ async function dryRun(project: string) {
   console.log(cs ? `clock: mode ${cs.mode}, ${hm(cs.active)} active (unchanged)` : 'clock: not started (a dry run never starts it)');
   console.log(`next cycle runs in ${tilde(p.project)}:\n  ${cmd.bin} ${cmd.args.map((a) => (/[\s<>*]/.test(a) ? JSON.stringify(a) : a)).join(' ')}`);
   if (adapter.id === 'claude-code') console.log(`generated files: ${tilde(dir)}/{agents,settings}.json`);
-  else console.log(`prompt: sent ${adapter.id === 'antigravity' ? 'in -p' : 'on stdin'}; roles in agents/*.md are guidance, not native agent configuration`);
+  else if (adapter.id === 'pi') console.log('prompt: sent on stdin; roles in agents/*.md are guidance (pi has no subagents)');
+  else console.log(`prompt: sent ${adapter.id === 'antigravity' ? 'in -p' : 'on stdin'}${agents.length ? `; roles as native agents: ${tilde(dir)}/${adapter.id === 'codex' ? 'codex-agents/*.toml' : '.agents/agents/*.md'}` : ''}`);
   if (adapter.id === 'pi') console.log(`deny list: ${tilde(dir)}/pi-guard.json, enforced by the epoptes guard extension`);
   const lint = lintGoal(p, goal);
   problems.push(...lint.problems);
