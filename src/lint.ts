@@ -63,6 +63,10 @@ export function lintGoal(p: GoalPaths, goal: Goal): LintResult {
   if (goal.adapter.type === 'codex') {
     if (fs.existsSync(p.settings)) warnings.push('Codex ignores .epoptes/settings.json; configure permissions with its sandbox and native Codex rules');
     if (goal.adapter.permission_mode === 'danger-full-access') warnings.push('Codex danger-full-access disables sandbox protection; prefer workspace-write');
+  } else if (goal.adapter.type === 'antigravity') {
+    if (fs.existsSync(p.settings)) warnings.push('Antigravity ignores .epoptes/settings.json; its own permissions in ~/.gemini/antigravity-cli/settings.json apply');
+    if (goal.adapter.permission_mode === 'skip-permissions') warnings.push('Antigravity skip-permissions approves every tool call; agy deny rules are the only guard');
+    else warnings.push('Antigravity can\'t ask in a cycle: a command missing from permissions.allow in ~/.gemini/antigravity-cli/settings.json (e.g. command(epoptes), command(git)) stops the cycle');
   } else {
     // pi enforces only the deny list (through the epoptes guard extension); it has no approvals to apply allow entries to.
     const pi = goal.adapter.type === 'pi';

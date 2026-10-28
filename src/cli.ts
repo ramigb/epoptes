@@ -21,7 +21,7 @@ import { runGoal } from './runner.ts';
 import { reconcile } from './status.ts';
 import { lastResult, milestonesWithReach, money, outputOf, projectFinish, readHead } from './summary.ts';
 
-const HELP = `epoptes: create, run, watch and steer long-running Claude Code, Codex or pi harnesses
+const HELP = `epoptes: create, run, watch and steer long-running Claude Code, Codex, pi or Antigravity harnesses
 
 Goals
   add [dir]                       validate <dir>/.epoptes/goal.json and register it
@@ -68,7 +68,7 @@ Brain
   brain lessons [--kind k]        print the harness lessons (optionally for one goal kind)
 
 Skill
-  skill install [--agent codex|pi] link the skill for Claude Code (default), Codex or pi
+  skill install [--agent codex|pi|antigravity] link the skill for Claude Code (default), Codex, pi or Antigravity
   skill path                      print where the skill lives
 
 Dashboard
@@ -216,7 +216,7 @@ async function dryRun(project: string) {
   console.log(cs ? `clock: mode ${cs.mode}, ${hm(cs.active)} active (unchanged)` : 'clock: not started (a dry run never starts it)');
   console.log(`next cycle runs in ${tilde(p.project)}:\n  ${cmd.bin} ${cmd.args.map((a) => (/[\s<>*]/.test(a) ? JSON.stringify(a) : a)).join(' ')}`);
   if (adapter.id === 'claude-code') console.log(`generated files: ${tilde(dir)}/{agents,settings}.json`);
-  else console.log('prompt: sent on stdin; roles in agents/*.md are guidance, not native agent configuration');
+  else console.log(`prompt: sent ${adapter.id === 'antigravity' ? 'in -p' : 'on stdin'}; roles in agents/*.md are guidance, not native agent configuration`);
   if (adapter.id === 'pi') console.log(`deny list: ${tilde(dir)}/pi-guard.json, enforced by the epoptes guard extension`);
   const lint = lintGoal(p, goal);
   problems.push(...lint.problems);
@@ -319,12 +319,13 @@ async function main(argv: string[]) {
     case 'skill': {
       const src = fileURLToPath(new URL('../plugin/skills/epoptes', import.meta.url));
       if (rest[0] === 'path') return console.log(src);
-      if (rest[0] !== 'install') throw new Error('usage: epoptes skill install [--agent claude-code|codex|pi] | epoptes skill path');
+      if (rest[0] !== 'install') throw new Error('usage: epoptes skill install [--agent claude-code|codex|pi|antigravity] | epoptes skill path');
       const agent = values.agent ?? 'claude-code';
-      const names: Record<string, string> = { 'claude-code': 'Claude Code', codex: 'Codex', pi: 'pi' };
-      if (!Object.hasOwn(names, agent)) throw new Error('--agent must be claude-code, codex or pi');
-      // Codex and pi both read the shared Agent Skills location.
-      const dest = path.join(os.homedir(), agent === 'claude-code' ? '.claude' : '.agents', 'skills', 'epoptes');
+      const names: Record<string, string> = { 'claude-code': 'Claude Code', codex: 'Codex', pi: 'pi', antigravity: 'Antigravity' };
+      if (!Object.hasOwn(names, agent)) throw new Error('--agent must be claude-code, codex, pi or antigravity');
+      // Codex and pi both read the shared Agent Skills location; Antigravity reads its global config folder.
+      const root = { 'claude-code': '.claude', antigravity: path.join('.gemini', 'config') }[agent] ?? '.agents';
+      const dest = path.join(os.homedir(), root, 'skills', 'epoptes');
       let current: string | null = null;
       try {
         current = fs.readlinkSync(dest);

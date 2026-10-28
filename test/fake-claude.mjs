@@ -82,6 +82,34 @@ if (argv[0] === '--mode' && argv[1] === 'json') {
   process.exit(0);
 }
 
+// And for `agy --output-format stream-json … -p=<prompt>`.
+if (argv.at(-1)?.startsWith('-p=')) {
+  fs.writeFileSync(path.join(process.env.EPOPTES_GOAL_DIR, 'cycles', String(cycle).padStart(6, '0'), 'fake-argv.json'), JSON.stringify({ argv: argv.slice(0, -1), prompt: argv.at(-1).slice(3) }));
+  const out = (m) => console.log(JSON.stringify(m));
+  const id = `agy-${cycle}`;
+  const step = (s) => out({ event: 'step_update', step_update: { conversation_id: id, ...s } });
+  const usage = { input_tokens: 100, output_tokens: 10, thinking_tokens: 5, cache_read_tokens: 80, total_tokens: 115 };
+  out({ event: 'init', conversation_id: id, init: { model: argv.includes('--model') ? arg('--model') : 'gemini-configured', cwd: process.cwd(), permission_mode: 'request-review' } });
+  step({ step_index: 0, state: 'DONE', step_type: 'user_input' });
+  if (mode === 'slow') {
+    process.on('SIGINT', () => process.exit(130));
+    await new Promise((r) => setTimeout(r, 60000));
+  } else if (mode === 'error' || mode === 'ratelimit') {
+    const error = mode === 'ratelimit' ? 'RESOURCE_EXHAUSTED: quota exceeded' : 'something broke';
+    out({ event: 'result', result: { conversation_id: id, status: 'ERROR', response: '', error, num_turns: 0, usage: { ...usage, total_tokens: 0 } } });
+    process.exit(1);
+  }
+  step({ step_index: 1, state: 'DONE', step_type: 'agent_response', usage });
+  step({ step_index: 2, state: 'ACTIVE', step_type: 'tool', tool_name: 'run_command', tool_info: { name: 'run_command', parameters: { CommandLine: 'epoptes event note' } } });
+  execFileSync('epoptes', ['event', 'note', `fake agy cycle ${cycle} ran`]);
+  step({ step_index: 3, state: 'ACTIVE', step_type: 'tool', tool_name: 'write_file', tool_info: { name: 'write_file', parameters: { Path: path.join(process.cwd(), 'out.txt') } } });
+  step({ step_index: 4, state: 'ACTIVE', step_type: 'agent_response', text_delta: 'Completed ' });
+  step({ step_index: 4, state: 'DONE', step_type: 'agent_response', text_delta: 'the work.', usage });
+  if (Number(process.env.FAKE_DONE_AT) === cycle) execFileSync('epoptes', ['event', 'done', 'fake agy finished']);
+  out({ event: 'result', result: { conversation_id: id, status: 'SUCCESS', response: 'Completed the work.', num_turns: 1, usage: { input_tokens: 200, output_tokens: 20, thinking_tokens: 10, cache_read_tokens: 160, total_tokens: 230 } } });
+  process.exit(0);
+}
+
 // Record what we were started with, so tests can check flags and generated files.
 const settings = JSON.parse(fs.readFileSync(arg('--settings'), 'utf8'));
 const agents = JSON.parse(fs.readFileSync(arg('--agents'), 'utf8'));

@@ -1,7 +1,7 @@
 {
   "name": "@ramigbcom/epoptes",
   "version": "0.5.0",
-  "description": "Create, run, watch and steer long-running Claude Code, Codex and pi harnesses",
+  "description": "Create, run, watch and steer long-running Claude Code, Codex, pi and Antigravity harnesses",
   "type": "module",
   "license": "MIT",
   "bin": {
@@ -40,6 +40,7 @@
     "claude-code",
     "codex",
     "pi-coding-agent",
+    "antigravity",
     "agents",
     "harness",
     "autonomous",

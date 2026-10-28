@@ -30,7 +30,7 @@ function setup(extra: Record<string, unknown> = {}) {
     ...extra,
   };
   fs.writeFileSync(path.join(root, 'goal.json'), JSON.stringify(goal));
-  const env = { ...process.env, EPOPTES_HOME: path.join(base, 'home'), EPOPTES_CLAUDE_BIN: fake, EPOPTES_CODEX_BIN: fake, EPOPTES_PI_BIN: fake, EPOPTES_CYCLE: '', EPOPTES_GOAL_DIR: '' };
+  const env = { ...process.env, EPOPTES_HOME: path.join(base, 'home'), EPOPTES_CLAUDE_BIN: fake, EPOPTES_CODEX_BIN: fake, EPOPTES_PI_BIN: fake, EPOPTES_AGY_BIN: fake, EPOPTES_CYCLE: '', EPOPTES_GOAL_DIR: '' };
   const run = (args: string[], more: Record<string, string> = {}) =>
     execFileSync(process.execPath, [cli, ...args], { env: { ...env, ...more }, encoding: 'utf8' });
   run(['add', project]);
@@ -397,6 +397,36 @@ test('pi runs fresh cycles through DONE with the deny list as a guard, records c
   assert.match(g.run(['report', g.project, '--stdout']), /test-model/);
 });
 
+test('Antigravity runs fresh cycles through DONE with the prompt in -p, records usage and fails on errors', async () => {
+  const g = setup({ adapter: { type: 'antigravity', model: 'gemini-3.8-flash-low' }, failures: { cooldown_after: 5, give_up_after: 1 } });
+  const dry = g.run(['run', g.project, '--dry-run']);
+  assert.match(dry, / --output-format stream-json --mode accept-edits --model gemini-3\.8-flash-low "-p=<loop\.md>"/);
+  assert.match(dry, /ignores \.epoptes\/settings\.json/);
+  assert.match(dry, /command\(epoptes\)/);
+  g.run(['start', g.project], { FAKE_DONE_AT: '2' });
+  await until(() => g.read('run/status.json').state === 'done');
+  for (const n of [1, 2]) {
+    const dir = `cycles/${String(n).padStart(6, '0')}`;
+    const r = g.read(`${dir}/result.json`);
+    assert.equal(r.adapter, 'antigravity');
+    assert.equal(r.exit, 'ok');
+    assert.equal(r.session_id, `agy-${n}`);
+    assert.equal(r.cost_usd, null);
+    assert.deepEqual(r.models['gemini-3.8-flash-low'], { input: 40, output: 30, cache_read: 160, cache_write: 0, cost_usd: null });
+    assert.deepEqual(validate('cycle-result', r), []);
+    assert.match(g.read(`${dir}/fake-argv.json`).prompt, /epoptes board/);
+    const activity = readJsonl<any>(path.join(g.root, dir, 'activity.jsonl'));
+    assert.ok(activity.some((a) => a.tool === 'Write' && a.path === 'out.txt'));
+    assert.ok(activity.some((a) => a.kind === 'text' && a.summary === 'Completed the work.'));
+  }
+  const f = setup({ adapter: { type: 'antigravity' }, failures: { cooldown_after: 5, give_up_after: 1 } });
+  f.run(['start', f.project], { FAKE_CLAUDE: 'ratelimit' });
+  await until(() => f.read('run/status.json').state === 'rate_limited');
+  assert.equal(f.read('cycles/000001/result.json').exit, 'rate_limited');
+  f.run(['stop', f.project]);
+  await until(() => f.read('run/status.json').state === 'stopped');
+});
+
 test('pi failed responses, rate limits and budget overruns use the runner failure and backoff paths', async () => {
   const g = setup({ adapter: { type: 'pi' }, failures: { cooldown_after: 5, give_up_after: 1 } });
   g.run(['start', g.project], { FAKE_CLAUDE: 'error' });
@@ -422,8 +452,10 @@ test('the skill installs for Codex without overwriting existing directories', ()
   assert.ok(fs.existsSync(path.join(home, '.agents', 'skills', 'epoptes', 'SKILL.md')));
   assert.match(run(['--agent', 'codex']), /already installed/);
   assert.match(run([]), /In Claude Code/);
-  assert.throws(() => run(['--agent', 'unknown']), /must be claude-code, codex or pi/);
+  assert.throws(() => run(['--agent', 'unknown']), /must be claude-code, codex, pi or antigravity/);
   assert.match(run(['--agent', 'pi']), /already installed/, 'pi reads the same Agent Skills link as Codex');
+  assert.match(run(['--agent', 'antigravity']), /In Antigravity/);
+  assert.ok(fs.existsSync(path.join(home, '.gemini', 'config', 'skills', 'epoptes', 'SKILL.md')));
   fs.unlinkSync(path.join(home, '.agents', 'skills', 'epoptes'));
   fs.mkdirSync(path.join(home, '.agents', 'skills', 'epoptes'));
   assert.throws(() => run(['--agent', 'codex']), /cannot be read as a link/);

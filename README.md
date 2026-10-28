@@ -9,7 +9,7 @@
 
 *Epoptes (Greek ἐπόπτης, "the overseer") was a title for Zeus and Helios, who watch over everything.*
 
-Epoptes runs **long, autonomous Claude Code, Codex or pi sessions** (an overnight build, a research sweep, a stack of documents, a data clean-up) and lets you watch and steer them. You describe the goal in a chat, and the agent interviews you and writes the harness. Epoptes then runs it as a series of fresh-context cycles until the goal is done or its time box ends, with a live dashboard, a kanban board you steer it through, and a report at the end.
+Epoptes runs **long, autonomous Claude Code, Codex, pi or Antigravity sessions** (an overnight build, a research sweep, a stack of documents, a data clean-up) and lets you watch and steer them. You describe the goal in a chat, and the agent interviews you and writes the harness. Epoptes then runs it as a series of fresh-context cycles until the goal is done or its time box ends, with a live dashboard, a kanban board you steer it through, and a report at the end.
 
 It grew out of a 12-hour autonomous game build. Its rules for keeping long runs cheap and on track are built in:
 - a fresh context every cycle
@@ -21,7 +21,7 @@ It grew out of a 12-hour autonomous game build. Its rules for keeping long runs 
 
 ## What you need
 - **Node.js 22.18 or newer**
-- **[Claude Code](https://docs.claude.com/claude-code), [Codex CLI](https://developers.openai.com/codex/cli) or [pi](https://pi.dev), installed and logged in.** Epoptes runs your own CLI and never handles logins or keys.
+- **[Claude Code](https://docs.claude.com/claude-code), [Codex CLI](https://developers.openai.com/codex/cli) [pi](https://pi.dev) or [Antigravity CLI](https://antigravity.google) (`agy`), installed and logged in.** Epoptes runs your own CLI and never handles logins or keys.
 - **Linux, macOS or WSL2**
 
 ## Install
@@ -115,10 +115,30 @@ An empty model uses pi's `defaultProvider`/`defaultModel`; otherwise use pi's `p
 pi has **no sandbox and no approval prompts**: its tools run with your permissions. Keep `.epoptes/settings.json` for its deny list. The adapter loads a small Epoptes guard extension that blocks `Bash(…)`, `Read(…)`, `Edit(…)` and `Write(…)` deny matches, including inside `&&`, `;` and `|` chains, and reports each blocked attempt as a warning. Allow rules have no effect. The guard is a tripwire, not a boundary: for untrusted goals, run pi in a container or VM. Extra pi flags (for example `["--exclude-tools", "write"]`) go in `adapter.args`.
 
 pi reports tokens and a cost estimate from its model catalog, so the dashboard and reports show dollar estimates (`≈`), live while a cycle runs. pi bills per token, so a pi goal's top bar shows the job's API spend instead of plan usage. `cycle.max_budget_usd` works: Epoptes stops the cycle when the estimate passes it, which is worth setting for pay-per-token providers. Rate-limit errors (429, "rate limit", overloaded) that pi's own retries don't clear use the runner's backoff. Like Codex, pi has no subagents, so the skill writes `loop.md` to work sequentially.
+### Using Antigravity
+
+The Antigravity CLI (`agy`) reads global skills from `~/.gemini/config/skills`:
+```sh
+epoptes skill install --agent antigravity
+```
+In `.epoptes/goal.json`, use:
+```json
+"adapter": {
+  "type": "antigravity",
+  "model": "gemini-3.8-flash",
+  "effort": "low",
+  "permission_mode": "accept-edits"
+}
+```
+An empty model uses agy's configured model; `agy models` lists the ids. A model id that already names an effort (`gemini-3.8-flash-low`) needs an empty `effort`: agy rejects both together. Each cycle runs a fresh `agy --output-format stream-json -p=<loop.md>` (agy reads no prompt from stdin) with its saved login.
+
+agy uses its **own** permissions, in `~/.gemini/antigravity-cli/settings.json`; `.epoptes/settings.json` is ignored. `permission_mode` is `accept-edits` (workspace edits approved; commands need an allow rule), `auto` (agy's sandboxed auto mode, a preview) or `skip-permissions` (`--dangerously-skip-permissions`: every tool call approved, only agy's deny rules apply). A cycle can't answer a prompt: agy auto-denies an unlisted command and ends the turn, and Epoptes records the cycle as an error naming what was denied. With `accept-edits`, add at least `command(epoptes)` and the commands loop.md runs (`command(git)`, `command(npm test)`) to `permissions.allow`.
+
+agy reports tokens but no dollar costs or plan usage, so costs show as unknown and `cycle.max_budget_usd` must be `null`. Quota and rate-limit errors use the runner's backoff. Role files are guidance, as with Codex and pi.
 
 ## How it works
 - **A goal is a directory.** Everything lives in `<project>/.epoptes/`: `goal.json` (objective, done checks, time box, models), `loop.md` (the orchestrator's per-cycle instructions), role files in `agents/`, and memory in `state/`. It also holds the board (`board.jsonl`) and the logs of events and cycles. The file format is the contract: the CLI, runner, dashboard and skill only read and write these files ([docs/spec.md](docs/spec.md)).
-- **A run is a detached process,** one per goal. It starts `claude -p`, `codex exec` or `pi --mode json` with `loop.md`, cycle after cycle:
+- **A run is a detached process,** one per goal. It starts `claude -p`, `codex exec`, `pi --mode json` or `agy -p` with `loop.md`, cycle after cycle:
   - Each cycle orients from the state files and the board, does a slice of work (through subagents when configured), verifies it, records it and exits.
   - Between cycles, the runner checks the time box, your controls, rate limits and failures.
   - Closing the dashboard or the terminal never stops a run.
@@ -191,7 +211,7 @@ epoptes clock                          one line with the time left and the curre
 epoptes report [goal] [--all] [--job <id>|all]   Markdown + HTML report (default: the current job)
 epoptes import-runsh <project>         import an older run.sh harness (dress2impress style)
 epoptes ui [--port N] [--lan]          the dashboard (outputs are served on the next port)
-epoptes skill install [--agent codex|pi]   install the skill (Claude Code by default)
+epoptes skill install [--agent codex|pi|antigravity]   install the skill (Claude Code by default)
 epoptes skill path                     print the shared skill directory
 ```
 `[goal]` is a registered id or a path. Leave it out inside a goal's folder.
@@ -217,11 +237,11 @@ The rest comes from the loop template: approval requests, "waiting for you", har
 
 ## Safety and privacy
 - **Local only.** The dashboard binds to `127.0.0.1`. It rejects other hosts (DNS rebinding) and cross-site writes (CSRF), because feedback ends up in agents' prompts. `--lan` is an explicit opt-in with a warning and no login.
-- **No telemetry,** no accounts, no keys handled by Epoptes. It runs the `claude`, `codex` or `pi` you're already logged into; the CLI's own data settings still apply.
+- **No telemetry,** no accounts, no keys handled by Epoptes. It runs the `claude`, `codex`, `pi` or `agy` you're already logged into; the CLI's own data settings still apply.
 - **Transcripts and logs stay on your machine,** gitignored under `.epoptes/cycles/` and `.epoptes/run/`. So does the brain (`~/.epoptes/brain/`).
 - **Outputs open on a separate local origin** (the dashboard's port + 1, read-only): an agent-built page runs normally but can't reach the dashboard's controls. It serves only files inside registered projects, never dotfiles such as `.env` or `.epoptes/`, and it's off in `--lan` mode.
 - **Guardrails in every generated harness:**
-  - Claude Code's permissions allow/deny list, Codex's native sandbox and rules, or for pi the deny list enforced by the Epoptes guard
+  - Claude Code's permissions allow/deny list, Codex's native sandbox and rules, Antigravity's own permission rules, or for pi the deny list enforced by the Epoptes guard
   - no `git push`, no history rewrites, no destructive cleans
   - secrets never in goal files (use your secret manager, e.g. the 1Password CLI)
   - an approval list the orchestrator must never act on by itself
@@ -230,13 +250,13 @@ The rest comes from the loop template: approval requests, "waiting for you", har
 
 ## Development
 ```sh
-npm test            # node --test: unit tests, runner tests with fake Claude/Codex/pi CLIs, server and report tests
+npm test            # node --test: unit tests, runner tests with fake Claude/Codex/pi/agy CLIs, server and report tests
 npm run typecheck
 npm run build       # dist/ for the npm package (the checkout runs src/ directly)
 ```
 - `src/`: the CLI, runner, adapters (`adapters/`), dashboard and output servers (`ui/`), reports, the importer, time use (`timeuse.ts`) and the brain (`brain.ts`).
 - `ui/`: the dashboard (Preact via `htm`, no build step).
-- `plugin/`: the shared Claude Code/Codex/pi skill and templates.
+- `plugin/`: the shared Claude Code/Codex/pi/Antigravity skill and templates.
 - `docs/`: the spec, JSON Schemas and decisions.
 
 Usage notes go in [NOTES.md](NOTES.md), and are triaged into [ROADMAP.md](ROADMAP.md).

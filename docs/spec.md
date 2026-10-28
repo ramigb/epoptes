@@ -57,6 +57,16 @@ Events used: `session` (id), `tool_execution_start` (ticker; pi tool names map t
 
 Verified against local pi 1.3.0 (`@earendil-works/pi-coding-agent`) with a local OpenAI-compatible fake server: the stdin prompt, the event shapes, cached-token accounting, the guard blocking `cd . && git push`, 429 retries ending as `rate_limited`, and the budget stop. Runner tests use a fake CLI and make no inference calls.
 
+## Antigravity adapter
+
+Set `adapter.type` to `antigravity`. Its defaults are `model: ""` (agy's configured model), `effort: ""` (passed as `--effort` when set; agy rejects it with a model id that names an effort, such as `gemini-3.8-flash-low`), `permission_mode: "accept-edits"`, `prompt: "loop.md"` and `args: []`. `cycle.max_budget_usd` must be `null`.
+
+The adapter launches `agy --output-format stream-json`, then `--mode accept-edits|auto` or `--dangerously-skip-permissions` (`permission_mode: skip-permissions`), optionally `--model` and `--effort`, extra arguments, and `-p=<prompt>` last: in text mode agy reads no prompt from stdin, and a bare `-p` would take the next flag as the prompt. Every cycle starts a new conversation. It uses agy's own login, settings, permissions, rules and skills; `.epoptes/settings.json` is not translated. `EPOPTES_AGY_BIN` overrides the executable for tests.
+
+Events used: `init` (`conversation_id`, `init.model`), `step_update` with `step_type: "tool"` and `state: "ACTIVE"` (ticker; `run_command` → `Bash`, `read_file`/`view_file` → `Read`, `write_file`/`write_to_file` → `Write`, `replace_file_content`/`multi_replace_file_content`/`sed_file` → `Edit`, `grep_search` → `Grep`, `find_by_name` → `Glob`, `list_dir` → `LS`, `invoke_subagent` → `Agent`), `step_type: "agent_response"` (`text_delta` joined into one text line per response; `state: "DONE"` carries per-response `usage`, sent as `live_usage` and counted as turns), and the final `result` (`status` `SUCCESS`/`ERROR`, `error`, whole-conversation `usage`, `denied_actions`). The result's usage replaces the per-step sums. `cache_read_tokens` is taken to be part of `input_tokens`, as in the Gemini API, and subtracted; `thinking_tokens` count as output. Headless agy auto-denies a tool needing a permission it can't ask for, ends the turn and still reports `SUCCESS` (exit 0): a result with `denied_actions` is an `error` cycle and each denial a `warn`. A bad model exits 1 with `status: "ERROR"`. Quota and rate-limit errors are detected from the text (`quota`, `RESOURCE_EXHAUSTED`, `429`); no reset time is given, so the runner's backoff applies. agy reports no cost (`cost_usd: null`) and no plan usage.
+
+Verified against local agy 1.4.9 with Gemini 3.8 Flash: the event shapes, a multi-line prompt in `-p=`, file tools under `accept-edits`, a denied `run_command`, and the model/effort conflict. Runner tests use a fake CLI and make no inference calls.
+
 ## goal.json — schema `goal.schema.json`
 Written by the skill, edited by you. The runner re-reads it before every cycle, so changes apply from the next cycle. The time box is copied into `run/clock.json` when a run starts; `extend` and `reset-clock` act on the clock, not on goal.json.
 
@@ -70,7 +80,7 @@ Written by the skill, edited by you. The runner re-reads it before every cycle, 
 | `output` | optional: the main deliverable, a project-relative path (file or folder) or an http(s) URL. `epoptes event output <path\|url>` overrides it at run time (latest wins) |
 | `timebox` | `total_min`, `wrapup_min`, `grace_min`, `pause_on_rate_limit` |
 | `checkpoints` | `git` (orchestrator commits), `shadow` (runner commits the workspace to `.epoptes/snapshots.git` after each cycle, no tokens, never touches your repo), `none` |
-| `adapter` | `type` (`claude-code`, `codex` or `pi`), `prompt` (default `loop.md`), `model`, `effort`, `permission_mode`, `args[]` |
+| `adapter` | `type` (`claude-code`, `codex`, `pi` or `antigravity`), `prompt` (default `loop.md`), `model`, `effort`, `permission_mode`, `args[]` |
 | `cycle` | `timeout_min` (clamped 20–180), `pause_between_s`, `max_budget_usd` (null = none) |
 | `failures` | `cooldown_after`, `cooldown_min`, `give_up_after` (consecutive failed cycles) |
 | `rate_limit` | `backoff_s`, `backoff_max_s` (doubles per consecutive hit) |
@@ -212,7 +222,7 @@ The runner starts each cycle in `<project>/` with:
 ## Adapter interface
 ```ts
 interface Adapter {
-  id: string;                                   // "claude-code", "codex" or "pi"
+  id: string;                                   // "claude-code", "codex", "pi" or "antigravity"
   check(): Promise<{ ok: boolean; version?: string; problem?: string }>;
   command(spec: CycleSpec): { bin: string; args: string[]; env: Record<string, string>; stdin?: string }; // also --dry-run
   start(spec: CycleSpec, hooks: CycleHooks): Cycle;

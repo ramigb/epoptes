@@ -1,11 +1,11 @@
 ---
 name: epoptes
-description: Design, generate and register a long-running, time-boxed autonomous harness that the Epoptes runner executes as fresh-context Claude Code, Codex or pi cycles, for any goal (code, research, content, data). Use when the user wants to build or set up a harness, an overnight or multi-hour autonomous run, or mentions Epoptes. Also use to start a new job (feature, task) in a project that already has a harness, and to check on or steer existing Epoptes goals (status, start, pause, stop, the board, feedback, events, reports).
+description: Design, generate and register a long-running, time-boxed autonomous harness that the Epoptes runner executes as fresh-context Claude Code, Codex, pi or Antigravity cycles, for any goal (code, research, content, data). Use when the user wants to build or set up a harness, an overnight or multi-hour autonomous run, or mentions Epoptes. Also use to start a new job (feature, task) in a project that already has a harness, and to check on or steer existing Epoptes goals (status, start, pause, stop, the board, feedback, events, reports).
 ---
 
 # Epoptes: harnesses for long-running goals
 
-Epoptes runs a goal as a series of **cycles**. Each cycle is a fresh `claude -p`, `codex exec` or `pi --mode json` orchestrator that reads the goal's files, does one slice of work (using subagents when configured), verifies it, records state and exits. All memory lives in files under `<project>/.epoptes/`. The runner, CLI and dashboard only read and write those files.
+Epoptes runs a goal as a series of **cycles**. Each cycle is a fresh `claude -p`, `codex exec`, `pi --mode json` or `agy -p` orchestrator that reads the goal's files, does one slice of work (using subagents when configured), verifies it, records state and exits. All memory lives in files under `<project>/.epoptes/`. The runner, CLI and dashboard only read and write those files.
 
 You do one of three jobs:
 - **Check on or steer a goal:** use the CLI (reference at the bottom). Read `epoptes status <goal>` before anything else. Don't open `cycles/` transcripts unless the user asks.
@@ -37,13 +37,14 @@ Show the one-screen summary from interview.md. Wait for an explicit yes. If the 
 
 ### 5. Generate
 1. Copy [templates/](templates/) into `<project>/.epoptes/`: `goal.json`, `loop.md`, `settings.json`, `FEEDBACK.md`, `agents/*.md` and `state/*.md`.
-2. Adapt **every** file to this goal and the selected adapter (Claude Code, Codex or pi):
+2. Adapt **every** file to this goal and the selected adapter (Claude Code, Codex, pi or Antigravity):
    - Replace every `{{…}}` placeholder.
    - Delete the template notes (lines starting with `<!-- template:`).
    - For Claude Code, keep `adapter.type: "claude-code"` and its model aliases, role frontmatter and settings.json.
    - For Codex, set `adapter.type: "codex"`, `permission_mode: "workspace-write"`, and `cycle.max_budget_usd: null`. Use a Codex model id confirmed with the user, or `model: ""` to use their CLI configuration. Remove settings.json: Codex uses its own sandbox and native rules.
    - For pi, set `adapter.type: "pi"` and `permission_mode: "default"`. Use `model: ""` for the user's pi default, or a model they confirmed in pi's `provider/id` form (e.g. `openrouter/<vendor>/<model>`; `pi --list-models <search>` lists them). `effort` is pi's thinking level (`off`, `minimal`, `low`, `medium`, `high`, `xhigh`). Keep settings.json for its **deny** list: pi has no sandbox or approvals, so Epoptes enforces the deny rules with a guard extension, and allow rules have no effect. `cycle.max_budget_usd` works (Epoptes stops the cycle when pi's cost estimate passes it); suggest one for pay-per-token providers like OpenRouter.
-   - Rename, add or remove role files to match the design. Codex and pi role files are guidance only: adapt loop.md to perform work and checks sequentially, reading role instructions when needed. Do not rely on Claude Agent, SendMessage, per-role models, tools or maxTurns. Native Codex subagents require separate user-configured Codex agents, and pi has no built-in subagents; Epoptes does not translate role frontmatter.
+   - For Antigravity, set `adapter.type: "antigravity"`, `permission_mode: "accept-edits"` and `cycle.max_budget_usd: null`. Use `model: ""` for agy's configured model, or an id from `agy models` the user confirmed; put the effort in `effort` with a base id (`gemini-3.8-flash` + `low`), or leave `effort` empty for an id that names one (`gemini-3.8-flash-low`). Remove settings.json: agy uses its own permissions in `~/.gemini/antigravity-cli/settings.json`. A cycle can't answer prompts, so an unlisted command ends the cycle: tell the user to add `command(epoptes)` and every command loop.md runs (`command(git)`, the test command) to its `permissions.allow`. Offer `skip-permissions` only with explicit consent.
+   - Rename, add or remove role files to match the design. Codex, pi and Antigravity role files are guidance only: adapt loop.md to perform work and checks sequentially, reading role instructions when needed. Do not rely on Claude Agent, SendMessage, per-role models, tools or maxTurns. Native Codex subagents require separate user-configured Codex agents, and pi has no built-in subagents; Epoptes does not translate role frontmatter.
    - Seed `state/backlog.md` with the first milestones and tasks, and `state/decisions.md` with what the interview settled. backlog.md is only a seed: Epoptes imports it onto the board the first time it reads the goal, and from then on every task, feedback item and comment is a card on the board (`epoptes board`).
    - Leave `FEEDBACK.md` exactly as the template has it. Every bullet in it becomes a backlog card for the orchestrator when the run starts, so never seed ideas, examples or review questions there.
 3. Apply [reference/guardrails.md](reference/guardrails.md): the permissions for this goal kind, no git push or history rewrites, and secrets kept out of every file.
@@ -93,7 +94,7 @@ When the user asks you to "distill the brain" (or INDEX.md has grown past ~30 le
 - **Caps per cycle:** at most 3 rounds, a soft time limit (usually 45–60 min), and optionally `cycle.max_budget_usd` (Claude Code and pi; not Codex).
 - **Parallel tasks own separate files.** Two workers never write the same file in one round.
 - **Guardrails:**
-  - Claude Code: a permissions allow/deny list; Codex: a workspace-write sandbox and native rules; pi: the settings.json deny list, enforced by the Epoptes guard (a tripwire, not a sandbox)
+  - Claude Code: a permissions allow/deny list; Codex: a workspace-write sandbox and native rules; Antigravity: accept-edits and agy's own allow list; pi: the settings.json deny list, enforced by the Epoptes guard (a tripwire, not a sandbox)
   - no `git push`, no history rewrites, no destructive cleans
   - secrets never in goal files (point to the user's secret manager, e.g. the 1Password CLI or MCP)
 - **Anything in the goal's approval list is never done autonomously.** The orchestrator runs `epoptes approval "…" --ref <card>`, which blocks that card, and moves on. The human answers with Approve / Disapprove in the dashboard (or `epoptes card <id> approve|reject`). When nothing else can move, the orchestrator runs `epoptes wait-for-human "…"` and the run waits, clock stopped, until the human answers.

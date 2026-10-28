@@ -172,7 +172,8 @@
           "enum": [
             "claude-code",
             "codex",
-            "pi"
+            "pi",
+            "antigravity"
           ]
         },
         "prompt": {
@@ -249,9 +250,39 @@
           "if": {
             "properties": {
               "type": {
+                "const": "antigravity"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "model": {
+                "default": ""
+              },
+              "effort": {
+                "default": "",
+                "description": "Passed as --effort; leave empty when the model id already names an effort (gemini-3.8-flash-low)."
+              },
+              "permission_mode": {
+                "enum": [
+                  "accept-edits",
+                  "auto",
+                  "skip-permissions"
+                ],
+                "default": "accept-edits",
+                "description": "agy --mode accept-edits or auto, or --dangerously-skip-permissions. Commands follow agy's own permissions.allow; headless agy can't ask."
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
                 "enum": [
                   "codex",
-                  "pi"
+                  "pi",
+                  "antigravity"
                 ]
               }
             }
@@ -384,6 +415,31 @@
               "max_budget_usd": {
                 "type": "null",
                 "description": "Codex exec has no dollar budget cap; use null."
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "adapter": {
+            "properties": {
+              "type": {
+                "const": "antigravity"
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "cycle": {
+            "properties": {
+              "max_budget_usd": {
+                "type": "null",
+                "description": "agy reports no costs; use null."
               }
             }
           }
