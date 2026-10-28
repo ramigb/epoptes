@@ -30,6 +30,7 @@ const store = {
   cycleView: null,
   freshActivity: new Set(),
   jobScope: 'job', // 'job' (the current job) or 'all' (every job of the harness)
+  cardSel: null, // the open card on the board
 };
 const listeners = new Set();
 let version = 0; // bumped on every change
@@ -268,7 +269,7 @@ function liveActive(g, now) {
   return g.clock.active + tick;
 }
 
-function ClockBar({ g, big }) {
+function ClockBar({ g, big, extra }) {
   const now = useNow();
   const c = g.clock;
   if (!c) return html`<div class="clockbar ${big ? 'big' : ''}"><div class="track"></div><div class="labels"><span>clock not started</span><span>${g.goal ? dur(g.goal.timebox.total_min * 60) + ' time box' : ''}</span></div></div>`;
@@ -300,7 +301,7 @@ function ClockBar({ g, big }) {
     <div class="labels">
       <span class="num">${dur(active)} active${c.paused ? ' · clock paused' : ''}</span>
       ${big && proj && html`<span class="num proj-label ${proj.end_s > c.timebox_s ? 'over' : ''}" title=${projTip}><span class="proj-key" aria-hidden="true"></span>on pace to finish at ~${dur(proj.end_s)}${proj.end_s > c.timebox_s ? ' · over the time box' : ''}</span>`}
-      <span class="num">${c.to_end > 0 ? `${dur(c.timebox_s - active)} left of ${dur(c.timebox_s)}` : `over by ${dur(active - c.timebox_s)}`}</span>
+      <span class="num">${c.to_end > 0 ? `${dur(c.timebox_s - active)} left of ${dur(c.timebox_s)}` : `over by ${dur(active - c.timebox_s)}`}${extra && html` ${extra}`}</span>
     </div>
   </div>`;
 }
@@ -381,22 +382,6 @@ function Topbar({ id }) {
   </header>`;
 }
 
-// ---------------------------------------------------------------- jobs
-
-/** The current job, and with several jobs a switch between "this job" and "all jobs" for the numbers below. */
-function JobChip({ d }) {
-  if (!d.job?.named) return null;
-  const scope = (s) => {
-    if (s === store.jobScope) return;
-    set({ jobScope: s, selectedCycle: null, cycleView: null });
-    loadDetail();
-  };
-  return html`<span class="jobchip"><span class="chip" title=${`Job ${d.job.id}: ${d.job.n} job${d.job.n > 1 ? 's' : ''} in this harness so far`}>job · ${d.job.title}${d.job.n > 1 ? ` · ${d.job.n} of ${d.job.n}` : ''}</span>
-    ${d.job.n > 1 && html`<span class="seg-toggle" role="group" aria-label="Which jobs the numbers cover">
-      <button class=${d.job_scope !== 'all' ? 'on' : ''} onClick=${() => scope('job')}>This job</button><button class=${d.job_scope === 'all' ? 'on' : ''} onClick=${() => scope('all')}>All jobs</button>
-    </span>`}</span>`;
-}
-
 // ---------------------------------------------------------------- waiting for you
 
 /** One line on a goal card when the human is needed: the run waits, or approvals are pending. */
@@ -433,46 +418,6 @@ function ApprovalButtons({ goalId, f }) {
     <button class="btn small ghost" onClick=${() => setNoting(!noting)} aria-expanded=${noting}>${noting ? 'No note' : 'Add a note'}</button>
     ${noting && html`<input type="text" class="approval-note" value=${note} onInput=${(e) => setNote(e.currentTarget.value)} placeholder="Conditions or reasons (sent with your answer)" aria-label=${`Note for ${f.id}`} />`}
   </div>`;
-}
-
-/** The panel at the top of a goal when it needs the human: what it waits for, approvals, and a reply box. */
-function NeedsYou({ d }) {
-  const [text, setText] = useState('');
-  const [busy, setBusy] = useState(false);
-  const pending = d.board_cards.filter(pendingApproval);
-  if (!d.needs && !pending.length) return null;
-  const reply = (e) => {
-    e?.preventDefault();
-    setBusy(true);
-    const p = text.trim() ? api.post(`/api/goals/${d.id}/cards`, { title: text.trim(), resume: true }) : api.post(`/api/goals/${d.id}/control`, { action: 'start' }).then(() => ({ resumed: true }));
-    p.then((r) => {
-      setText('');
-      toast({ kind: 'info', title: r.resumed ? 'Resuming' : r.id ? `${r.id} added` : 'Sent', body: r.problem ? `Not resumed: ${r.problem}` : d.name, ms: 4000 });
-    })
-      .catch((err) => toast({ kind: 'bad', title: 'Could not resume', body: err.message }))
-      .finally(() => {
-        setBusy(false);
-        loadState();
-        loadDetail();
-      });
-  };
-  return html`<section class="panel needs-you" aria-live="polite">
-    <h2><span class="flagmark" aria-hidden="true">⚑</span> ${d.needs ? 'Waiting for you' : 'Approval needed'}
-      <span class="right muted">${d.needs ? `paused ${ago(d.needs.since)} · the clock is stopped` : 'the run keeps working on other tasks meanwhile'}</span></h2>
-    ${d.needs && html`<p class="needs-reason">${d.needs.reason}</p>`}
-    ${pending.length > 0 &&
-    html`<ul class="approvals">${pending.map((f) => html`<li key=${f.id}>
-      <div class="approval-text"><span class="id">${f.id}</span> ${f.approval.text}${f.approval.text !== f.title ? html` <span class="chip">${f.title}</span>` : ''}</div>
-      <${ApprovalButtons} goalId=${d.id} f=${f} />
-    </li>`)}</ul>`}
-    ${d.needs &&
-    html`<form class="fb-form needs-reply" onSubmit=${reply}>
-      <textarea rows="2" value=${text} disabled=${busy} placeholder=${pending.length ? 'Anything else to tell it? (optional)' : 'Your answer or opinion. It becomes a backlog card the next cycle reads first.'}
-        aria-label="Reply" onInput=${(e) => setText(e.currentTarget.value)} onKeyDown=${(e) => (e.ctrlKey || e.metaKey) && e.key === 'Enter' && reply(e)}></textarea>
-      <div class="row"><span class="faint">${pending.length ? 'Answering the last approval resumes the run by itself.' : 'Ctrl+Enter to send'}</span>
-        <button class="btn primary small" disabled=${busy}>${text.trim() ? 'Send & resume' : 'Resume'}</button></div>
-    </form>`}
-  </section>`;
 }
 
 // ---------------------------------------------------------------- goal list
@@ -524,46 +469,7 @@ function GoalList() {
       : html`<div class="cards">${goals.map((g) => html`<${GoalCard} key=${g.id} g=${g} />`)}</div>`}`;
 }
 
-// ---------------------------------------------------------------- goal detail
-
-function Controls({ d }) {
-  const [busy, setBusy] = useState(false);
-  const act = (action, extra = {}, confirmText) => {
-    if (confirmText && !confirm(confirmText)) return;
-    setBusy(true);
-    api
-      .post(`/api/goals/${d.id}/control`, { action, ...extra })
-      .then(() => toast({ kind: 'info', title: extra.follow_up ? 'Starting a follow-up…' : { start: 'Starting…', pause: 'Pause requested', stop: 'Stopping…', extend: 'Time box extended', reset: 'Clock reset' }[action], body: d.name, ms: 3500 }))
-      .catch((e) => toast({ kind: 'bad', title: `Could not ${action}`, body: e.message }))
-      .finally(() => {
-        setBusy(false);
-        loadState();
-        loadDetail();
-      });
-  };
-  const live = d.live;
-  const finished = d.run_finished;
-  const newRunText = d.done_marker
-    ? 'This goal is done. Start a new run?\n\nA new run gets a fresh time box and spends tokens. The orchestrator only finds work if you added cards since.'
-    : 'The time box is over. Start a new run with a fresh time box?\n\nTo continue this run instead, cancel and use +30m / +1h / +2h.';
-  const start = () => (finished ? act('start', { new_run: true }, newRunText) : act('start'));
-  const fu = d.followup_items;
-  return html`<div class="controls">
-    ${!live && finished && fu > 0 && html`<button class="btn primary" disabled=${busy} onClick=${() => act('start', { follow_up: true })}
-      title="Handle just your open cards and comments, with no time box. Minor items are fixed in place; anything that needs a restart or a new version is flagged for a new run instead.">▶ Follow up on ${fu} card${fu > 1 ? 's' : ''}</button>`}
-    ${!live && html`<button class=${`btn ${finished ? '' : 'primary'}`} disabled=${busy} onClick=${start} title=${d.needs ? 'Resume without answering' : ''}>▶ ${finished ? 'Start new run…' : d.clock ? 'Resume' : 'Start'}</button>`}
-    ${live && html`<button class="btn" disabled=${busy || d.pause_requested} onClick=${() => act('pause')} title="Finish the current cycle, then pause (the clock pauses too)">‖ ${d.pause_requested ? 'Pausing after cycle' : 'Pause after cycle'}</button>`}
-    ${live && html`<button class="btn danger" disabled=${busy} onClick=${() => act('stop', {}, 'Stop now? The current cycle is interrupted; the next start recovers its work.')}>■ Stop now</button>`}
-    ${d.clock &&
-    html`<span class="btn-group" role="group" aria-label="Extend the time box">
-      ${[['+30m', 1800], ['+1h', 3600], ['+2h', 7200]].map(([l, s]) => html`<button key=${l} class="btn small" disabled=${busy} onClick=${() => act('extend', { seconds: s })} title="Extend the time box">${l}</button>`)}
-    </span>`}
-    ${!live && d.clock && html`<button class="btn small" disabled=${busy} onClick=${() => act('reset', {}, 'Reset the clock? The next start begins a new run with the time box from goal.json.')}>Reset clock</button>`}
-    <a class="btn small" href=${`/goals/${d.id}/report.html`} target="_blank" rel="noopener" title=${d.job.n > 1 ? 'Report for the current job' : ''}>Report</a>
-    ${d.job.n > 1 && html`<a class="btn small" href=${`/goals/${d.id}/report.html?job=all`} target="_blank" rel="noopener">Report: all jobs</a>`}
-    <${OutputLink} o=${d.output} />
-  </div>`;
-}
+// ---------------------------------------------------------------- goal detail: header bits
 
 /** The goal's deliverable: a URL, or a project file served on the output origin. */
 function OutputLink({ o, big }) {
@@ -574,211 +480,6 @@ function OutputLink({ o, big }) {
     return html`<span class="btn small disabled-link" title=${why}>${label}</span>`;
   }
   return html`<a class=${`btn small output-link ${big ? 'primary' : ''}`} href=${o.href} target="_blank" rel="noopener noreferrer" title=${`${o.target}${o.text ? ` · ${o.text}` : ''}`}>${label}</a>`;
-}
-
-function Banners({ d }) {
-  const now = useNow();
-  const out = [];
-  if (d.pause_requested) out.push(html`<div class="banner">Pause requested: the run pauses when this cycle finishes.</div>`);
-  if (d.waiting_until && d.wait_reason !== 'between_cycles') {
-    const left = (Date.parse(d.waiting_until) - now) / 1000;
-    out.push(html`<div class="banner warn">${d.wait_reason === 'rate_limit' ? 'Rate-limited' : 'Cooling down after failed cycles'}: next cycle in ${dur(Math.max(0, left))}.</div>`);
-  }
-  const lastCycle = d.cycles_detail.at(-1);
-  if (lastCycle && ['error', 'timeout'].includes(lastCycle.exit) && !d.live) {
-    out.push(html`<div class="banner bad">Cycle ${lastCycle.cycle} ended with <b>${lastCycle.exit}</b>${lastCycle.error ? html`: <span class="mono">${lastCycle.error}</span>` : ''}. <a href="#" onClick=${(e) => { e.preventDefault(); set({ selectedCycle: lastCycle.cycle, cycleView: null }); api.get(`/api/goals/${d.id}/cycles/${lastCycle.cycle}`).then((cycleView) => set({ cycleView })); }}>See its activity</a>.</div>`);
-  }
-  if (d.state === 'done') {
-    const last = d.events.findLast((e) => e.type === 'done');
-    out.push(html`<div class="banner done-banner"><span>✓ <b>Done</b>${last?.text ? `: ${last.text}` : ''}</span>${d.output ? html`<${OutputLink} o=${d.output} big=${true} />` : ''}</div>`);
-  }
-  if (d.state === 'crashed') out.push(html`<div class="banner bad">The runner stopped without cleaning up (crashed). The clock was paused at its last heartbeat. Resume to continue.</div>`);
-  if (d.state === 'failed') out.push(html`<div class="banner bad">Too many failed cycles in a row. Check the last cycle's error below, then resume.</div>`);
-  return out.length ? html`<div class="stack">${out}</div>` : null;
-}
-
-function Stats({ d }) {
-  const all = d.cycles_detail;
-  const live = d.live_usage; // the running cycle, until its result lands in cycles_detail
-  let read = 0;
-  let totalIn = 0;
-  for (const models of [...all.map((r) => r.models), live?.models ?? {}]) for (const u of Object.values(models)) {
-    read += u.cache_read;
-    totalIn += u.input + u.cache_read + u.cache_write;
-  }
-  const liveNote = live ? ' (including the running cycle so far)' : '';
-  const b = d.board;
-  const bt = b ? b.todo + b.doing + b.review + b.done + b.blocked : 0;
-  return html`<div class="stats">
-    <div class="panel stat"><div class="k">Cycles</div><div class="v num">${all.length}${d.round ? html` <small>round ${d.round} now</small>` : ''}</div></div>
-    <div class="panel stat" title=${live && live.cost_usd == null ? 'This CLI prices a cycle when it ends; the running cycle is not counted yet.' : `Cost${liveNote}`}><div class="k">Cost</div><div class="v"><${Money} usd=${all.length || live?.cost_usd != null ? d.cost_usd : null} basis=${d.cost_basis} /></div></div>
-    <div class="panel stat" title=${`Cached input as a share of all input${liveNote}`}><div class="k">Cache-read share</div><div class="v num">${totalIn ? pct(read / totalIn) : '–'}</div></div>
-    <div class="panel stat"><div class="k">Median cycle</div><div class="v"><${Money} usd=${d.cost_median || null} basis=${d.cost_basis} /></div></div>
-    <div class="panel stat"><div class="k">Board</div><div class="v num">${b ? html`${b.done}<small>/${bt} done</small>` : '–'}</div></div>
-  </div>`;
-}
-
-function Ticker({ d }) {
-  const s = useStore();
-  const items = d.activity;
-  const open = new Map();
-  for (const a of items) {
-    if (a.kind === 'agent.start') open.set(a.agent, a);
-    if (a.kind === 'agent.end') open.delete(a.agent);
-  }
-  const lastBy = new Map();
-  for (const a of items) lastBy.set(a.agent, a);
-  const running = d.state === 'running' || d.state === 'pausing';
-  const shown = items.slice(-60).reverse();
-  return html`<section class="panel">
-    <h2>${running ? 'Now' : 'Last cycle'} <span class="right muted">cycle ${d.activity_cycle || '–'} · ${items.length} steps</span></h2>
-    ${running &&
-    html`<div class="agents">
-      <${Agent} name="orchestrator" working=${true} />
-      ${[...open.keys()].map((a) => html`<span key=${a} title=${lastBy.get(a)?.summary}><${Agent} name=${a} working=${true} /></span>`)}
-    </div>`}
-    ${shown.length === 0
-      ? html`<p class="empty">${running ? 'Waiting for the first step…' : 'No activity yet.'}</p>`
-      : html`<ul class="ticker" aria-live="polite">
-          ${shown.map((a, i) => html`<li key=${a.ts + a.summary + i} class="kind-${a.kind} ${s.freshActivity.has(a.ts + a.summary) ? 'fresh' : ''}">
-            <time>${clockTime(a.ts)}</time>
-            <${Agent} name=${a.agent} />
-            <span class="what" title=${a.summary}>${a.tool && html`<span class="tool">${a.tool}</span>`}${a.kind === 'agent.start' ? '▶ ' : a.kind === 'agent.end' ? '■ ' : ''}${a.summary}</span>
-          </li>`)}
-        </ul>`}
-  </section>`;
-}
-
-function cacheShare(r) {
-  let read = 0;
-  let all = 0;
-  for (const u of Object.values(r.models)) {
-    read += u.cache_read;
-    all += u.input + u.cache_read + u.cache_write;
-  }
-  return all ? read / all : null;
-}
-
-function Timeline({ d }) {
-  const s = useStore();
-  const now = useNow();
-  const known = useRef(null);
-  const results = d.cycles_detail;
-  const maxCost = Math.max(0.0001, ...results.map((r) => r.cost_usd ?? 0));
-  const waits = new Map();
-  for (const e of d.events) if (e.type === 'wait' && e.reason !== 'between_cycles' && e.cycle) waits.set(e.cycle, [...(waits.get(e.cycle) ?? []), e]);
-  const segs = [];
-  let lastRun = null;
-  for (const r of results) {
-    segs.push({ key: `c${r.cycle}`, kind: 'cycle', r, runLabel: r.run !== lastRun ? r.run : null });
-    lastRun = r.run;
-    for (const w of waits.get(r.cycle) ?? []) segs.push({ key: `w${w.ts}`, kind: 'wait', w });
-  }
-  const running = d.cycle_started_at && !results.some((r) => r.cycle === d.cycle);
-  if (running) segs.push({ key: `c${d.cycle}`, kind: 'running', elapsed: (now - Date.parse(d.cycle_started_at)) / 1000, runLabel: d.run !== lastRun ? d.run : null });
-
-  // Only segments that weren't there on the previous render animate in.
-  const prev = known.current;
-  const keys = new Set(segs.map((x) => x.key));
-  useEffect(() => {
-    known.current = keys;
-  });
-
-  const select = (n) => {
-    if (s.selectedCycle === n) return set({ selectedCycle: null, cycleView: null });
-    set({ selectedCycle: n, cycleView: null });
-    api.get(`/api/goals/${d.id}/cycles/${n}`).then((cycleView) => set({ cycleView })).catch(() => {});
-  };
-
-  return html`<div>
-    <div class="timeline" role="list" aria-label="Cycles">
-      ${segs.length === 0 && html`<p class="empty">No cycles yet.</p>`}
-      ${segs.map((x) => {
-        const enter = prev && !prev.has(x.key) ? 'enter' : '';
-        if (x.kind === 'wait') {
-          return html`<div key=${x.key} role="listitem" class="seg wait ${enter}" style=${{ flexGrow: Math.max(30, x.w.seconds), height: '30%' }} title=${`${x.w.reason === 'rate_limit' ? 'Rate-limit wait' : 'Cooldown'}: ${dur(x.w.seconds)}`}></div>`;
-        }
-        if (x.kind === 'running') {
-          return html`<div key=${x.key} role="listitem" class="seg running ${enter}" style=${{ flexGrow: Math.max(30, x.elapsed), height: '55%' }} title=${`Cycle ${d.cycle}: running for ${dur(x.elapsed)}`} onClick=${() => select(d.cycle)}>
-            ${x.runLabel && html`<span class="run-label">${x.runLabel}</span>`}
-          </div>`;
-        }
-        const r = x.r;
-        const models = Object.entries(r.models).map(([m, u]) => `${shortModel(m)}: in ${tokens(u.input)} · out ${tokens(u.output)} · cache read ${tokens(u.cache_read)} · write ${tokens(u.cache_write)}`).join('\n');
-        const share = cacheShare(r);
-        const tip = `Cycle ${r.cycle} (${r.run}) · ${r.exit}\n${dur(r.duration_s)} · ${r.turns ?? '?'} turns · ${r.cost_usd != null ? `${r.cost_basis === 'estimate' ? '≈ ' : ''}$${r.cost_usd.toFixed(2)}` : '–'}${share != null ? ` · cache read ${pct(share)}` : ''}${r.flagged ? '\n⚠ costs more than twice the median cycle' : ''}\n${models}`;
-        return html`<div key=${x.key} role="listitem" class="seg ${r.exit} ${enter} ${s.selectedCycle === r.cycle ? 'selected' : ''}" title=${tip} onClick=${() => select(r.cycle)}
-          style=${{ flexGrow: Math.max(30, r.duration_s), height: `${24 + 76 * ((r.cost_usd ?? 0) / maxCost)}%` }}>
-          ${x.runLabel && html`<span class="run-label">${x.runLabel}</span>`}
-          ${r.flagged && html`<span class="flag" aria-label="expensive">⚠</span>`}
-        </div>`;
-      })}
-    </div>
-    <div class="legend">
-      <span>width = duration · height = cost${results.some((r) => r.cost_usd == null) ? ' (unknown costs use minimum height)' : ''}</span>
-      <span><i style=${{ background: 'var(--ok)' }}></i>ok</span>
-      <span><i style=${{ background: 'var(--bad)' }}></i>error / timeout</span>
-      <span><i style=${{ background: 'var(--idle)' }}></i>interrupted</span>
-      <span><i style=${{ background: 'var(--warn)' }}></i>rate-limited / wait</span>
-      <span>⚠ over 2× median cost</span>
-    </div>
-  </div>`;
-}
-
-function CycleTable({ d }) {
-  const s = useStore();
-  const rows = [...d.cycles_detail].reverse();
-  const [all, setAll] = useState(false);
-  const shown = all ? rows : rows.slice(0, 12);
-  const select = (n) => {
-    if (s.selectedCycle === n) return set({ selectedCycle: null, cycleView: null });
-    set({ selectedCycle: n, cycleView: null });
-    api.get(`/api/goals/${d.id}/cycles/${n}`).then((cycleView) => set({ cycleView })).catch(() => {});
-  };
-  if (!rows.length) return null;
-  return html`<div class="table-wrap"><table>
-    <thead><tr><th>#</th><th>run</th><th>exit</th><th class="r">time</th><th class="r">turns</th><th>tokens by model</th><th class="r">cache read</th><th class="r">cost</th></tr></thead>
-    <tbody>
-      ${shown.map((r) => {
-        const share = cacheShare(r);
-        return html`<tr key=${r.cycle} class="clickable ${r.flagged ? 'flagged' : ''} ${s.selectedCycle === r.cycle ? 'selected' : ''}" onClick=${() => select(r.cycle)}>
-          <td class="num">${r.cycle}${r.flagged ? html` <span title="costs more than twice the median cycle">⚠</span>` : ''}</td>
-          <td class="muted">${r.run}</td>
-          <td><span class="exit ${r.exit}">${r.exit.replace('_', ' ')}</span></td>
-          <td class="r num">${dur(r.duration_s)}</td>
-          <td class="r num">${r.turns ?? '–'}</td>
-          <td><div class="models mono">${Object.entries(r.models).map(([m, u]) => html`<span key=${m} title=${`input ${u.input} · output ${u.output} · cache read ${u.cache_read} · cache write ${u.cache_write}`}>${shortModel(m)} · out ${tokens(u.output)} · cache ${tokens(u.cache_read)} · ${u.cost_usd != null ? `${r.cost_basis === 'estimate' ? '≈' : ''}$${u.cost_usd.toFixed(2)}` : ''}</span>`)}</div></td>
-          <td class="r num">${share != null ? pct(share) : '–'}</td>
-          <td class="r"><${Money} usd=${r.cost_usd} basis=${r.cost_basis} /></td>
-        </tr>`;
-      })}
-    </tbody>
-  </table>
-  ${rows.length > 12 && html`<button class="btn small" style=${{ marginTop: '8px' }} onClick=${() => setAll(!all)}>${all ? 'Show recent' : `Show all ${rows.length}`}</button>`}
-  </div>`;
-}
-
-function CycleDetail({ d }) {
-  const s = useStore();
-  if (!s.selectedCycle) return null;
-  const v = s.cycleView;
-  const r = v?.result;
-  return html`<section class="panel">
-    <h2>Cycle ${s.selectedCycle} <span class="right"><button class="btn small" onClick=${() => set({ selectedCycle: null, cycleView: null })}>Close</button></span></h2>
-    ${!v
-      ? html`<p class="empty">Loading…</p>`
-      : html`${r &&
-        html`<dl class="kv" style=${{ marginBottom: '12px' }}>
-          <dt>exit</dt><dd><span class="exit ${r.exit}">${r.exit}</span>${r.error ? html` · <span class="muted">${r.error}</span>` : ''}</dd>
-          <dt>time</dt><dd class="num">${dur(r.duration_s)} · ${clockTime(r.started_at)} → ${clockTime(r.ended_at)}</dd>
-          <dt>cost</dt><dd><${Money} usd=${r.cost_usd} basis=${r.cost_basis} /> · ${r.turns ?? '?'} turns</dd>
-          ${r.session_id && html`<dt>session</dt><dd class="mono">${r.session_id}</dd>`}
-        </dl>`}
-        <ul class="ticker">
-          ${[...v.activity].reverse().map((a, i) => html`<li key=${i} class="kind-${a.kind}"><time>${clockTime(a.ts)}</time><${Agent} name=${a.agent} /><span class="what" title=${a.summary}>${a.tool && html`<span class="tool">${a.tool}</span>`}${a.summary}</span></li>`)}
-        </ul>
-        ${v.activity_total > v.activity.length && html`<p class="faint">Showing the last ${v.activity.length} of ${v.activity_total} steps.</p>`}`}
-  </section>`;
 }
 
 // ---------------------------------------------------------------- where the time went
@@ -879,38 +580,15 @@ function feedText(e) {
     default: return e.text ?? e.type;
   }
 }
-function Feed({ d }) {
-  const [filter, setFilter] = useState('all');
-  const groups = {
-    all: (e) => !['cycle.start', 'round'].includes(e.type) && !(e.type === 'cycle.end' && e.exit === 'ok') && !(e.type === 'wait' && e.reason === 'between_cycles'),
-    milestones: (e) => ['milestone', 'done', 'artifact', 'wrapup'].includes(e.type),
-    problems: (e) => ['blocked', 'warn', 'needs_you'].includes(e.type) || (e.type === 'cycle.end' && e.exit !== 'ok') || (e.type === 'wait' && e.reason !== 'between_cycles'),
-    notes: (e) => e.type === 'note',
-  };
-  const items = d.events.filter(groups[filter]).reverse().slice(0, 120);
-  const seen = store.seenAtOpen[d.id]?.events_at;
-  return html`<section class="panel">
-    <h2>Activity feed</h2>
-    <div class="feed-filter" role="group" aria-label="Filter">
-      ${Object.keys(groups).map((k) => html`<button key=${k} class=${filter === k ? 'on' : ''} onClick=${() => setFilter(k)}>${k}</button>`)}
-    </div>
-    ${items.length === 0
-      ? html`<p class="empty">Nothing here yet.</p>`
-      : html`<ul class="feed">${items.map((e, i) => {
-          const t = e.type === 'cycle.end' ? 'fail' : e.type.startsWith('run.') ? 'run' : e.type;
-          return html`<li key=${e.ts + i} class="t-${t}">
-            <span class="ico" aria-hidden="true">${FEED_ICON[e.type] ?? '·'}</span>
-            <span>${seen && e.ts > seen && e.src !== 'user' ? html`<span class="new-dot" title="new since you last looked"></span> ` : ''}${feedText(e)}</span>
-            <span class="when" title=${new Date(e.ts).toLocaleString()}>${e.cycle ? `c${e.cycle} · ` : ''}${ago(e.ts)}</span>
-          </li>`;
-        })}</ul>`}
-  </section>`;
-}
+// ---------------------------------------------------------------- board
 
 const SRC_LABEL = { file: 'you, from FEEDBACK.md', orchestrator: 'the orchestrator', dashboard: 'you, from the dashboard', cli: 'you, from the CLI' };
-const COLS = [['backlog', 'Backlog'], ['todo', 'TODO'], ['doing', 'DOING'], ['review', 'REVIEW'], ['done', 'DONE']];
-const LANE_HINT = { backlog: 'Your feedback and agent notes, until the orchestrator triages them', todo: 'Planned', doing: 'Being worked on', review: 'Being verified', done: 'Done or cut' };
-const DONE_SHOWN = 8;
+const SRC_FROM = { file: 'from FEEDBACK.md', dashboard: 'from the dashboard', cli: 'from the CLI' };
+const COLS = [['backlog', 'Backlog'], ['todo', 'Todo'], ['doing', 'Doing'], ['review', 'Review'], ['done', 'Done']];
+const LANE_HINT = { backlog: 'Your feedback and agent notes, until the orchestrator triages them', todo: 'Planned, ranked', doing: 'Being worked on', review: 'Being verified', done: 'Done or cut' };
+const LANE_META = { todo: 'ranked', done: 'newest first' };
+const BACKLOG_SHOWN = 6;
+const DONE_SHOWN = 3;
 const pendingApproval = (c) => c.approval && !c.approval.decision && c.column !== 'done';
 
 const postCard = (d, id, body) =>
@@ -919,14 +597,21 @@ const postCard = (d, id, body) =>
     .then((r) => (loadDetail(), loadState(), r))
     .catch((e) => toast({ kind: 'bad', title: `Could not update ${id}`, body: e.message }));
 
-function CardTile({ c, selected, onSelect, seen }) {
+function CardTile({ c, selected, onSelect, seen, live }) {
   const fresh = seen && c.comments.some((m) => m.by !== 'user' && m.ts > seen);
-  return html`<button type="button" class=${`kcard ${selected ? 'selected' : ''} ${c.cut ? 'cut' : ''} ${c.blocked || pendingApproval(c) ? 'blocked' : ''}`} draggable="true"
+  const yours = c.src !== 'orchestrator' && c.column !== 'done';
+  const n = c.comments.length;
+  const meta = [
+    c.column === 'doing' ? `started${c.cycle ? ` in c${c.cycle}` : ''} · ${ago(c.updated_at)}` : yours ? `added ${SRC_FROM[c.src] ?? ''} · ${ago(c.created_at)}` : '',
+    n ? `${n} comment${n > 1 ? 's' : ''}` : '',
+  ].filter(Boolean).join(' · ');
+  return html`<button type="button" class=${`kcard ${c.column} ${yours ? 'yours' : ''} ${selected ? 'selected' : ''} ${c.cut ? 'cut' : ''} ${c.blocked || pendingApproval(c) ? 'blocked' : ''}`} draggable="true"
     onDragStart=${(e) => e.dataTransfer.setData('text/plain', c.id)} onClick=${() => onSelect(selected ? null : c.id)} aria-expanded=${selected}>
-    <span class="kc-head"><span class="id">${c.id}</span>${c.milestone && html`<span class="chip">${c.milestone}</span>`}${c.priority && html`<span class=${`prio ${c.priority}`}>${c.priority}</span>`}${c.assignee && html`<${Agent} name=${c.assignee} />`}${fresh && html`<span class="new-dot" title="new reply since you last looked"></span>`}</span>
+    <span class="kc-head"><span class="id">${c.id}</span>${c.priority && html`<span class=${`prio ${c.priority}`}>${c.priority}</span>`}${fresh && html`<span class="new-dot" title="new reply since you last looked"></span>`}
+      <span class="right">${yours ? html`<span class="tag yours">yours</span>` : [c.milestone, c.column === 'done' && c.cycle && `c${c.cycle}`].filter(Boolean).join(' · ')}</span></span>
     <span class="kc-title">${c.title}</span>
+    ${c.assignee && html`<span class="agents"><${Agent} name=${c.assignee} working=${live && c.column === 'doing'} /></span>`}
     <span class="kc-tags">
-      ${c.src !== 'orchestrator' && html`<span class="kind you">you</span>`}
       ${c.src === 'orchestrator' && c.column === 'backlog' && html`<span class="kind agent" title="The orchestrator filed this for a later cycle. Edit or cut it if it's wrong.">agent note</span>`}
       ${c.steering && html`<span class="kind steer">⚡ steer</span>`}
       ${pendingApproval(c) && html`<span class="kind approval">approval: waiting for you</span>`}
@@ -934,8 +619,8 @@ function CardTile({ c, selected, onSelect, seen }) {
       ${c.blocked && html`<span class="kind blocked" title=${c.blocked}>blocked</span>`}
       ${c.cut && html`<span class="kind" title=${c.cut}>cut</span>`}
       ${c.waiting && !c.steering && html`<span class="kind waiting" title="The orchestrator hasn't read your latest yet">waiting for the agent</span>`}
-      ${c.comments.length > 0 && html`<span class="faint">${c.comments.length} comment${c.comments.length > 1 ? 's' : ''}</span>`}
     </span>
+    ${meta && html`<span class="kc-meta">${meta}</span>`}
   </button>`;
 }
 
@@ -959,7 +644,7 @@ function CardDetail({ d, c, onClose }) {
         if (!r) return;
         setText('');
         setSteer(false);
-        const body = steer ? (r.interrupted ? `Cycle ${d.cycle} is interrupted; a fresh cycle replans around it now.` : 'The next cycle replans around it first.') : closed ? 'The card is back in TODO for the next cycle.' : d.run_finished ? 'This goal is finished: press "Follow up" to have it handled (no time box).' : 'The next cycle reads it.';
+        const body = steer ? (r.interrupted ? `Cycle ${d.cycle} is interrupted; a fresh cycle replans around it now.` : 'The next cycle replans around it first.') : closed ? 'The card is back in Todo for the next cycle.' : d.run_finished ? 'This goal is finished: press "Follow up" to have it handled (no time box).' : 'The next cycle reads it.';
         toast({ kind: 'info', title: `${c.id}: comment sent`, body, ms: 5000 });
       })
       .finally(() => setBusy(false));
@@ -968,8 +653,8 @@ function CardDetail({ d, c, onClose }) {
     const why = prompt(`Cut ${c.id}? Say why (the orchestrator reads it).`, '');
     if (why?.trim()) postCard(d, c.id, { column: 'done', cut: why.trim() });
   };
-  return html`<div class="kdetail" ref=${ref} aria-label=${`Card ${c.id}`}>
-    <div class="kd-head"><span class="id">${c.id}</span>${c.milestone && html`<span class="chip">${c.milestone}</span>`}${c.assignee && html`<${Agent} name=${c.assignee} />`}
+  return html`<div class="panel kdetail" ref=${ref} aria-label=${`Card ${c.id}`}>
+    <div class="kd-head"><span class="id">${c.id}</span>${c.milestone && html`<span class="chip">${c.milestone}</span>`}${c.priority && html`<span class=${`prio ${c.priority}`}>${c.priority}</span>`}${c.assignee && html`<${Agent} name=${c.assignee} />`}
       <span class="faint">from ${SRC_LABEL[c.src] ?? c.src} · ${ago(c.created_at)}${c.cycle ? ` · last touched in c${c.cycle}` : ''}</span>
       <button class="btn small ghost close" onClick=${onClose} aria-label="Close the card">✕</button></div>
     ${editing
@@ -1014,10 +699,11 @@ function CardDetail({ d, c, onClose }) {
 }
 
 /** New cards land in the backlog; the next cycle triages them (or replans around them first, when steering). */
-function AddCard({ d }) {
+function AddCard({ d, label = 'Add a card', bar }) {
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
   const running = d.state === 'running' || d.state === 'pausing';
+  const after = d.run_finished && !d.live; // after DONE or the time box, cards wait for a follow-up
   const submit = (e, steer = false) => {
     e?.preventDefault();
     if (!text.trim()) return;
@@ -1035,62 +721,546 @@ function AddCard({ d }) {
       .catch((e) => toast({ kind: 'bad', title: 'Could not add the card', body: e.message }))
       .finally(() => setBusy(false));
   };
-  return html`<form class="fb-form add-card" onSubmit=${submit}>
-    <textarea rows="2" value=${text} disabled=${busy} placeholder="Feedback or a task for the harness. It lands in the backlog, and your cards outrank the rest."
-      aria-label="New card" onInput=${(e) => setText(e.currentTarget.value)} onKeyDown=${(e) => (e.ctrlKey || e.metaKey) && e.key === 'Enter' && submit(e)}></textarea>
-    <div class="row"><span class="faint">Ctrl+Enter to send · drag cards between columns, or open one to comment</span>
-      <span class="send-btns">
-        <button type="button" class="btn small steer" disabled=${busy || !text.trim()} onClick=${(e) => submit(e, true)}
-          title=${running ? 'Interrupt the running cycle now and replan the whole board around this' : 'The next cycle replans the whole board around this before anything else'}>⚡ ${running ? 'Steer now' : 'Steer'}</button>
-        <button class="btn primary small" disabled=${busy || !text.trim()} title="Triaged at the start of the next cycle">Add to backlog</button>
-      </span></div>
+  const fid = `add-${bar ? 'bar' : 'ov'}`;
+  return html`<form class=${bar ? 'panel addcard bar' : 'addcard'} onSubmit=${submit}>
+    <label class="field-label" for=${fid}>${label}</label>
+    <div class="addrow">
+      <input id=${fid} type="text" value=${text} disabled=${busy} onInput=${(e) => setText(e.currentTarget.value)}
+        placeholder=${after ? 'e.g. a fix or a tweak you want in the follow-up' : 'Feedback or a task for the harness. Your cards outrank the rest.'} />
+      ${!after && html`<button type="button" class="btn steer" disabled=${busy || !text.trim()} onClick=${(e) => submit(e, true)}
+        title=${running ? 'Interrupt the running cycle now and replan the whole board around this' : 'The next cycle replans the whole board around this before anything else'}>⚡ ${running ? 'Steer now' : 'Steer'}</button>`}
+      <button class=${`btn ${after ? '' : 'primary'}`} disabled=${busy || !text.trim()} title="Triaged at the start of the next cycle">${after ? 'Add card' : 'Add to backlog'}</button>
+    </div>
+    ${!bar && html`<p class="faint note">${after
+      ? 'After DONE your cards wait for a follow-up: just your cards, no time box. Anything big is flagged for a new run.'
+      : `Add to backlog: the next cycle picks it up. ${running ? `Steer now: interrupts cycle ${d.cycle} (its work is kept) and replans around it.` : 'Steer: the next cycle replans around it first.'}`}</p>`}
   </form>`;
 }
 
-/** The kanban board: the backlog, then TODO → DOING → REVIEW → DONE, for one epic (a job) at a time. */
+/** Done cards, newest first: the latest few, then the rest folded by milestone. */
+function DoneLane({ list, tile }) {
+  const sorted = [...list].sort((a, b) => b.updated_at.localeCompare(a.updated_at));
+  const top = sorted.slice(0, DONE_SHOWN);
+  const groups = new Map();
+  for (const c of sorted.slice(DONE_SHOWN)) groups.set(c.milestone, [...(groups.get(c.milestone) ?? []), c]);
+  return html`${top.map(tile)}
+    ${[...groups].map(([m, cs]) => html`<details key=${m ?? '-'} class="done-group"><summary>${m ?? 'No milestone'} · ${cs.length} ${top.some((c) => c.milestone === m) ? 'more' : `card${cs.length > 1 ? 's' : ''}`}</summary><div class="lane-cards">${cs.map(tile)}</div></details>`)}`;
+}
+
+/** The kanban board: the backlog, then Todo → Doing → Review → Done, for one epic (a job) at a time. */
 function Board({ d }) {
+  const s = useStore();
   const [epic, setEpic] = useState(null);
-  const [sel, setSel] = useState(null);
+  const [ms, setMs] = useState(null);
+  const [mine, setMine] = useState(false);
   const [over, setOver] = useState(null);
-  const [allDone, setAllDone] = useState(false);
+  const [allBacklog, setAllBacklog] = useState(false);
+  const setSel = (id) => set({ cardSel: id });
   const seen = store.seenAtOpen[d.id]?.feedback_at;
-  const cur = d.epics.find((e) => e.current)?.id;
+  const cur = curEpic(d);
   const ep = epic ?? cur;
-  const cards = d.board_cards.filter((c) => c.epic === ep);
-  const selected = cards.find((c) => c.id === sel);
-  const ms = ep === cur ? (d.milestones ?? []).filter((m) => m.todo + m.doing + m.done + m.blocked + m.cut > 0) : [];
+  const all = d.board_cards.filter((c) => c.epic === ep);
+  const cards = all.filter((c) => (!ms || c.milestone === ms) && (!mine || c.src !== 'orchestrator'));
+  const selected = all.find((c) => c.id === s.cardSel);
+  const open = [...new Set(all.filter((c) => c.column !== 'done' && c.milestone).map((c) => c.milestone))].sort();
+  const now = ep === cur ? d.milestones?.find((m) => m.current)?.id : null;
+  const live = d.state === 'running' || d.state === 'pausing';
+  const tile = (c) => html`<${CardTile} key=${c.id} c=${c} selected=${s.cardSel === c.id} onSelect=${setSel} seen=${seen} live=${live} />`;
   const drop = (e, col) => {
     e.preventDefault();
     setOver(null);
-    const c = cards.find((x) => x.id === e.dataTransfer.getData('text/plain'));
+    const c = all.find((x) => x.id === e.dataTransfer.getData('text/plain'));
     if (c && c.column !== col) postCard(d, c.id, { column: col });
   };
-  return html`<section class="panel board-panel">
-    <h2>Board
-      ${d.epics.length > 1 && html`<select class="epic" value=${ep} onChange=${(e) => (setEpic(e.currentTarget.value), setSel(null))} aria-label="Epic (job)">
+  return html`${ep === cur && html`<${AddCard} d=${d} bar=${true} />`}
+    <div class="board-filters">
+      ${d.epics.length > 1 && html`<select class="epic" value=${ep} onChange=${(e) => (setEpic(e.currentTarget.value), setMs(null), setSel(null))} aria-label="Epic (job)">
         ${d.epics.map((e) => html`<option key=${e.id} value=${e.id}>${e.title}${e.current ? ' (current job)' : ''}</option>`)}
       </select>`}
-      <span class="right muted">${ep === cur && d.board?.milestone ? `milestone ${d.board.milestone}` : ''}</span></h2>
-    ${ms.length > 1 && html`<${MilestoneBar} ms=${ms} />`}
-    ${ep === cur && html`<${AddCard} d=${d} />`}
+      <span class="pills" role="group" aria-label="Milestone">
+        <button class=${!ms ? 'on' : ''} onClick=${() => setMs(null)}>All milestones</button>
+        ${open.map((m) => html`<button key=${m} class=${ms === m ? 'on' : ''} onClick=${() => setMs(ms === m ? null : m)}>${m}${m === now ? ' · now' : ''}</button>`)}
+      </span>
+      <label class="check"><input type="checkbox" checked=${mine} onChange=${(e) => setMine(e.currentTarget.checked)} /> Only my cards</label>
+      <span class="faint right hide-sm">Drag cards between columns · open one to comment</span>
+    </div>
     <div class="board">
       ${COLS.map(([k, label]) => {
         const list = cards.filter((c) => c.column === k);
-        if (k === 'done') list.reverse();
-        const shown = k === 'done' && !allDone ? list.slice(0, DONE_SHOWN) : list;
+        const shown = k === 'backlog' && !allBacklog ? list.slice(0, BACKLOG_SHOWN) : list;
         return html`<div key=${k} class=${`lane lane-${k} ${over === k ? 'over' : ''}`} onDragOver=${(e) => (e.preventDefault(), setOver(k))} onDragLeave=${() => setOver(null)} onDrop=${(e) => drop(e, k)}>
-          <h3 title=${LANE_HINT[k]}>${label} <span class="faint num">${list.length}</span></h3>
-          ${shown.map((c) => html`<${CardTile} key=${c.id} c=${c} selected=${sel === c.id} onSelect=${setSel} seen=${seen} />`)}
-          ${list.length > shown.length && html`<button class="btn small ghost" onClick=${() => setAllDone(true)}>${list.length - shown.length} more</button>`}
+          <h3 title=${LANE_HINT[k]}><span class="lane-dot"></span>${label} <span class="count num">${list.length}</span><span class="right faint">${LANE_META[k] ?? (k === 'backlog' && ms ? ms : '')}</span></h3>
+          ${k === 'done' ? html`<${DoneLane} list=${list} tile=${tile} />` : shown.map(tile)}
+          ${list.length > shown.length && html`<button class="btn small ghost dashed" onClick=${() => setAllBacklog(true)}>Show ${list.length - shown.length} more</button>`}
           ${list.length === 0 && html`<p class="empty">–</p>`}
         </div>`;
       })}
     </div>
-    ${selected && html`<${CardDetail} key=${selected.id} d=${d} c=${selected} onClose=${() => setSel(null)} />`}
+    ${selected && html`<${CardDetail} key=${selected.id} d=${d} c=${selected} onClose=${() => setSel(null)} />`}`;
+}
+
+
+// ---------------------------------------------------------------- goal detail: shared bits
+
+const TABS = [['', 'Overview'], ['board', 'Board'], ['cycles', 'Cycles'], ['time', 'Time'], ['activity', 'Activity'], ['setup', 'Setup']];
+const tabHref = (id, tab) => `#/g/${id}${tab ? `/${tab}` : ''}`;
+const FAILED = ['error', 'timeout'];
+const shortAgo = (iso) => ago(iso).replace(' ago', '');
+const curEpic = (d) => d.epics.find((e) => e.current)?.id;
+const epicCards = (d) => d.board_cards.filter((c) => c.epic === curEpic(d));
+
+/** Failed cycles at the end of the list (the streak that stopped the run). */
+function failedStreak(cycles) {
+  let i = cycles.length;
+  while (i > 0 && FAILED.includes(cycles[i - 1].exit)) i--;
+  return cycles.slice(i);
+}
+
+/** The cycle that was running at `iso`, for grouping commits and events. */
+const cycleAt = (d, iso) => d.cycles_detail.find((r) => r.started_at <= iso && iso <= r.ended_at)?.cycle ?? null;
+
+function cacheReadShare(d) {
+  let read = 0;
+  let all = 0;
+  for (const models of [...d.cycles_detail.map((r) => r.models), d.live_usage?.models ?? {}]) for (const u of Object.values(models)) {
+    read += u.cache_read;
+    all += u.input + u.cache_read + u.cache_write;
+  }
+  return all ? read / all : null;
+}
+
+function selectCycle(d, n, toggle = true) {
+  if (toggle && store.selectedCycle === n) return set({ selectedCycle: null, cycleView: null });
+  set({ selectedCycle: n, cycleView: null });
+  api.get(`/api/goals/${d.id}/cycles/${n}`).then((cycleView) => set({ cycleView })).catch(() => {});
+}
+const openCycle = (d, n) => (e) => {
+  e.preventDefault();
+  selectCycle(d, n, false);
+  location.hash = tabHref(d.id, 'cycles');
+};
+const openCard = (d, id) => (e) => {
+  e.preventDefault();
+  set({ cardSel: id });
+  location.hash = tabHref(d.id, 'board');
+};
+
+/** [busy, act]: a control action with its toast, then a refresh. */
+function useAct(d) {
+  const [busy, setBusy] = useState(false);
+  const act = (action, extra = {}, confirmText) => {
+    if (confirmText && !confirm(confirmText)) return;
+    setBusy(true);
+    api
+      .post(`/api/goals/${d.id}/control`, { action, ...extra })
+      .then(() => toast({ kind: 'info', title: extra.follow_up ? 'Starting a follow-up…' : { start: 'Starting…', pause: 'Pause requested', stop: 'Stopping…', extend: 'Time box extended', reset: 'Clock reset' }[action], body: d.name, ms: 3500 }))
+      .catch((e) => toast({ kind: 'bad', title: `Could not ${action}`, body: e.message }))
+      .finally(() => {
+        setBusy(false);
+        loadState();
+        loadDetail();
+      });
+  };
+  return [busy, act];
+}
+
+const newRunText = (d) =>
+  d.done_marker
+    ? 'This goal is done. Start a new run?\n\nA new run gets a fresh time box and spends tokens. The orchestrator only finds work if you added cards since.'
+    : 'The time box is over. Start a new run with a fresh time box?\n\nTo continue this run instead, cancel and use +30m / +1h / +2h.';
+const STOP_TEXT = 'Stop now? The current cycle is interrupted; the next start recovers its work.';
+const RESET_TEXT = 'Reset the clock? The next start begins a new run with the time box from goal.json.';
+
+function Extend({ d, busy, act }) {
+  return html`<span class="btn-group" role="group" aria-label="Extend the time box">
+    ${[['+30m', 1800], ['+1h', 3600], ['+2h', 7200]].map(([l, s]) => html`<button key=${l} class="btn small" disabled=${busy} onClick=${() => act('extend', { seconds: s })} title="Extend the time box">${l}</button>`)}
+  </span>`;
+}
+
+function FollowUpButton({ d, busy, act }) {
+  const fu = d.followup_items;
+  return html`<button class="btn primary" disabled=${busy} onClick=${() => act('start', { follow_up: true })}
+    title="Handle just your open cards and comments, with no time box. Minor items are fixed in place; anything that needs a restart or a new version is flagged for a new run instead.">▶ Follow up on ${fu} card${fu > 1 ? 's' : ''}</button>`;
+}
+
+/** One activity step: time, agent, tool and summary. */
+function Step({ a, fresh }) {
+  return html`<li class="kind-${a.kind} ${fresh ? 'fresh' : ''}">
+    <time>${clockTime(a.ts)}</time>
+    <${Agent} name=${a.agent} />
+    <span class="what" title=${a.summary}>${a.tool && html`<span class="tool">${a.tool}</span>`}${a.kind === 'agent.start' ? '▶ ' : a.kind === 'agent.end' ? '■ ' : ''}${a.summary}</span>
+  </li>`;
+}
+
+// ---------------------------------------------------------------- goal detail: header and tabs
+
+function MoreMenu({ d }) {
+  const [busy, act] = useAct(d);
+  const close = (e) => (e.currentTarget.closest('details').open = false);
+  return html`<details class="menu">
+    <summary class="btn icon" aria-label="More actions">⋯</summary>
+    <div class="menu-list" onClick=${close}>
+      ${d.job.n > 1 && html`<a href=${`/goals/${d.id}/report.html?job=all`} target="_blank" rel="noopener">Report: all jobs ↗</a>`}
+      <a href=${tabHref(d.id, 'setup')}>Setup and run settings</a>
+      ${!d.live && d.clock && html`<button disabled=${busy} onClick=${() => act('reset', {}, RESET_TEXT)}>Reset clock…</button>`}
+    </div>
+  </details>`;
+}
+
+function GoalHead({ d, tab }) {
+  const [busy, act] = useAct(d);
+  const overview = !tab;
+  const a = d.goal.adapter;
+  return html`<a class="back" href="#/">‹ All goals</a>
+    <div class="ghead">
+      <div class="ghead-main">
+        <div class="title"><h1>${d.name}</h1><${StatePill} state=${d.state} />${d.mode && html`<span class="chip ${d.mode}">${d.mode}</span>`}</div>
+        <div class="meta">
+          <span>run <b>${d.run ?? '–'}</b> · cycle <b class="num">${d.cycle || '–'}</b>${d.round ? html` · round <b>${d.round}</b>` : ''}</span>
+          ${d.job.named && html`<span>job <b>${d.job.title}</b>${d.job.n > 1 ? ` · ${d.job.n} of ${d.job.n}` : ''}</span>`}
+          <span>${[a.model && shortModel(a.model), a.effort].filter(Boolean).join(' · ')}</span>
+        </div>
+        ${overview && html`<p class="objective" title=${d.objective}>${d.objective}</p>`}
+      </div>
+      <div class="ghead-actions">
+        <a class="btn" href=${`/goals/${d.id}/report.html${d.job_scope === 'all' ? '?job=all' : ''}`} target="_blank" rel="noopener">Report</a>
+        <${OutputLink} o=${d.output} />
+        <${MoreMenu} d=${d} />
+      </div>
+    </div>
+    <${ClockBar} g=${d} big=${overview} extra=${d.live && d.clock && !d.clock.followup && html`<${Extend} d=${d} busy=${busy} act=${act} />`} />
+    <${Tabs} d=${d} tab=${tab} />`;
+}
+
+function Tabs({ d, tab }) {
+  const cards = epicCards(d).length;
+  const failed = d.live ? 0 : failedStreak(d.cycles_detail).length;
+  const seen = store.seenAtOpen[d.id]?.events_at;
+  const fresh = seen && d.events.some((e) => e.ts > seen && e.src !== 'user' && ['milestone', 'blocked', 'needs_you', 'done', 'warn', 'run.end'].includes(e.type));
+  const count = { board: cards || null, cycles: d.cycles || null };
+  return html`<nav class="tabs" aria-label="Goal sections">
+    ${TABS.map(([k, label]) => html`<a key=${k} href=${tabHref(d.id, k)} class=${tab === k ? 'on' : ''} aria-current=${tab === k ? 'page' : undefined}>
+      ${label}${k === 'cycles' && failed ? html`<span class="count bad">${failed} failed</span>` : count[k] ? html`<span class="count">${count[k]}</span>` : ''}${k === 'activity' && fresh ? html`<span class="new-dot" title="new since you last looked"></span>` : ''}
+    </a>`)}
+    <span class="spacer"></span>
+    <${JobToggle} d=${d} />
+  </nav>`;
+}
+
+/** With several jobs: whether the numbers (and the Report button) cover this job or all of them. */
+function JobToggle({ d }) {
+  if (d.job.n < 2) return null;
+  const scope = (s) => {
+    if (s === store.jobScope) return;
+    set({ jobScope: s, selectedCycle: null, cycleView: null });
+    loadDetail();
+  };
+  return html`<span class="seg-toggle" role="group" aria-label="Which jobs the numbers cover">
+    <button class=${d.job_scope !== 'all' ? 'on' : ''} onClick=${() => scope('job')}>This job</button><button class=${d.job_scope === 'all' ? 'on' : ''} onClick=${() => scope('all')}>All jobs</button>
+  </span>`;
+}
+
+// ---------------------------------------------------------------- status band
+
+function bandKind(d) {
+  if (d.needs || (!d.live && d.board_cards.some(pendingApproval))) return 'needs';
+  if (d.state === 'rate_limited' || d.state === 'cooldown') return 'limited';
+  if (d.live) return 'running';
+  if (d.state === 'done') return 'done';
+  if (d.state === 'failed' || d.state === 'crashed' || FAILED.includes(d.cycles_detail.at(-1)?.exit)) return 'trouble';
+  if (d.state === 'timeboxed') return 'timeboxed';
+  if (d.cycles === 0) return 'first';
+  return 'paused';
+}
+
+function Band({ kind, icon, title, sub, actions, children }) {
+  return html`<section class="band ${kind}" aria-live="polite">
+    <div class="band-head">
+      ${icon && html`<span class="band-ico" aria-hidden="true">${icon}</span>`}
+      <b class="band-title">${title}</b>
+      ${sub && html`<span class="band-sub">${sub}</span>`}
+      <span class="band-actions">${actions}</span>
+    </div>
+    ${children}
   </section>`;
 }
 
-/** Backlog progress split by milestone: one segment per milestone, width by task count, filled by state. */
+function StatusBand({ d }) {
+  const kind = bandKind(d);
+  const pending = d.board_cards.filter(pendingApproval);
+  const B = { needs: NeedsBand, limited: LimitedBand, running: RunningBand, done: DoneBand, trouble: TroubleBand, timeboxed: TimeboxedBand, first: FirstBand, paused: PausedBand }[kind];
+  return html`<${B} d=${d} />
+    ${kind !== 'needs' && pending.length > 0 && html`<${Approvals} d=${d} pending=${pending} strip=${true} />`}`;
+}
+
+function Approvals({ d, pending, strip }) {
+  return html`<div class=${strip ? 'band-strip' : ''}>
+    <h3 class="micro">${strip ? html`<span class="flagmark" aria-hidden="true">⚑</span> Approval needed · the run keeps working on other cards meanwhile` : `Needs your approval · ${pending.length}`}</h3>
+    <ul class="approvals">${pending.map((c) => html`<li key=${c.id}>
+      <div class="ap-head"><span class="id">${c.id}</span><span class="kind approval">approval</span>${c.approval.text !== c.title && html`<span class="chip" title=${c.title}>${c.title}</span>`}<span class="faint right">${c.cycle ? `asked in c${c.cycle}` : ago(c.created_at)}</span></div>
+      <div class="approval-text">${c.approval.text}</div>
+      <${ApprovalButtons} goalId=${d.id} f=${c} />
+    </li>`)}</ul>
+  </div>`;
+}
+
+function RunningBand({ d }) {
+  const now = useNow();
+  const s = useStore();
+  const [busy, act] = useAct(d);
+  const doing = epicCards(d).filter((c) => c.column === 'doing');
+  const open = new Map();
+  for (const a of d.activity) {
+    if (a.kind === 'agent.start') open.set(a.agent, a);
+    if (a.kind === 'agent.end') open.delete(a.agent);
+  }
+  const steps = d.activity.slice(-5).reverse();
+  const running = d.state === 'running' || d.state === 'pausing';
+  const elapsed = d.cycle_started_at ? (now - Date.parse(d.cycle_started_at)) / 1000 : null;
+  const cost = d.live_usage?.cost_usd;
+  const title = d.state === 'waiting' ? `Between cycles · cycle ${d.cycle + 1} is next` : d.pause_requested ? `Pausing after cycle ${d.cycle}` : `Running cycle ${d.cycle}`;
+  const sub = running && elapsed != null ? `${dur(elapsed)} in · times out at ${d.goal.cycle.timeout_min}m${cost != null ? ` · ≈ $${cost.toFixed(2)} so far` : ''}` : d.clock?.followup ? 'follow-up · no time box' : '';
+  const ms = (d.milestones ?? []).find((m) => m.current);
+  const msN = ms && ms.todo + ms.doing + ms.done + ms.blocked + ms.cut;
+  return html`<${Band} kind="running" icon=${html`<span class="live-dot"></span>`} title=${title} sub=${sub}
+    actions=${html`<button class="btn" disabled=${busy || d.pause_requested} onClick=${() => act('pause')} title="Finish the current cycle, then pause (the clock pauses too)">‖ ${d.pause_requested ? 'Pausing after cycle' : 'Pause after cycle'}</button>
+      <button class="btn danger" disabled=${busy} onClick=${() => act('stop', {}, STOP_TEXT)}>■ Stop now</button>`}>
+    <div class="band-cols">
+      <div>
+        <h3 class="micro">Working on</h3>
+        ${doing.length === 0
+          ? html`<p class="faint">Nothing in DOING right now: the orchestrator is planning, briefing or checking.</p>`
+          : doing.map((c, i) => html`<div key=${c.id} class="working">
+              <a href=${tabHref(d.id, 'board')} onClick=${openCard(d, c.id)} class=${i === 0 ? 'band-headline' : 'working-title'}>${c.title}</a>
+              <div class="kc-head"><span class="id">${c.id}</span>${c.milestone && html`<span class="chip">${c.milestone}</span>`}${c.priority && html`<span class=${`prio ${c.priority}`}>${c.priority}</span>`}</div>
+            </div>`)}
+        ${running && html`<h3 class="micro">Agents</h3>
+          <div class="agents"><${Agent} name="orchestrator" working=${true} />${[...open.entries()].map(([a, x]) => html`<span key=${a} title=${x.summary}><${Agent} name=${a} working=${true} /></span>`)}</div>`}
+        ${ms && html`<p class="faint">${ms.id} · ${ms.done} of ${msN} cards done${ms.target_s != null ? ` · target ${dur(ms.target_s)}` : ''}</p>`}
+      </div>
+      <div>
+        <h3 class="micro">Latest steps ${d.activity_cycle ? html`<a class="right" href=${tabHref(d.id, 'cycles')} onClick=${openCycle(d, d.activity_cycle)}>All ${d.activity.length} steps →</a>` : ''}</h3>
+        ${steps.length === 0
+          ? html`<p class="faint">${running ? 'Waiting for the first step…' : 'No steps yet.'}</p>`
+          : html`<ul class="ticker" aria-live="polite">${steps.map((a, i) => html`<${Step} key=${a.ts + a.summary + i} a=${a} fresh=${s.freshActivity.has(a.ts + a.summary)} />`)}</ul>`}
+      </div>
+    </div>
+  </${Band}>`;
+}
+
+function LimitedBand({ d }) {
+  const now = useNow();
+  const [busy, act] = useAct(d);
+  const left = d.waiting_until ? Math.max(0, (Date.parse(d.waiting_until) - now) / 1000) : null;
+  const rl = d.state === 'rate_limited';
+  return html`<${Band} kind="waiting" icon="◔" title=${rl ? 'Rate-limited' : 'Cooling down after failed cycles'} sub=${left != null ? `next cycle in ${dur(left)}` : ''}
+    actions=${html`<button class="btn danger" disabled=${busy} onClick=${() => act('stop', {}, STOP_TEXT)}>■ Stop now</button>`}>
+    <p class="band-text">${rl ? 'The plan hit its usage limit. The run waits and starts the next cycle by itself; the clock is paused meanwhile.' : 'Several cycles failed in a row, so the run waits a little before trying again.'}</p>
+  </${Band}>`;
+}
+
+function NeedsBand({ d }) {
+  const [text, setText] = useState('');
+  const [busy, setBusy] = useState(false);
+  const pending = d.board_cards.filter(pendingApproval);
+  const reply = (e, withText = true) => {
+    e?.preventDefault();
+    setBusy(true);
+    const t = withText ? text.trim() : '';
+    const p = t ? api.post(`/api/goals/${d.id}/cards`, { title: t, resume: true }) : api.post(`/api/goals/${d.id}/control`, { action: 'start' }).then(() => ({ resumed: true }));
+    p.then((r) => {
+      setText('');
+      toast({ kind: 'info', title: r.resumed ? 'Resuming' : r.id ? `${r.id} added` : 'Sent', body: r.problem ? `Not resumed: ${r.problem}` : d.name, ms: 4000 });
+    })
+      .catch((err) => toast({ kind: 'bad', title: 'Could not resume', body: err.message }))
+      .finally(() => {
+        setBusy(false);
+        loadState();
+        loadDetail();
+      });
+  };
+  const sub = d.needs ? `paused after cycle ${d.cycle} · ${ago(d.needs.since)} · the clock is stopped until you answer` : 'the run is stopped; answering the last approval resumes it';
+  return html`<${Band} kind="needs" icon="⚑" title=${d.needs ? 'Waiting for you' : 'Approval needed'} sub=${sub}>
+    <div class=${d.needs && pending.length ? 'band-cols' : ''}>
+      ${d.needs && html`<form onSubmit=${reply}>
+        <h3 class="micro">The orchestrator asks</h3>
+        <p class="band-headline">${d.needs.reason}</p>
+        <label class="field-label" for="needs-reply">Your answer</label>
+        <textarea id="needs-reply" rows="2" value=${text} disabled=${busy} placeholder="It becomes a card the next cycle reads first."
+          onInput=${(e) => setText(e.currentTarget.value)} onKeyDown=${(e) => (e.ctrlKey || e.metaKey) && e.key === 'Enter' && reply(e)}></textarea>
+        <div class="row"><span class="faint">${pending.length ? 'Answering the last approval also resumes the run.' : 'Ctrl+Enter to send'}</span>
+          <span class="send-btns"><button type="button" class="btn ghost" disabled=${busy} onClick=${(e) => reply(e, false)}>Resume without answering</button>
+          <button class="btn primary" disabled=${busy || !text.trim()}>▶ Send & resume</button></span></div>
+      </form>`}
+      ${pending.length > 0 && html`<${Approvals} d=${d} pending=${pending} />`}
+    </div>
+  </${Band}>`;
+}
+
+function TroubleBand({ d }) {
+  const [busy, act] = useAct(d);
+  const streak = failedStreak(d.cycles_detail);
+  const last = streak.at(-1) ?? d.cycles_detail.at(-1);
+  const note = epicCards(d).filter((c) => c.src === 'orchestrator' && c.column === 'backlog').at(-1);
+  const spent = streak.reduce((a, r) => a + (r.cost_usd ?? 0), 0);
+  const title = d.state === 'crashed' ? 'The runner crashed' : d.state === 'failed' ? 'Run stopped' : `Cycle ${last?.cycle} ended with ${last?.exit}`;
+  const headline =
+    d.state === 'crashed' ? 'The runner stopped without cleaning up' : streak.length > 1 ? `${streak.length} cycles failed in a row` : last ? `Cycle ${last.cycle}: ${last.exit}` : 'The run stopped';
+  return html`<${Band} kind="trouble" icon="⚠" title=${title} sub=${`after cycle ${d.cycle}${last ? ` · ${ago(last.ended_at)}` : ''} · the clock is paused`}
+    actions=${html`${last && html`<a class="btn" href=${tabHref(d.id, 'cycles')} onClick=${openCycle(d, last.cycle)}>See cycle ${last.cycle}'s steps</a>`}
+      <button class="btn primary" disabled=${busy} onClick=${() => act('start')}>▶ Resume</button>`}>
+    <div class=${note ? 'band-cols' : ''}>
+      <div>
+        <p class="band-headline">${headline}</p>
+        <p class="band-text">${d.state === 'crashed' ? 'The clock was paused at its last heartbeat. Resume to continue; verified work is kept.' : 'Nothing verified is lost. Check the error, fix what it needs, then resume.'}</p>
+        ${last?.error && html`<pre class="errbox"><span class="faint">c${last.cycle} · ${last.exit} after ${dur(last.duration_s)}</span>${'\n'}${last.error}</pre>`}
+        ${streak.length > 0 && html`<div class="fail-chips">${streak.map((r) => html`<a key=${r.cycle} class="kind blocked" href=${tabHref(d.id, 'cycles')} onClick=${openCycle(d, r.cycle)}>✕ c${r.cycle} · ${dur(r.duration_s)}</a>`)}
+          ${spent > 0 && html`<span class="faint">≈ $${spent.toFixed(2)} spent on failed cycles</span>`}</div>`}
+      </div>
+      ${note && html`<div>
+        <h3 class="micro">Latest agent note</h3>
+        <div class="note-card">
+          <div class="ap-head"><span class="id">${note.id}</span><span class="kind agent">agent note</span><span class="faint right">${note.cycle ? `filed in c${note.cycle}` : ago(note.created_at)}</span></div>
+          <div class="approval-text">${note.title}</div>
+          <a class="btn small" href=${tabHref(d.id, 'board')} onClick=${openCard(d, note.id)}>Open on the board</a>
+        </div>
+      </div>`}
+    </div>
+  </${Band}>`;
+}
+
+/** The done text as a headline when it's short; otherwise its first sentence, with the rest below. */
+function splitDone(text) {
+  if (!text) return ['Done', ''];
+  if (text.length <= 100) return [text, ''];
+  const m = /^(.{10,100}?[.:;])\s+(.*)$/s.exec(text);
+  return m ? [m[1], m[2]] : ['Done', text];
+}
+
+function DoneBand({ d }) {
+  const [busy, act] = useAct(d);
+  const last = d.events.findLast((e) => e.type === 'done');
+  const [headline, rest] = splitDone(last?.text);
+  const c = d.clock;
+  const spare = c && !c.followup && c.to_end > 0 ? c.timebox_s - c.active : null;
+  const out = d.output && html`<${OutputLink} o=${d.output} big=${d.followup_items === 0} />`;
+  return html`<${Band} kind="done" icon="✓" title=${`Done${last ? ` · finished ${ago(last.ts)}${last.cycle ? ` in cycle ${last.cycle}` : ''}` : ''}`}
+    actions=${html`${d.followup_items > 0 && html`<${FollowUpButton} d=${d} busy=${busy} act=${act} />`}${out}
+      <a class="btn" href=${`/goals/${d.id}/report.html`} target="_blank" rel="noopener">Read the report</a>
+      <button class="btn ghost" disabled=${busy} onClick=${() => act('start', { new_run: true }, newRunText(d))}>Start new run…</button>`}>
+    <p class="band-headline">${headline}</p>
+    ${(rest || spare != null) && html`<p class="band-text">${rest}${rest && spare != null ? ' ' : ''}${spare != null ? `Finished with ${dur(spare)} of the time box to spare.` : ''}</p>`}
+  </${Band}>`;
+}
+
+function TimeboxedBand({ d }) {
+  const [busy, act] = useAct(d);
+  return html`<${Band} kind="waiting" icon="◔" title="Time box over" sub=${`after cycle ${d.cycle}${d.clock ? ` · ${dur(d.clock.active)} active` : ''}`}
+    actions=${html`${d.followup_items > 0 && html`<${FollowUpButton} d=${d} busy=${busy} act=${act} />`}
+      ${d.clock && html`<${Extend} d=${d} busy=${busy} act=${act} />`}
+      <button class="btn" disabled=${busy} onClick=${() => act('start', { new_run: true }, newRunText(d))}>▶ Start new run…</button>`}>
+    <p class="band-text">The run used its whole time box. Extend it to continue this run, or start a new one with a fresh time box.</p>
+  </${Band}>`;
+}
+
+function PausedBand({ d }) {
+  const [busy, act] = useAct(d);
+  const title = { paused: 'Paused', stopped: 'Stopped' }[d.state] ?? 'Not running';
+  return html`<${Band} kind="idle" icon="‖" title=${title} sub=${d.cycle ? `after cycle ${d.cycle} · the clock is paused` : ''}
+    actions=${html`<button class="btn primary" disabled=${busy} onClick=${() => act('start')}>▶ ${d.clock ? 'Resume' : 'Start'}</button>`}>
+  </${Band}>`;
+}
+
+function FirstBand({ d }) {
+  const [busy, act] = useAct(d);
+  return html`<${Band} kind="idle" title="Before the first cycle" sub=${`time box ${dur(d.goal.timebox.total_min * 60)} of active time`}
+    actions=${html`<button class="btn primary" disabled=${busy} onClick=${() => act('start')}>▶ Start</button>`}>
+    <ol class="band-steps">
+      <li>Check the setup (it never starts the clock): <span class="mono">epoptes run ${d.id} --dry-run</span></li>
+      <li>Read <span class="mono">.epoptes/loop.md</span> and the board once: that's exactly what every cycle will do.</li>
+      <li>Press <b>Start</b>. The first cycle begins within seconds; this page follows it live. Pausing or stopping never loses verified work.</li>
+    </ol>
+  </${Band}>`;
+}
+
+// ---------------------------------------------------------------- overview
+
+function Overview({ d }) {
+  const kind = bandKind(d);
+  const handoff = html`<${Handoff} key="h" d=${d} />`;
+  const board = html`<${BoardSummary} key="b" d=${d} done=${kind === 'done'} />`;
+  return html`<${StatusBand} d=${d} />
+    <div class="split">
+      <div class="main-col">
+        ${kind === 'trouble' && d.activity.length > 0 && html`<${LastSteps} d=${d} />`}
+        ${kind === 'done' ? [handoff, board] : [board, handoff]}
+      </div>
+      <aside class="rail">
+        <${DoneChecks} d=${d} />
+        <${CostRail} d=${d} />
+        <${Lately} d=${d} />
+      </aside>
+    </div>`;
+}
+
+function LastSteps({ d }) {
+  const steps = d.activity.slice(-8).reverse();
+  return html`<section class="panel">
+    <h2>Cycle ${d.activity_cycle} <span class="sub">the last cycle · ${d.activity.length} steps · newest first</span>
+      <a class="right" href=${tabHref(d.id, 'cycles')} onClick=${openCycle(d, d.activity_cycle)}>All steps →</a></h2>
+    <ul class="ticker">${steps.map((a, i) => html`<${Step} key=${i} a=${a} />`)}</ul>
+  </section>`;
+}
+
+function Handoff({ d }) {
+  const [all, setAll] = useState(false);
+  const long = (d.handoff ?? '').split('\n').length > 14;
+  return html`<section class="panel">
+    <h2>Handoff <span class="sub">written by the orchestrator</span></h2>
+    ${d.handoff
+      ? html`<pre class=${`handoff ${long && !all ? 'clamp' : ''}`}><${Rich} text=${d.handoff} /></pre>
+        ${long && html`<button class="linkbtn" onClick=${() => setAll(!all)}>${all ? 'Show less' : 'Read the whole handoff'}</button>`}`
+      : html`<p class="empty">No handoff yet.</p>`}
+  </section>`;
+}
+
+const FLIGHT = [['doing', (c) => c.column === 'doing'], ['review', (c) => c.column === 'review'], ['blocked', (c) => c.column !== 'done' && (c.blocked || pendingApproval(c))], ['yours', (c) => c.column !== 'done' && c.src !== 'orchestrator']];
+
+function BoardSummary({ d, done }) {
+  const cards = epicCards(d);
+  const n = (col) => cards.filter((c) => c.column === col).length;
+  const closed = cards.filter((c) => c.column === 'done');
+  const cut = closed.filter((c) => c.cut).length;
+  const seen = new Set();
+  const rows = [];
+  for (const [tag, f] of FLIGHT) for (const c of cards) if (f(c) && !seen.has(c.id)) (seen.add(c.id), rows.push([tag, c]));
+  const recent = [...closed].sort((a, b) => b.updated_at.localeCompare(a.updated_at)).slice(0, 3);
+  const ms = (d.milestones ?? []).filter((m) => m.todo + m.doing + m.done + m.blocked + m.cut > 0);
+  const inFlight = n('doing') + n('review');
+  return html`<section class="panel">
+    <h2>Board <span class="sub">${closed.length} of ${cards.length} cards done${cut ? ` · ${cut} cut` : ''}${done ? (inFlight ? '' : ' · nothing in flight') : d.board?.milestone ? ` · milestone ${d.board.milestone}` : ''}</span>
+      <a class="right" href=${tabHref(d.id, 'board')}>Open board ›</a></h2>
+    ${ms.length > 0 && html`<${MilestoneBar} ms=${ms} />`}
+    ${!done && cards.length > 0 && html`<div class="colcounts">${COLS.map(([k, l]) => html`<a key=${k} href=${tabHref(d.id, 'board')} class=${`cc ${k}`}><span>${l}</span><b class="num">${n(k)}</b></a>`)}</div>`}
+    ${done
+      ? recent.length > 0 && html`<h3 class="micro">Last cards closed</h3><ul class="rows closed">${recent.map((c) => html`<${CardRow} key=${c.id} d=${d} c=${c} />`)}</ul>`
+      : rows.length > 0 && html`<h3 class="micro">In flight and yours</h3><ul class="rows">${rows.slice(0, 6).map(([tag, c]) => html`<${CardRow} key=${c.id} d=${d} c=${c} tag=${tag} />`)}</ul>`}
+    ${cards.length === 0 && html`<p class="empty">No cards yet: the first cycle plans the board.</p>`}
+    <${AddCard} d=${d} label=${done ? 'Feedback for a follow-up' : 'Add a card'} />
+  </section>`;
+}
+
+function CardRow({ d, c, tag }) {
+  return html`<li>
+    ${tag && html`<span class=${`tag ${tag}`}>${tag}</span>`}
+    <span class="id">${c.id}</span>
+    <span class="prio-slot">${c.priority && html`<span class=${`prio ${c.priority}`}>${c.priority}</span>`}</span>
+    <a class="row-title" href=${tabHref(d.id, 'board')} onClick=${openCard(d, c.id)}>${c.milestone ? `${c.milestone} · ` : ''}${c.title}${tag === 'yours' || tag === 'blocked' ? html`<span class="faint"> · ${c.blocked ? `blocked: ${c.blocked}` : pendingApproval(c) ? 'waits for your approval' : c.column}</span>` : ''}</a>
+    ${!tag && c.cycle && html`<span class="faint">c${c.cycle}</span>`}
+  </li>`;
+}
+
+/** Board progress split by milestone: one segment per milestone, width by card count, filled by state. */
 function MilestoneBar({ ms }) {
   return html`<div class="ms-bar" role="list" aria-label="Progress by milestone">
     ${ms.map((m) => {
@@ -1099,92 +1269,411 @@ function MilestoneBar({ ms }) {
       const tip = `${m.id} ${m.title}${m.target_s != null ? ` (target ${dur(m.target_s)})` : ''}\n${m.done} done · ${m.doing} in progress · ${m.blocked} blocked · ${m.cut} cut · ${m.todo} to do${m.reached ? `\nreached ${ago(m.reached.at)}` : ''}`;
       return html`<div key=${m.id} role="listitem" class="ms-seg ${m.current ? 'current' : ''}" style=${{ flexGrow: n }} title=${tip}>
         <div class="progress"><span class="done" style=${{ flexGrow: m.done }}></span><span class="doing" style=${{ flexGrow: m.doing }}></span><span class="blocked" style=${{ flexGrow: m.blocked }}></span><span class="cut" style=${{ flexGrow: m.cut }}></span><span style=${{ flexGrow: m.todo }}></span></div>
-        <div class="ms-name"><b>${m.id}</b> ${finished ? '✓' : `${m.done}/${n}`}</div>
+        <div class="ms-name"><b>${m.id}</b> ${finished ? `done${m.cut ? ` · ${m.cut} cut` : ''}` : `${m.done}/${n}${m.current ? ' · now' : ''}${m.blocked ? ` · ${m.blocked} blocked` : ''}`}</div>
       </div>`;
     })}
   </div>`;
 }
 
+const VERIFY = { command: (v) => html`runs <span class="mono">${v.run}</span>`, file: (v) => html`file <span class="mono">${v.path}</span>`, agent: () => 'reviewed by an agent', manual: () => 'checked by you' };
+
+/** The done criteria. Epoptes doesn't run them itself (yet), so there's no pass/fail to show; agent checks get the latest scores. */
+function DoneChecks({ d }) {
+  const sc = d.scores;
+  return html`<section class="rail-sec">
+    <h3 class="micro">Done checks <span class="right" title="Epoptes doesn't run these checks itself yet; the orchestrator runs them and calls DONE.">${d.done_marker ? 'the orchestrator called DONE' : 'run by the orchestrator'}</span></h3>
+    <ul class="checks">${d.goal.done.map((x) => html`<li key=${x.id}>
+      <span class=${`ck ${d.done_marker ? 'ok' : ''}`} aria-hidden="true">${d.done_marker ? '✓' : '–'}</span>
+      <div><div class="ck-text"><b>${x.id}</b> · ${x.check}</div>
+        <div class="faint">${VERIFY[x.verify.type]?.(x.verify) ?? x.verify.type}</div>
+        ${x.verify.type === 'agent' && sc && html`<div class="score-chips">${Object.entries(sc.scores).map(([k, v]) => html`<span key=${k} class="chip">${k} <b>${v ?? '–'}</b></span>`)}<span class="faint">${sc.cycle ? `scored in c${sc.cycle}` : 'latest scores'}</span></div>`}
+      </div>
+    </li>`)}</ul>
+  </section>`;
+}
+
+function CostRail({ d }) {
+  const share = cacheReadShare(d);
+  const recent = d.cycles_detail.slice(-12);
+  const max = Math.max(0.0001, ...recent.map((r) => r.cost_usd ?? 0), d.live_usage?.cost_usd ?? 0);
+  const failed = recent.filter((r) => FAILED.includes(r.exit)).length;
+  const running = d.cycle_started_at && !d.cycles_detail.some((r) => r.cycle === d.cycle);
+  const flagged = recent.filter((r) => r.flagged).length;
+  return html`<section class="rail-sec">
+    <h3 class="micro">Cost <a class="right" href=${tabHref(d.id, 'cycles')}>Cycles →</a></h3>
+    <div class="big-money"><${Money} usd=${d.cycles || d.live_usage?.cost_usd != null ? d.cost_usd : null} basis=${d.cost_basis} /> <span class="faint">${d.cost_basis === 'billed' ? 'billed' : 'API-equivalent estimate'}${running ? ', incl. the running cycle' : ''}</span></div>
+    <p class="faint">${d.cycles} cycle${d.cycles === 1 ? '' : 's'}${d.cost_median ? ` · median ≈ $${d.cost_median.toFixed(2)}` : ''}${share != null ? ` · cache read ${pct(share)}` : ''}</p>
+    ${recent.length > 0 && html`<a class="minibars" href=${tabHref(d.id, 'cycles')} aria-label="Cost of recent cycles">
+      ${recent.map((r) => html`<span key=${r.cycle} class=${`mb ${r.exit}`} style=${{ height: `${Math.max(6, ((r.cost_usd ?? 0) / max) * 100)}%`, flexGrow: Math.max(1, r.duration_s) }} title=${`c${r.cycle} · ${r.exit} · ${dur(r.duration_s)} · ${r.cost_usd != null ? `$${r.cost_usd.toFixed(2)}` : '–'}`}></span>`)}
+      ${running && html`<span class="mb running" style=${{ height: `${Math.max(6, ((d.live_usage?.cost_usd ?? 0) / max) * 100)}%`, flexGrow: Math.max(1, (Date.now() - Date.parse(d.cycle_started_at)) / 1000) }}></span>`}
+    </a>
+    <div class="mb-labels"><span>c${recent[0].cycle}</span><span>${failed ? `${failed} failed` : `all ok${flagged ? '' : ' · none over 2× median'}`}</span><span>${running ? `c${d.cycle} now` : `c${recent.at(-1).cycle}`}</span></div>`}
+  </section>`;
+}
+
+const LATELY_ICON = { milestone: '★', done: '✓', needs_you: '⚑', blocked: '⊘', 'run.end': '✕', commit: '⌥' };
+
+/** Milestones, done, needs-you and failures, merged with commits by time. */
+function Lately({ d }) {
+  const events = d.events
+    .filter((e) => ['milestone', 'done', 'needs_you', 'blocked'].includes(e.type) || (e.type === 'run.end' && ['failed', 'crashed'].includes(e.reason)))
+    .map((e) => ({ ts: e.ts, cycle: e.cycle, t: e.type, text: feedText(e) }));
+  const commits = d.commits.map((c) => ({ ts: c.at, cycle: cycleAt(d, c.at), t: 'commit', hash: c.hash, text: c.subject }));
+  const items = [...events, ...commits].sort((a, b) => b.ts.localeCompare(a.ts)).slice(0, 6);
+  return html`<section class="rail-sec">
+    <h3 class="micro">Lately <a class="right" href=${tabHref(d.id, 'activity')}>Activity →</a></h3>
+    ${items.length === 0
+      ? html`<p class="empty">Nothing yet.</p>`
+      : html`<ul class="lately">${items.map((x, i) => html`<li key=${i} class=${`t-${x.t.replace('.', '-')}`}>
+          <span class="ico" aria-hidden="true">${LATELY_ICON[x.t]}</span>
+          <span class="txt">${x.hash && html`<span class="hash">${x.hash}</span> `}${x.text}</span>
+          <span class="when" title=${new Date(x.ts).toLocaleString()}>${x.cycle ? `c${x.cycle} · ` : ''}${shortAgo(x.ts)}</span>
+        </li>`)}</ul>`}
+  </section>`;
+}
+
+// ---------------------------------------------------------------- cycles tab
+
+function CyclesTab({ d }) {
+  const s = useStore();
+  const all = d.cycles_detail;
+  useEffect(() => {
+    if (!store.selectedCycle && all.length) selectCycle(d, all.at(-1).cycle, false);
+  }, []);
+  const share = cacheReadShare(d);
+  const failed = all.filter((r) => FAILED.includes(r.exit)).length;
+  const durs = all.map((r) => r.duration_s).sort((a, b) => a - b);
+  const medDur = durs.length ? durs[Math.floor(durs.length / 2)] : null;
+  return html`<div class="sumrow">
+      <div><span>Total</span><b><${Money} usd=${all.length || d.live_usage?.cost_usd != null ? d.cost_usd : null} basis=${d.cost_basis} /></b></div>
+      <div><span>Cycles</span><b class="num">${all.length} <small class=${failed ? 'bad' : 'ok'}>${all.length ? (failed ? `${failed} failed` : 'all ok') : ''}</small></b></div>
+      <div><span>Median cycle</span><b><${Money} usd=${d.cost_median || null} basis=${d.cost_basis} />${medDur != null ? html` <small>· ${dur(medDur)}</small>` : ''}</b></div>
+      <div><span>Cache read</span><b class="num">${share != null ? pct(share) : '–'}</b></div>
+      <div><span>Over 2× median</span><b class="num">${all.filter((r) => r.flagged).length}</b></div>
+    </div>
+    <${CostChart} d=${d} />
+    <div class="split">
+      <div class="main-col"><${CycleTable} d=${d} /></div>
+      ${s.selectedCycle && html`<aside class="rail wide"><${CycleDetail} d=${d} /></aside>`}
+    </div>`;
+}
+
+/** A round axis step for `max` dollars: 0.05, 0.1, 0.25, 0.5, 1, 2, 5… */
+function niceStep(max) {
+  const raw = max / 4;
+  const p = 10 ** Math.floor(Math.log10(raw));
+  return [1, 2, 2.5, 5, 10].map((m) => m * p).find((x) => x >= raw);
+}
+
+function CostChart({ d }) {
+  const s = useStore();
+  const now = useNow();
+  const known = useRef(null);
+  const results = d.cycles_detail;
+  const waits = new Map();
+  for (const e of d.events) if (e.type === 'wait' && e.reason !== 'between_cycles' && e.cycle) waits.set(e.cycle, [...(waits.get(e.cycle) ?? []), e]);
+  const live = d.live_usage?.cost_usd ?? 0;
+  const max = Math.max(0.01, ...results.map((r) => r.cost_usd ?? 0), live);
+  const step = niceStep(max);
+  const top = Math.ceil(max / step) * step;
+  const ticks = Array.from({ length: Math.round(top / step) + 1 }, (_, i) => i * step);
+  const h = (usd) => `${Math.max(2, ((usd ?? 0) / top) * 100)}%`;
+  const segs = [];
+  for (const r of results) {
+    segs.push({ key: `c${r.cycle}`, kind: 'cycle', r });
+    for (const w of waits.get(r.cycle) ?? []) segs.push({ key: `w${w.ts}`, kind: 'wait', w });
+  }
+  const running = d.cycle_started_at && !results.some((r) => r.cycle === d.cycle);
+  if (running) segs.push({ key: `c${d.cycle}`, kind: 'running', elapsed: (now - Date.parse(d.cycle_started_at)) / 1000 });
+  // Only segments that weren't there on the previous render animate in.
+  const prev = known.current;
+  const keys = new Set(segs.map((x) => x.key));
+  useEffect(() => {
+    known.current = keys;
+  });
+  const runs = new Set(results.map((r) => r.run));
+  const models = new Set(results.flatMap((r) => Object.keys(r.models)));
+  const money = (x) => (x == null ? '–' : `${d.cost_basis === 'estimate' ? '≈ ' : ''}$${x.toFixed(2)}`);
+  return html`<section class="panel">
+    <h2>Cost per cycle <span class="sub">bar width is duration${runs.size === 1 ? ` · run ${[...runs][0]}` : ''}${models.size === 1 ? ` · all on ${shortModel([...models][0])}` : ''}</span>
+      <span class="legend right"><span><i class="ok"></i>ok</span><span><i class="bad"></i>error or timeout</span><span><i class="idle"></i>interrupted</span><span><i class="wait"></i>rate-limit wait</span><span><i class="med"></i>median</span></span></h2>
+    ${segs.length === 0
+      ? html`<p class="empty">No cycles yet.</p>`
+      : html`<div class="chart">
+          <div class="yaxis" aria-hidden="true">${ticks.map((t) => html`<span key=${t} style=${{ bottom: `${(t / top) * 100}%` }}>$${t.toFixed(step < 0.1 ? 2 : step < 1 ? 2 : 0)}</span>`)}</div>
+          <div class="plot">
+            ${ticks.map((t) => html`<span key=${t} class="grid-line" style=${{ bottom: `${(t / top) * 100}%` }}></span>`)}
+            ${d.cost_median > 0 && html`<span class="median-line" style=${{ bottom: `${(d.cost_median / top) * 100}%` }}><span>median ${money(d.cost_median)}</span></span>`}
+            <div class="bars" role="list" aria-label="Cycles">
+              ${segs.map((x) => {
+                const enter = prev && !prev.has(x.key) ? 'enter' : '';
+                if (x.kind === 'wait') return html`<div key=${x.key} role="listitem" class="bar-col"><div class="seg wait ${enter}" style=${{ height: '30%' }} title=${`${x.w.reason === 'rate_limit' ? 'Rate-limit wait' : 'Cooldown'}: ${dur(x.w.seconds)}`}></div><span class="xl"></span></div>`;
+                if (x.kind === 'running') {
+                  return html`<div key=${x.key} role="listitem" class="bar-col" style=${{ flexGrow: Math.max(30, x.elapsed) }}>
+                    <div class="seg running ${enter} ${s.selectedCycle === d.cycle ? 'selected' : ''}" style=${{ height: h(live) }} title=${`Cycle ${d.cycle}: running for ${dur(x.elapsed)}`} onClick=${() => selectCycle(d, d.cycle)}></div>
+                    <span class="xl">c${d.cycle}</span></div>`;
+                }
+                const r = x.r;
+                const tip = `Cycle ${r.cycle} (${r.run}) · ${r.exit}\n${dur(r.duration_s)} · ${r.turns ?? '?'} turns · ${money(r.cost_usd)}${r.flagged ? '\n⚠ costs more than twice the median cycle' : ''}\n${Object.entries(r.models).map(([m, u]) => `${shortModel(m)}: in ${tokens(u.input)} · out ${tokens(u.output)} · cache read ${tokens(u.cache_read)} · write ${tokens(u.cache_write)}`).join('\n')}`;
+                return html`<div key=${x.key} role="listitem" class="bar-col" style=${{ flexGrow: Math.max(30, r.duration_s) }}>
+                  <div class="seg ${r.exit} ${enter} ${s.selectedCycle === r.cycle ? 'selected' : ''}" title=${tip} onClick=${() => selectCycle(d, r.cycle)} style=${{ height: h(r.cost_usd) }}>${r.flagged && html`<span class="flag" aria-label="expensive">⚠</span>`}</div>
+                  <span class=${`xl ${s.selectedCycle === r.cycle ? 'on' : ''}`}>c${r.cycle}</span></div>`;
+              })}
+            </div>
+          </div>
+        </div>`}
+  </section>`;
+}
+
+function CycleTable({ d }) {
+  const s = useStore();
+  const rows = [...d.cycles_detail].reverse();
+  const [all, setAll] = useState(false);
+  const shown = all ? rows : rows.slice(0, 20);
+  if (!rows.length) return null;
+  const perRun = new Set(rows.map((r) => r.run)).size > 1;
+  const perModel = new Set(rows.flatMap((r) => Object.keys(r.models))).size > 1;
+  const sum = (r, k) => Object.values(r.models).reduce((a, u) => a + u[k], 0);
+  return html`<section class="panel">
+    <h2>All cycles <span class="sub">newest first · pick one to see its steps</span></h2>
+    <div class="table-wrap"><table>
+      <thead><tr><th>#</th>${perRun && html`<th>run</th>`}<th>exit</th><th class="r">time</th><th class="r">turns</th>${perModel && html`<th>models</th>`}<th class="r">output</th><th class="r">cache read</th><th class="r">cost</th></tr></thead>
+      <tbody>
+        ${shown.map((r) => {
+          const share = cacheShare(r);
+          const tip = Object.entries(r.models).map(([m, u]) => `${shortModel(m)}: input ${tokens(u.input)} · output ${tokens(u.output)} · cache read ${tokens(u.cache_read)} · cache write ${tokens(u.cache_write)}${u.cost_usd != null ? ` · $${u.cost_usd.toFixed(2)}` : ''}`).join('\n');
+          return html`<tr key=${r.cycle} title=${tip} class="clickable ${r.flagged ? 'flagged' : ''} ${s.selectedCycle === r.cycle ? 'selected' : ''}" onClick=${() => selectCycle(d, r.cycle)}>
+            <td class="num"><b>${r.cycle}</b>${r.flagged ? html` <span title="costs more than twice the median cycle">⚠</span>` : ''}</td>
+            ${perRun && html`<td class="muted">${r.run}</td>`}
+            <td><span class="exit ${r.exit}">${r.exit.replace('_', ' ')}</span></td>
+            <td class="r num">${dur(r.duration_s)}</td>
+            <td class="r num">${r.turns ?? '–'}</td>
+            ${perModel && html`<td class="muted">${Object.keys(r.models).map(shortModel).join(', ')}</td>`}
+            <td class="r num">${tokens(sum(r, 'output'))}</td>
+            <td class="r num">${tokens(sum(r, 'cache_read'))}${share != null ? html` <span class="faint">· ${pct(share)}</span>` : ''}</td>
+            <td class="r"><${Money} usd=${r.cost_usd} basis=${r.cost_basis} /></td>
+          </tr>`;
+        })}
+      </tbody>
+    </table></div>
+    ${rows.length > 20 && html`<button class="btn small" onClick=${() => setAll(!all)}>${all ? 'Show recent' : `Show all ${rows.length}`}</button>`}
+    <p class="faint note">${d.cost_basis === 'estimate' ? 'Costs are API-equivalent estimates. ' : ''}Hover a row for input, output, cache read and cache write by model.</p>
+  </section>`;
+}
+
+function CycleDetail({ d }) {
+  const s = useStore();
+  const [all, setAll] = useState(false);
+  if (!s.selectedCycle) return null;
+  const v = s.cycleView;
+  const r = v?.result;
+  // The running cycle's steps stream into d.activity; a fetched view would be a stale snapshot.
+  const live = d.live && s.selectedCycle === d.activity_cycle;
+  const steps = live ? d.activity : v?.activity ?? [];
+  const total = live ? d.activity.length : v?.activity_total ?? 0;
+  const shown = [...steps].reverse().slice(0, all ? undefined : 40);
+  return html`<section class="panel cycle-detail">
+    <h2>Cycle ${s.selectedCycle} ${r ? html`<span class="exit ${r.exit}">${r.exit}</span>` : live ? html`<span class="exit ok">running</span>` : ''}
+      <button class="btn small ghost right" onClick=${() => set({ selectedCycle: null, cycleView: null })} aria-label="Close the cycle">✕</button></h2>
+    ${!v && !live
+      ? html`<p class="empty">Loading…</p>`
+      : html`${r &&
+        html`<dl class="kv">
+          ${r.error && html`<dt>error</dt><dd class="mono bad">${r.error}</dd>`}
+          <dt>time</dt><dd class="num">${dur(r.duration_s)} · ${clockTime(r.started_at)} → ${clockTime(r.ended_at)}</dd>
+          <dt>cost</dt><dd><${Money} usd=${r.cost_usd} basis=${r.cost_basis} /> · ${r.turns ?? '?'} turns</dd>
+          <dt>tokens</dt><dd class="num">${Object.entries(r.models).map(([m, u]) => html`<div key=${m}>${Object.keys(r.models).length > 1 ? `${shortModel(m)}: ` : ''}out ${tokens(u.output)} · cache read ${tokens(u.cache_read)}</div>`)}</dd>
+          ${r.session_id && html`<dt>session</dt><dd class="mono">${r.session_id}</dd>`}
+        </dl>`}
+        <h3 class="micro">Steps · ${total}</h3>
+        <ul class="ticker tall">${shown.map((a, i) => html`<${Step} key=${i} a=${a} />`)}</ul>
+        ${steps.length > shown.length && html`<button class="linkbtn" onClick=${() => setAll(true)}>Show all ${steps.length} steps</button>`}
+        ${total > steps.length && html`<p class="faint">Showing the last ${steps.length} of ${total} steps.</p>`}`}
+  </section>`;
+}
+
+function cacheShare(r) {
+  let read = 0;
+  let all = 0;
+  for (const u of Object.values(r.models)) {
+    read += u.cache_read;
+    all += u.input + u.cache_read + u.cache_write;
+  }
+  return all ? read / all : null;
+}
+
+// ---------------------------------------------------------------- time tab
+
+function TimeTab({ d }) {
+  return html`<div class="stack"><${MilestonePlan} d=${d} /><${TimeUse} d=${d} /></div>`;
+}
+
+/** Each milestone's active time until reached, against its planned target, on one time-box axis. */
+function MilestonePlan({ d }) {
+  const now = useNow();
+  const ms = (d.milestones ?? []).filter((m) => m.target_s != null);
+  if (!ms.length || !d.clock || d.clock.followup) return null;
+  const active = liveActive(d, now);
+  const box = d.clock.timebox_s;
+  const max = Math.max(box, ...ms.map((m) => m.target_s), ...ms.map((m) => m.reached?.active_s ?? 0));
+  const stepH = Math.max(1, Math.ceil(max / 3600 / 3));
+  const ticks = [];
+  for (let t = 0; t < max; t += stepH * 3600) ticks.push(t);
+  const x = (s) => `${Math.min(100, (s / max) * 100)}%`;
+  const reached = ms.filter((m) => m.reached);
+  const late = reached.filter((m) => m.reached.active_s != null && m.reached.active_s > m.target_s).length;
+  const sub = reached.length === 0 ? 'none reached yet' : `${reached.length} of ${ms.length} reached${late ? ` · ${late} late` : reached.every((m) => m.reached.active_s != null) ? ' · all on time' : ''}`;
+  return html`<section class="panel">
+    <h2>Milestones against the plan <span class="sub">${sub}</span></h2>
+    <div class="msplan">
+      <div class="mp-axis"><span></span><div>${ticks.map((t) => html`<span key=${t} style=${{ left: x(t) }}>${t ? `${t / 3600}h` : '0'}</span>`)}<span style=${{ left: x(box) }}>${dur(box)} box</span></div><span></span></div>
+      ${ms.map((m) => {
+        const at = m.reached ? m.reached.active_s : m.current ? active : null;
+        const diff = at != null ? m.target_s - at : null;
+        const state = m.reached ? (diff != null && diff < 0 ? 'late' : 'ontime') : m.current ? (active > m.target_s ? 'late' : 'current') : 'upcoming';
+        const text = m.reached
+          ? at != null ? html`${dur(at)} of ${dur(m.target_s)} · <span class=${state}>${diff >= 0 ? `${dur(diff)} early` : `${dur(-diff)} late`}</span>` : `reached in an earlier run · target ${dur(m.target_s)}`
+          : m.current ? html`${dur(at)} so far of ${dur(m.target_s)}${diff < 0 ? html` · <span class="late">${dur(-diff)} over</span>` : ''}` : `target ${dur(m.target_s)}`;
+        return html`<div key=${m.id} class="mp-row" title=${`${m.id} ${m.title}`}>
+          <b>${m.id}</b>
+          <div class="mp-track">${at != null && html`<span class=${`mp-bar ${state}`} style=${{ width: x(at) }}></span>`}<span class="mp-target" style=${{ left: x(m.target_s) }}></span></div>
+          <span class="mp-text">${text}</span>
+        </div>`;
+      })}
+    </div>
+    <div class="legend"><span><i class="ok"></i>active time until reached</span><span><i class="tick"></i>planned target</span></div>
+  </section>`;
+}
+
+// ---------------------------------------------------------------- activity tab
+
+function ActivityTab({ d }) {
+  return html`<div class="split">
+    <div class="main-col"><${Feed} d=${d} /></div>
+    <aside class="rail wide"><${Checkpoints} d=${d} /></aside>
+  </div>`;
+}
+
+/** Items grouped by cycle, newest first; `key` gives each item's cycle. */
+function byCycle(items, key) {
+  const groups = [];
+  for (const x of items) {
+    const c = key(x);
+    if (groups.at(-1)?.cycle !== c) groups.push({ cycle: c, items: [] });
+    groups.at(-1).items.push(x);
+  }
+  return groups;
+}
+
+function Feed({ d }) {
+  const [filter, setFilter] = useState('all');
+  const [more, setMore] = useState(false);
+  const groups = {
+    all: (e) => !['cycle.start', 'round'].includes(e.type) && !(e.type === 'cycle.end' && e.exit === 'ok') && !(e.type === 'wait' && e.reason === 'between_cycles'),
+    milestones: (e) => ['milestone', 'done', 'artifact', 'wrapup'].includes(e.type),
+    problems: (e) => ['blocked', 'warn', 'needs_you'].includes(e.type) || (e.type === 'cycle.end' && e.exit !== 'ok') || (e.type === 'wait' && e.reason !== 'between_cycles'),
+    notes: (e) => e.type === 'note',
+  };
+  const items = d.events.filter(groups[filter]).reverse();
+  const cycles = byCycle(items, (e) => e.cycle ?? null);
+  const shown = more ? cycles : cycles.slice(0, 4);
+  const seen = store.seenAtOpen[d.id]?.events_at;
+  return html`<section class="panel">
+    <h2>Events
+      <span class="feed-filter right" role="group" aria-label="Filter">${Object.keys(groups).map((k) => html`<button key=${k} class=${filter === k ? 'on' : ''} onClick=${() => setFilter(k)}>${k[0].toUpperCase() + k.slice(1)}</button>`)}</span></h2>
+    ${items.length === 0
+      ? html`<p class="empty">Nothing here yet.</p>`
+      : shown.map((g, gi) => html`<div key=${gi} class="cgroup">
+          <h3 class="micro">${g.cycle ? `Cycle ${g.cycle}` : 'Between runs'} <span class="faint">· ${ago(g.items.at(-1).ts)}</span></h3>
+          <ul class="feed">${g.items.map((e, i) => {
+            const t = e.type === 'cycle.end' ? 'fail' : e.type.startsWith('run.') ? 'run' : e.type;
+            return html`<li key=${e.ts + i} class="t-${t}">
+              <span class="ico" aria-hidden="true">${FEED_ICON[e.type] ?? '·'}</span>
+              <span>${seen && e.ts > seen && e.src !== 'user' ? html`<span class="new-dot" title="new since you last looked"></span> ` : ''}${e.type === 'note' ? html`<span class="kind">note</span> ` : ''}${feedText(e)}</span>
+              <span class="when" title=${new Date(e.ts).toLocaleString()}>${shortAgo(e.ts)}</span>
+            </li>`;
+          })}</ul>
+        </div>`)}
+    ${cycles.length > shown.length && html`<button class="btn small ghost dashed" onClick=${() => setMore(true)}>Show earlier cycles (${cycles.length - shown.length})</button>`}
+    <p class="faint note">Every tool step of a cycle lives in the <a href=${tabHref(d.id, 'cycles')}>Cycles tab</a>: pick a cycle there.</p>
+  </section>`;
+}
+
 function Checkpoints({ d }) {
   const artifacts = d.events.filter((e) => e.type === 'artifact').reverse().slice(0, 10);
-  if (!d.commits.length && !artifacts.length) return null;
+  const groups = byCycle(d.commits, (c) => cycleAt(d, c.at));
   return html`<section class="panel">
-    <h2>${d.goal.checkpoints === 'shadow' ? 'Snapshots' : 'Commits'} ${artifacts.length ? '& artifacts' : ''}</h2>
-    ${d.commits.length > 0 && html`<ul class="commits">${d.commits.map((c) => html`<li key=${c.hash}><span class="hash">${c.hash}</span><span class="s" title=${c.subject}>${c.subject}</span><span class="faint" style=${{ marginLeft: 'auto', flex: 'none' }}>${ago(c.at)}</span></li>`)}</ul>`}
-    ${artifacts.length > 0 && html`<ul class="commits" style=${{ marginTop: '10px' }}>${artifacts.map((a, i) => html`<li key=${i}><span class="hash">▤</span><span class="s mono" title=${a.text ?? ''}>${a.path}</span></li>`)}</ul>`}
+    <h2>${d.goal.checkpoints === 'shadow' ? 'Snapshots' : 'Commits'} <span class="sub">${d.commits.length ? `last ${d.commits.length} · newest first` : ''}</span></h2>
+    ${d.commits.length === 0 && html`<p class="empty">${d.goal.checkpoints === 'none' ? 'Checkpoints are off for this goal.' : 'None yet.'}</p>`}
+    ${groups.map((g, gi) => html`<div key=${gi} class="cgroup">
+      <h3 class="micro">${g.cycle ? `c${g.cycle}` : 'outside cycles'}</h3>
+      <ul class="commits">${g.items.map((c) => html`<li key=${c.hash}><span class="hash">${c.hash}</span><span class="s" title=${c.subject}>${c.subject}</span><span class="faint">${shortAgo(c.at)}</span></li>`)}</ul>
+    </div>`)}
+    ${artifacts.length > 0 && html`<h3 class="micro">Artifacts</h3><ul class="commits">${artifacts.map((a, i) => html`<li key=${i}><span class="hash">▤</span><span class="s mono" title=${a.text ?? ''}>${a.path}</span></li>`)}</ul>`}
   </section>`;
 }
 
-function About({ d }) {
+// ---------------------------------------------------------------- setup tab
+
+function SetupTab({ d }) {
   const g = d.goal;
-  return html`<section class="panel">
-    <h2>Goal</h2>
-    <dl class="kv">
-      <dt>path</dt><dd class="mono">${d.path}</dd>
-      <dt>model</dt><dd>${g.adapter.model} / ${g.adapter.effort} · ${g.adapter.permission_mode}</dd>
-      <dt>time box</dt><dd>${dur(g.timebox.total_min * 60)} · wrap-up ${dur(g.timebox.wrapup_min * 60)} · grace ${dur(g.timebox.grace_min * 60)}</dd>
-      <dt>cycle</dt><dd>timeout ${g.cycle.timeout_min}m${g.cycle.max_budget_usd ? ` · budget $${g.cycle.max_budget_usd}` : ''}</dd>
-      <dt>done when</dt><dd>${g.done.map((x) => html`<div key=${x.id}>${x.id}: ${x.check}</div>`)}</dd>
-    </dl>
-  </section>`;
+  const [busy, act] = useAct(d);
+  const ms = (d.milestones ?? []).filter((m) => m.target_s != null);
+  return html`<div class="split">
+    <div class="main-col">
+      <section class="panel"><h2>Objective</h2><p class="prose">${d.objective}</p>
+        ${g.non_goals?.length > 0 && html`<h3 class="micro">Not in scope</h3><ul class="prose">${g.non_goals.map((x, i) => html`<li key=${i}>${x}</li>`)}</ul>`}</section>
+      <section class="panel"><h2>Done when <span class="sub">${g.done.length === 1 ? 'the check passes' : `all ${g.done.length} pass`}</span></h2>
+        <ul class="defs">${g.done.map((x) => html`<li key=${x.id}><b class="id">${x.id}</b><div>${x.check}<div class="faint">${VERIFY[x.verify.type]?.(x.verify) ?? x.verify.type}</div></div></li>`)}</ul></section>
+      <section class="panel"><h2>Jobs in this harness ${d.job.n > 1 && html`<a class="right" href=${`/goals/${d.id}/report.html?job=all`} target="_blank" rel="noopener">Report: all jobs ↗</a>`}</h2>
+        <ul class="defs">${[...d.epics].reverse().map((e, i) => html`<li key=${e.id}><span class="faint num">${d.epics.length - i}</span><div><b>${e.title}</b></div>
+          <span class="faint right">${e.current ? html`<span class="done-ink">current${d.state === 'done' ? ' · done' : ''}</span>` : e.archive ? `archived in .epoptes/${e.archive}` : 'archived'}</span></li>`)}</ul>
+        <p class="faint note">Next feature in this project? Ask the skill for a new job; it keeps the roles, permissions, lessons and decisions.</p></section>
+    </div>
+    <aside class="rail wide">
+      <section class="panel"><h2>Run settings</h2>
+        <dl class="kv">
+          <dt>path</dt><dd class="mono">${d.path}</dd>
+          <dt>model</dt><dd>${[g.adapter.type, g.adapter.model, g.adapter.effort && `${g.adapter.effort} effort`, g.adapter.permission_mode].filter(Boolean).join(' · ')}</dd>
+          <dt>time box</dt><dd>${dur(g.timebox.total_min * 60)} · wrap-up ${dur(g.timebox.wrapup_min * 60)} · grace ${dur(g.timebox.grace_min * 60)}</dd>
+          <dt>cycle</dt><dd>times out at ${g.cycle.timeout_min}m · ${g.cycle.max_budget_usd ? `budget $${g.cycle.max_budget_usd}` : 'no budget cap'}</dd>
+          ${ms.length > 0 && html`<dt>milestones</dt><dd>${ms.map((m) => `${m.id} ${dur(m.target_s)}`).join(' · ')}</dd>`}
+          <dt>checkpoints</dt><dd>${g.checkpoints}</dd>
+          <dt>harness</dt><dd class="mono">.epoptes/goal.json<br />.epoptes/loop.md<br />.epoptes/state/</dd>
+        </dl>
+      </section>
+      ${d.clock && !d.live && html`<section class="panel danger-zone"><h2>Reset the clock</h2>
+        <p class="prose">The next start begins a new run with the time box from goal.json. Nothing on disk changes.</p>
+        <button class="btn danger" disabled=${busy} onClick=${() => act('reset', {}, RESET_TEXT)}>Reset clock…</button></section>`}
+    </aside>
+  </div>`;
 }
 
-function FirstRun({ d }) {
-  return html`<section class="panel first-run">
-    <h2>Before the first cycle</h2>
-    <ol>
-      <li>Check the setup (it never starts the clock): <span class="mono">epoptes run ${d.id} --dry-run</span></li>
-      <li>Read <span class="mono">.epoptes/loop.md</span> and the board once: that's exactly what every cycle will do.</li>
-      <li>Press <b>Start</b>. The first cycle begins within seconds; this page follows it live.</li>
-    </ol>
-    <p class="muted">Time box ${dur(d.goal.timebox.total_min * 60)} of active time · orchestrator ${d.goal.adapter.model}/${d.goal.adapter.effort} · pausing or stopping never loses verified work.</p>
-  </section>`;
-}
+// ---------------------------------------------------------------- goal detail
 
-function GoalDetail({ id }) {
+function GoalDetail({ id, tab }) {
   const s = useStore();
   useEffect(() => {
-    set({ detailId: id, detail: null, selectedCycle: null, cycleView: null, jobScope: 'job' });
+    set({ detailId: id, detail: null, selectedCycle: null, cycleView: null, cardSel: null, jobScope: 'job' });
     loadDetail(id);
     return () => set({ detailId: null, detail: null });
   }, [id]);
+  useEffect(() => scrollTo(0, 0), [tab]);
   const d = s.detail;
-  if (!d || d.id !== id) return html`<a class="back" href="#/">← All goals</a><p class="empty">Loading…</p>`;
+  if (!d || d.id !== id) return html`<a class="back" href="#/">‹ All goals</a><p class="empty">Loading…</p>`;
   if (d.error) {
-    return html`<a class="back" href="#/">← All goals</a>
+    return html`<a class="back" href="#/">‹ All goals</a>
       <div class="panel empty-state">
         <h2>${d.missing ? 'Goal not found' : `Can't read ${d.id}`}</h2>
         <p>${d.missing ? html`No registered goal is called <b>${d.id}</b>. It may have been removed from the registry.` : d.error}</p>
         ${!d.missing && html`<p class="muted">Fix the file, then check it with <span class="mono">epoptes run ${d.id} --dry-run</span>. This page updates by itself.</p>`}
       </div>`;
   }
-  return html`<a class="back" href="#/">← All goals</a>
-    <div class="detail-head">
-      <div class="title"><h1>${d.name}</h1><${StatePill} state=${d.state} />${d.mode && html`<span class="chip ${d.mode}">${d.mode}</span>`}<span class="muted">run ${d.run ?? '–'} · cycle ${d.cycle || '–'}${d.round ? ` · round ${d.round}` : ''}</span><${JobChip} d=${d} /></div>
-      <p class="objective">${d.objective}</p>
-      <${ClockBar} g=${d} big=${true} />
-      <${Controls} d=${d} />
-      <${Banners} d=${d} />
-      <${NeedsYou} d=${d} />
-    </div>
-    ${d.cycles === 0 && !d.live && html`<${FirstRun} d=${d} />`}
-    <${Stats} d=${d} />
-    <${Board} d=${d} />
-    <div class="grid">
-      <div class="stack">
-        <${Ticker} d=${d} />
-        <section class="panel"><h2>Cycles <span class="right muted">median <${Money} usd=${d.cost_median || null} basis=${d.cost_basis} /></span></h2><${Timeline} d=${d} /><${CycleTable} d=${d} /></section>
-        <${CycleDetail} d=${d} />
-        <${TimeUse} d=${d} />
-        <${Feed} d=${d} />
-      </div>
-      <div class="stack">
-        <section class="panel"><h2>Handoff</h2>${d.handoff ? html`<pre class="handoff"><${Rich} text=${d.handoff} /></pre>` : html`<p class="empty">No handoff yet.</p>`}</section>
-        <${Checkpoints} d=${d} />
-        <${About} d=${d} />
-      </div>
-    </div>`;
+  const Tab = { board: Board, cycles: CyclesTab, time: TimeTab, activity: ActivityTab, setup: SetupTab }[tab] ?? Overview;
+  return html`<${GoalHead} d=${d} tab=${Tab === Overview ? '' : tab} />
+    <div class="tab-body"><${Tab} d=${d} /></div>`;
 }
+
 
 // ---------------------------------------------------------------- favicon
 
@@ -1334,17 +1823,17 @@ function Brain() {
 
 function useRoute() {
   const parse = () => {
-    if (location.hash.startsWith('#/brain')) return 'brain';
-    const m = /^#\/g\/([a-z0-9-]+)/.exec(location.hash);
-    return m ? m[1] : null;
+    if (location.hash.startsWith('#/brain')) return { id: 'brain' };
+    const m = /^#\/g\/([a-z0-9-]+)(?:\/([a-z]+))?/.exec(location.hash);
+    return m ? { id: m[1], tab: m[2] ?? '' } : { id: null };
   };
-  const [id, setId] = useState(parse());
+  const [route, setRoute] = useState(parse());
   useEffect(() => {
-    const f = () => setId(parse());
+    const f = () => setRoute(parse());
     addEventListener('hashchange', f);
     return () => removeEventListener('hashchange', f);
   }, []);
-  return id;
+  return route;
 }
 
 function Toasts() {
@@ -1354,7 +1843,7 @@ function Toasts() {
 
 function App() {
   const s = useStore();
-  const id = useRoute();
+  const { id, tab } = useRoute();
   useEffect(() => {
     const goals = s.state?.goals ?? [];
     // On a goal's page the icon follows that goal; on the list, the most urgent goal.
@@ -1365,7 +1854,7 @@ function App() {
   }, [s.detail?.name, s.state, id]);
   return html`<${Topbar} id=${id} />
     ${s.offline && html`<div class="offline pill bad">Dashboard server unreachable. Runs keep going; reconnecting…</div>`}
-    <main>${id === 'brain' ? html`<${Brain} />` : id ? html`<${GoalDetail} id=${id} />` : html`<${GoalList} />`}</main>
+    <main>${id === 'brain' ? html`<${Brain} />` : id ? html`<${GoalDetail} id=${id} tab=${tab} />` : html`<${GoalList} />`}</main>
     <${Toasts} />`;
 }
 

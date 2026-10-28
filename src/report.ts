@@ -107,7 +107,7 @@ function gitLog(args: string[], cwd: string) {
   }
 }
 
-function readScores(p: Pick<GoalPaths, 'state'>): GoalReport['scores'] {
+export function readScores(p: Pick<GoalPaths, 'state'>): GoalReport['scores'] {
   const rows: GoalReport['scores']['rows'] = [];
   const criteria = new Set<string>();
   for (const line of readJsonl<Record<string, unknown>>(path.join(p.state, 'scores.jsonl'))) {

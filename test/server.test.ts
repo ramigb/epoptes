@@ -101,7 +101,7 @@ test('cards from the dashboard stream to clients; moves, comments and bad fields
   const d = await req('GET', '/api/goals/ui-test');
   const c = d.json.board_cards.find((x: any) => x.id === 'C-3');
   assert.deepEqual([c.column, c.milestone, c.waiting, c.comments[0].text], ['todo', 'M1', true, 'and bold']);
-  assert.deepEqual(d.json.epics, [{ id: 'job-1', title: 'UI test', current: true }]);
+  assert.deepEqual(d.json.epics, [{ id: 'job-1', title: 'UI test', current: true, archive: null }]);
 });
 
 test('approvals are answered from the dashboard', async () => {

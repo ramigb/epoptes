@@ -6,6 +6,7 @@ import type { CycleResult } from '../adapters/types.ts';
 import { clockState, readClock, runFinished } from '../clock.ts';
 import { boardCounts, boardMilestones, fold, followUpCards, pendingApprovals } from '../board.ts';
 import { exists, nowIso, readJson, readJsonl, writeJson } from '../fsx.ts';
+import { readScores } from '../report.ts';
 import { loadGoal, type Goal } from '../goal.ts';
 import { inJob, jobsOf, type Job } from '../jobs.ts';
 import { epoptesHome } from '../paths.ts';
@@ -221,7 +222,9 @@ export function detail(w: GoalWatch, { all = false } = {}) {
     handoff: read('handoff.md'),
     // Every epic's cards: the board switches between them.
     board_cards: [...fold(w.board.items).cards.values()],
-    epics: jobsOf(w.events.items, goal).map((j) => ({ id: j.id, title: j.title, current: j.current })),
+    epics: jobsOf(w.events.items, goal).map((j) => ({ id: j.id, title: j.title, current: j.current, archive: j.archive })),
+    // the reviewer's latest scores, for agent-checked done criteria
+    scores: readScores(p).rows.at(-1) ?? null,
     events: w.events.items.filter((e) => within(e.ts)).slice(-500),
     cycles_detail: results.map((r) => ({ ...r, flagged: results.length >= 3 && med > 0 && (r.cost_usd ?? 0) > 2 * med })),
     cost_median: med,
