@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { Activity } from '../adapters/types.ts';
 import type { EpoptesEvent } from '../events.ts';
-import { ingestInbox, type FeedbackOp } from '../feedback.ts';
+import { ingest, type BoardOp } from '../board.ts';
 import { goalPaths, type GoalPaths } from '../paths.ts';
 import { reconcile, type Status } from '../status.ts';
 import { JsonlTail } from './tail.ts';
@@ -12,7 +12,7 @@ export interface GoalUpdate {
   id: string;
   parts: string[];
   events: EpoptesEvent[];
-  feedback: FeedbackOp[];
+  board: BoardOp[];
   activity: Activity[];
   cycle: number;
 }
@@ -30,7 +30,7 @@ export class GoalWatch {
   readonly id: string;
   readonly p: GoalPaths;
   readonly events: JsonlTail<EpoptesEvent>;
-  readonly feedback: JsonlTail<FeedbackOp>;
+  readonly board: JsonlTail<BoardOp>;
   readonly activity = new JsonlTail<Activity>('', 2000);
   activityCycle = 0;
   status: Status | null = null;
@@ -41,7 +41,7 @@ export class GoalWatch {
     this.id = id;
     this.p = goalPaths(project);
     this.events = new JsonlTail(this.p.events);
-    this.feedback = new JsonlTail(this.p.feedback);
+    this.board = new JsonlTail(this.p.board);
     this.files = {
       status: this.p.status,
       clock: this.p.clock,
@@ -67,9 +67,10 @@ export class GoalWatch {
         parts.push(name);
       }
     }
-    if (parts.includes('inbox')) {
+    // A new FEEDBACK.md bullet or seeded backlog.md goes onto the board (and the first poll migrates an old goal).
+    if (parts.includes('inbox') || parts.includes('backlog')) {
       try {
-        ingestInbox(this.p);
+        ingest(this.p);
       } catch {
         // lock busy; next poll
       }
@@ -86,12 +87,12 @@ export class GoalWatch {
       parts.push('cycle');
     }
     const events = this.events.read();
-    const feedback = this.feedback.read();
+    const board = this.board.read();
     const activity = this.activity.read();
     if (events.length) parts.push('events');
-    if (feedback.length) parts.push('feedback');
+    if (board.length) parts.push('board');
     if (activity.length) parts.push('activity');
     if (!parts.length) return null;
-    return { id: this.id, parts, events, feedback, activity, cycle };
+    return { id: this.id, parts, events, board, activity, cycle };
   }
 }

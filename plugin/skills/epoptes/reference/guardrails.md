@@ -27,12 +27,12 @@ Set `adapter.type` to `pi` and `permission_mode` to `default`. pi has no sandbox
 - A 0-byte `.git/index.lock` with no git process running was left by a killed worker. Remove it, then commit.
 
 ## Secrets
-- Secrets never go in `goal.json`, `loop.md`, role files, state files, feedback or briefs. `epoptes run --dry-run` warns when a file looks like it contains one.
+- Secrets never go in `goal.json`, `loop.md`, role files, state files, cards or briefs. `epoptes run --dry-run` warns when a file looks like it contains one.
 - When a goal needs credentials, point at the user's secret manager (for example the 1Password CLI, `op read op://…`, or its MCP server) and add only the narrow allow rule for it. Better still, have the human provide the value at run time through the environment.
 - Tell workers not to print environment variables or read `.env` files, `~/.ssh`, `~/.aws` or similar. The baseline deny list blocks the common paths.
 
 ## Approval list
-Every item in `goal.json` `approval_required` is copied into `loop.md` §Rules. The orchestrator never does these. It runs `epoptes approval "<what>" --ref <task>`, marks the task `[blocked: needs approval F-<n>]`, and continues with other work. The human answers with Approve / Disapprove; the next cycle sees APPROVED or REJECTED in `epoptes feedback --open`. When nothing else can move, it runs `epoptes wait-for-human "<what>"`.
+Every item in `goal.json` `approval_required` is copied into `loop.md` §Rules. The orchestrator never does these. It runs `epoptes approval "<what>" --ref <card>`, which blocks that card, and continues with other work. The human answers with Approve / Disapprove; the next cycle sees APPROVED or REJECTED on the card in `epoptes board --open`. When nothing else can move, it runs `epoptes wait-for-human "<what>"`.
 
 ## Data stays local
 Cycle transcripts and logs (`.epoptes/cycles/`, `run/`) can contain confidential material. They're gitignored and never leave the machine. Don't tell workers to upload, paste or post them anywhere.

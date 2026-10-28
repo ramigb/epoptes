@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "board.schema.json",
+  "title": "One line of .epoptes/board.jsonl",
+  "type": "object",
+  "required": ["ts", "op", "id"],
+  "$defs": {
+    "by": { "type": "string", "minLength": 1, "description": "user (the human), orchestrator, or the role acting for it" },
+    "cycle": { "type": ["integer", "null"] },
+    "column": { "enum": ["backlog", "todo", "doing", "review", "done"] },
+    "priority": { "enum": ["high", "med", "low", null] },
+    "text": { "type": "string", "minLength": 1 }
+  },
+  "properties": {
+    "ts": { "type": "string", "format": "date-time" },
+    "op": { "enum": ["add", "set", "comment", "ask", "decide", "milestone"] },
+    "id": { "type": "string", "pattern": "^([A-Z]+-[0-9]+|M[0-9]+[A-Z]?)$", "description": "a card (C-<n>; F-<n> for feedback from before the board) or, for op milestone, M<n>" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "op": { "const": "add" } } },
+      "then": {
+        "required": ["title", "src", "epic", "column"],
+        "properties": {
+          "title": { "$ref": "#/$defs/text" },
+          "src": { "enum": ["dashboard", "cli", "file", "orchestrator"] },
+          "epic": { "type": "string", "minLength": 1, "description": "the job the card belongs to" },
+          "column": { "$ref": "#/$defs/column" },
+          "milestone": { "type": "string" },
+          "assignee": { "type": "string" },
+          "priority": { "$ref": "#/$defs/priority" },
+          "cycle": { "$ref": "#/$defs/cycle" },
+          "steer": { "type": "boolean", "description": "steering: interrupt the running cycle and replan around it first" }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "op": { "const": "set" } } },
+      "then": {
+        "required": ["by"],
+        "properties": {
+          "by": { "$ref": "#/$defs/by" },
+          "cycle": { "$ref": "#/$defs/cycle" },
+          "title": { "$ref": "#/$defs/text" },
+          "column": { "$ref": "#/$defs/column" },
+          "epic": { "type": "string", "minLength": 1 },
+          "milestone": { "type": ["string", "null"] },
+          "assignee": { "type": ["string", "null"] },
+          "priority": { "$ref": "#/$defs/priority" },
+          "blocked": { "type": ["string", "null"], "description": "why it can't move on; null unblocks" },
+          "cut": { "type": ["string", "null"], "description": "with column done: dropped, and why. Any move without it clears it" },
+          "scope": { "enum": ["auto", "tweak", "new_run"], "description": "how a follow-up after DONE treats the card" }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "op": { "const": "comment" } } },
+      "then": {
+        "required": ["text", "by"],
+        "properties": { "text": { "$ref": "#/$defs/text" }, "by": { "$ref": "#/$defs/by" }, "cycle": { "$ref": "#/$defs/cycle" }, "steer": { "type": "boolean" } }
+      }
+    },
+    {
+      "if": { "properties": { "op": { "const": "ask" } } },
+      "then": {
+        "required": ["text", "by"],
+        "properties": { "text": { "$ref": "#/$defs/text" }, "by": { "$ref": "#/$defs/by" }, "cycle": { "$ref": "#/$defs/cycle" } }
+      }
+    },
+    {
+      "if": { "properties": { "op": { "const": "decide" } } },
+      "then": {
+        "required": ["decision", "by"],
+        "properties": { "decision": { "enum": ["approved", "rejected"] }, "by": { "$ref": "#/$defs/by" }, "note": { "type": "string" } }
+      }
+    },
+    {
+      "if": { "properties": { "op": { "const": "milestone" } } },
+      "then": {
+        "required": ["epic", "title", "target_s"],
+        "properties": { "epic": { "type": "string", "minLength": 1 }, "title": { "type": "string" }, "target_s": { "type": ["integer", "null"], "minimum": 0 } }
+      }
+    }
+  ]
+}

@@ -16,16 +16,16 @@ The file format is the contract: the runner, CLI, dashboard and skill only read 
     loop.md                orchestrator prompt           you / the skill            committed
     agents/*.md            role files                    you / the skill            committed
     settings.json          cycle permissions             you / the skill            committed
-    FEEDBACK.md            optional hand-written inbox   you (+ runner marks → F-n) committed
+    FEEDBACK.md            optional hand-written inbox   you (+ marks → C-n)        committed
     state/                 orchestrator memory           orchestrator               committed
-    feedback.jsonl         feedback log                  append-only, anyone        committed
+    board.jsonl            the board: every card         append-only, anyone        committed
     events.jsonl           event log                     append-only, anyone        committed
     snapshots.git/         shadow checkpoints            runner (checkpoints=shadow) ignored
     run/                   live runner state             runner (+ CLI for control) ignored
       status.json  clock.json  control.json  runner.lock  DONE  WRAPUP  runner.log  bin/epoptes
     cycles/<NNNNNN>/       per-cycle records             runner                     ignored
       result.json  activity.jsonl  stream.jsonl  stderr.log
-    .gitignore             run/ cycles/ snapshots.git/ *.tmp .feedback.lock
+    .gitignore             run/ cycles/ snapshots.git/ reports/ *.tmp .board.lock
 ~/.epoptes/
   registry.json            registered goals
   config.json              dashboard port, LAN opt-in
@@ -84,18 +84,18 @@ There is no daemon. `epoptes start` spawns one detached runner per goal (`setsid
 
 **States** (`status.json.state`): `idle` (never started / after reset), `running` (a cycle is in flight), `waiting` (between cycles), `rate_limited`, `cooldown`, `pausing` (pause requested, cycle finishing), `paused`, `needs_input` (paused because the orchestrator ran `epoptes wait-for-human`; `status.needs` says why), `stopped`, `crashed`, `failed` (gave up after `give_up_after` fails), `done`, `timeboxed` (hard stop reached).
 
-**Follow-up runs.** After DONE (or a finished time box), `start --follow-up` (dashboard: "Follow up on N feedback items") begins a run whose clock has `kind: "followup"` and no time box (`timebox_s: 0`, mode `followup`, `TO_END=none`). It handles only the *follow-up items*: open feedback (`new | seen | in_progress`) that isn't an agent note, an unanswered approval, or marked `scope: new_run`. Before each cycle the runner puts a FOLLOW-UP note in front of the prompt listing them: minor items (a colour, a size, wording, a small bug) get done in place; major ones (a restart, a new version, a change of direction) are marked `blocked "needs a new run: …"`. The human can override per item with `{op: scope, scope: auto | tweak | new_run}`. The run ends when the orchestrator says DONE or no follow-up item is left (the runner then records `done` itself); after 3 cycles without that it pauses with a warning. `run.start` carries `followup: true`; the control action is `follow_up`.
+**Follow-up runs.** After DONE (or a finished time box), `start --follow-up` (dashboard: "Follow up on N cards") begins a run whose clock has `kind: "followup"` and no time box (`timebox_s: 0`, mode `followup`, `TO_END=none`). It handles only the *follow-up cards* of the current epic: the human's open cards that aren't blocked, and any card *waiting* for a reply (below), minus unanswered approvals and cards marked `scope: new_run`. Before each cycle the runner puts a FOLLOW-UP note in front of the prompt listing them: minor items (a colour, a size, wording, a small bug) get done in place; major ones (a restart, a new version, a change of direction) are blocked with `"needs a new run: …"`; questions get a reply. The human can override per card with `{op: set, scope: auto | tweak | new_run}`. The run ends when the orchestrator says DONE or no follow-up item is left (the runner then records `done` itself); after 3 cycles without that it pauses with a warning. `run.start` carries `followup: true`; the control action is `follow_up`.
 
 **Runs.** `start` from `idle`, `done`, `timeboxed` or after `reset-clock` begins a new run `r<k>` with a fresh clock. `start` from `paused`, `stopped`, `crashed` or `failed` resumes the current run. Cycle numbers are monotonic per goal across runs; each record carries its `run`.
 
 ### Controls
 | control | mechanism |
 |---|---|
-| start / resume | CLI spawns the runner; the clock resumes. If the run is over (DONE, or past the hard stop), `start` refuses unless given `--new-run` (dashboard: "Start new run…" with a confirm), because a new run spends tokens and only finds work if feedback or tasks were added. The `control` event says `start` for a new run and `resume` for a continuation |
+| start / resume | CLI spawns the runner; the clock resumes. If the run is over (DONE, or past the hard stop), `start` refuses unless given `--new-run` (dashboard: "Start new run…" with a confirm), because a new run spends tokens and only finds work if cards were added. The `control` event says `start` for a new run and `resume` for a continuation |
 | pause after this cycle | CLI writes `control.json {pause_after_cycle: true}`; runner finishes the cycle, pauses the clock, sets `paused`, exits |
 | wait for the human | orchestrator runs `epoptes wait-for-human "<what>"`: `control.json {pause_after_cycle: true, for_human: {reason}}` plus a `needs_you` event. The run ends after the cycle as `needs_input` with `status.needs = {reason, since}` and the clock paused. Resume as usual; answering the last open approval (or "Send & resume" in the dashboard) resumes it by itself |
-| steer | `epoptes feedback "<text>" --steer` (dashboard: ⚡ Steer now) adds `{op: add, steer: true}` and sends SIGUSR2 to a live runner. A running cycle is interrupted (`cycle.end {exit: interrupted, steered: true}`, not counted as a failure) and the next starts at once; a between-cycles wait is cut short, a rate-limit or cooldown wait is not. While a steering item is still `new`, the runner puts a STEERING note in front of the prompt (and `cycle.start` carries `steer: [ids]`) telling the orchestrator to replan the whole backlog around it first. With no live runner, the item waits for the next start |
-| backlog clear | not a control, a runner guard: in build mode, when the backlog has tasks but none open apart from `low`/`med` review fixes (blocked and cut don't count), no feedback is waiting and nothing is steering, the runner puts a BACKLOG CLEAR note in front of the prompt (`cycle.start {backlog_clear: true}`): run the done checks; all pass → wrap up; one fails → add only the tasks for it; no other new tasks (ideas go in the handoff). Why: an orchestrator with hours left tends to invent work |
+| steer | `epoptes feedback "<text>" --steer` (dashboard: ⚡ Steer now) adds a backlog card `{op: add, steer: true}`, and `epoptes card <id> comment "<text>" --steer` (dashboard: the ⚡ box under a card's comment) adds `{op: comment, steer: true}`; either sends SIGUSR2 to a live runner. A running cycle is interrupted (`cycle.end {exit: interrupted, steered: true}`, not counted as a failure) and the next starts at once; a between-cycles wait is cut short, a rate-limit or cooldown wait is not. While a steering card is unanswered, the runner puts a STEERING note in front of the prompt (and `cycle.start` carries `steer: [ids]`) telling the orchestrator to replan the whole board around it first. With no live runner, it waits for the next start |
+| board clear | not a control, a runner guard: in build mode, when the current epic has cards but none open in todo/doing/review apart from `low`/`med` priority ones (blocked and cut don't count), nothing sits untriaged in the backlog, no card waits for a reply and nothing is steering, the runner puts a BOARD CLEAR note in front of the prompt (`cycle.start {backlog_clear: true}`): run the done checks; all pass → wrap up; one fails → add only the tasks for it; no other new tasks (ideas go in the handoff). Why: an orchestrator with hours left tends to invent work |
 | stop now | CLI sends SIGINT to the runner pid; the runner SIGINTs the adapter, kills it after 120 s, records the cycle as `interrupted`, pauses the clock, sets `stopped`, exits. The next cycle recovers interrupted work (loop.md orient step) |
 | extend `<dur>` | CLI adds to `clock.json.timebox_s` (wrap-up and hard stop move with it) |
 | reset-clock | only when no runner is live; clears `clock.json`, `DONE`, `WRAPUP`; next start is a new run |
@@ -134,7 +134,7 @@ Envelope: `{ts, run, cycle, src: runner | orchestrator | user, type, ...payload}
 | runner | `mode` | `from, to` |
 | runner / user | `control` | `action: start \| resume \| pause \| stop \| extend \| reset \| steer, seconds?, ref?` |
 | runner | `warn` | `text` (state cap exceeded, clock restored, feedback file unparsable, …) |
-| orchestrator | `milestone`, `blocked`, `note` | `text`, `ref?` (task or feedback id). `epoptes approval` emits `blocked` with `text: "needs approval: …"` and `ref: F-<n>` |
+| orchestrator | `milestone`, `blocked`, `note` | `text`, `ref?` (card id). `epoptes approval` emits `blocked` with `text: "needs approval: …"` and `ref: <card id>` |
 | orchestrator / user | `needs_you` | `text`: what the human should do (`epoptes wait-for-human`) |
 | orchestrator | `artifact` | `path`, `text?` (produced file worth showing in reports) |
 | orchestrator | `output` | `path` (project-relative path or URL of the main deliverable), `text?` |
@@ -143,22 +143,30 @@ Envelope: `{ts, run, cycle, src: runner | orchestrator | user, type, ...payload}
 
 `milestone`, `wrapup` and `done` events from the CLI also carry `active_s` (active time when recorded), so the dashboard can place them on the clock.
 
-Feedback changes are **not** duplicated here; they live in `feedback.jsonl`.
+Card changes are **not** duplicated here; they live in `board.jsonl`.
 
-## feedback.jsonl — `feedback.schema.json`
-An append-only log of operations; the current state of each item is the fold of its lines in order.
+## board.jsonl — `board.schema.json`
+The board: every piece of work is a card, the human's feedback included. One board per harness; each job is an **epic** (`epic` = the job id). Columns: `backlog` (untriaged: the human's feedback, agent notes) → `todo` → `doing` → `review` (being verified) → `done`. An append-only log of operations; a card's state is the fold of its lines in order.
 ```
-{"ts":"…","op":"add","id":"F-3","text":"Arms clip into dresses","src":"dashboard"}
-{"ts":"…","op":"status","id":"F-3","status":"in_progress","cycle":11,"by":"orchestrator"}
-{"ts":"…","op":"status","id":"F-3","status":"done","cycle":12,"by":"orchestrator","note":"arms clear skirts/bags"}
-{"ts":"…","op":"note","id":"F-3","text":"still clips with the big bag","by":"user"}
+{"ts":"…","op":"milestone","id":"M2","epic":"job-1","title":"Templates","target_s":4800}
+{"ts":"…","op":"add","id":"C-3","title":"Arms clip into dresses","src":"dashboard","epic":"job-1","column":"backlog"}
+{"ts":"…","op":"set","id":"C-3","by":"orchestrator","cycle":11,"column":"todo","milestone":"M2"}
+{"ts":"…","op":"set","id":"C-3","by":"orchestrator","cycle":11,"column":"doing","assignee":"builder"}
+{"ts":"…","op":"comment","id":"C-3","text":"still clips with the big bag","by":"user"}
+{"ts":"…","op":"comment","id":"C-3","text":"fixed for every bag","by":"builder","cycle":12}
+{"ts":"…","op":"set","id":"C-3","by":"orchestrator","cycle":12,"column":"done"}
 ```
-- **Approvals.** `epoptes approval "<what>" [--ref <task>]` adds `{op: add, kind: "approval", src: "orchestrator", ref?}`; an approval starts as `blocked` (waiting for the human). The human answers with `{op: decide, decision: approved | rejected, by: user, note?}`, followed by a `status → new` line so the next cycle acts on it; `epoptes feedback --open` prints `[approval: APPROVED "<note>"]`. An approval is *pending* while it has no decision and isn't closed.
-- **Agent notes (auto feedback).** `epoptes feedback "<text>"` inside a cycle adds an item with `src: "orchestrator"`: something a later cycle must act on, typically a research finding that changes the plan. It shows to the human (toast, "agent note" chip, unread badge), who can edit it (`{op: edit, text, by}`) or dismiss it (`wont_do`); the next cycle triages it after the human's own feedback. `epoptes feedback --open` tags it `[agent note]`.
-- Statuses: `new → seen → in_progress → done | blocked | wont_do`. Any transition is allowed and recorded; you reopen an item by setting it to `new`.
-- `src` on add: `dashboard | cli | file | orchestrator`. `by` on status/note: `orchestrator | user`.
-- Ids are `F-<n>`, next free number. Adds take `.epoptes/.feedback.lock` (created with O_EXCL, stale after 10 s) so two writers can't pick the same id.
-- **Inbox.** Before each cycle, and whenever `epoptes status`, `epoptes feedback` or the dashboard reads feedback, Epoptes ingests new bullets from `.epoptes/FEEDBACK.md` as `add` with `src: file` and appends ` → F-<n>` to each bullet. No model tokens are spent on intake.
+- **Ops.** `add {title, src, epic, column, milestone?, assignee?, priority?, steer?, cycle?}`; `set {by, cycle?, …fields}` with any of `title, column, epic, milestone, assignee, priority (high|med|low), blocked (reason | null), cut (reason, with column done), scope`; `comment {text, by, cycle?, steer?}`; `ask {text, by}` (an approval request); `decide {decision: approved | rejected, by: user, note?}`; `milestone {id: M<n>, epic, title, target_s}`.
+- `src` on add: `dashboard | cli | file | orchestrator`; a card from anything but `orchestrator` is the human's. `by`: `user` (the human), `orchestrator`, or the role acting for it (`epoptes card … --as builder`).
+- **Whose turn it is.** A card is *waiting* when the human added it, commented on it or answered its approval, and no agent has acted on the card since (any op with `by` other than `user` answers it; so does the human moving it to done). A waiting card with a steering add or comment is *steering*. `epoptes board` tags them `[new: triage it]` / `[the human commented: read it]` / `[STEERING …]`.
+- **Comments.** The human comments on any card; the next cycle acts on it (changes, moves or adds cards) or just replies. A human comment on a card in `done` also moves it back to `todo`.
+- **Blocked and cut.** `blocked` keeps a card in its column, marked; `cut` moves it to `done` with a reason, and any later move clears it. A card with an unanswered approval counts as blocked.
+- **Approvals.** `epoptes approval "<what>" --ref <card>` appends `ask` to that card (without `--ref`, or when it isn't a card id, to a new TODO card); it's blocked until the human's `decide`, which also shows in its thread and makes it wait for the next cycle.
+- **Agent notes.** `epoptes feedback "<text>"` inside a cycle adds a backlog card with `src: "orchestrator"`: something a later cycle must act on. It shows to the human (toast, "agent note" chip, unread badge), who can edit (`set title`) or cut it.
+- **Milestones** belong to an epic, in the order they were added, plus any milestone a card names without one. The current one is the first whose cards aren't all done, cut or blocked (or that has no cards yet). `epoptes clock` adds `MILESTONE=<id> M_TARGET=<h:mm>`.
+- Ids are `C-<n>`, next free number (`F-<n>` for feedback imported from before the board). Adds take `.epoptes/.board.lock` (created with O_EXCL, stale after 10 s) so two writers can't pick the same id.
+- **Ingest** (no model tokens). Before each cycle, and whenever the CLI or the dashboard reads the board: new bullets in `.epoptes/FEEDBACK.md` become backlog cards (`src: file`, the bullet gets ` → C-<n>`); a `state/backlog.md` (the seed format the skill writes: `## M<n> · <title> (target h:mm)` headings, `- [ ] <task>` lines with `[~]`, `[x]`, `[blocked: why]`, `[cut]`) becomes milestones and cards in the current epic and is renamed `backlog.md.imported`. A goal from before the board is migrated once, when `board.jsonl` doesn't exist yet: `feedback.jsonl` ops become card ops (ids kept, each item in the epic of the job it was added in; renamed `feedback.jsonl.imported`), and every archived job's `backlog.md` is imported into its epic.
+- **For old loop.md files** (no `epoptes board` or `epoptes card` in them) the runner puts a THE BOARD note in front of the prompt that maps backlog.md and `epoptes feedback` onto the board.
 
 ## cycles/NNNNNN/result.json — `cycle-result.schema.json`
 Normalised by the adapter; the dashboard and reports use only this, never the raw stream.
@@ -184,7 +192,7 @@ The skill generates these with caps in `goal.json.state_caps`. The dashboard rea
 | file | contract |
 |---|---|
 | `handoff.md` | overwritten each cycle, ≤ 25 lines; the dashboard shows it verbatim |
-| `backlog.md` | task lines `- [ ] <ID> <text>`; markers `[ ]` todo, `[~]` in progress, `[x]` done, `[blocked: why]`, `[cut]`. A line `**Current milestone: <name>**` is optional. Milestone headings `## M<n> · <title> (target h:mm)` group the tasks below them until the next heading; the target is active time from the start of the run. The dashboard counts markers for backlog progress, splits the progress bar by milestone, and marks each target on the clock bar (reached on time, late, overdue, upcoming) with a dot where the `milestone` event that names it (`"M2: …"`) actually landed. `epoptes clock` adds `MILESTONE=<id> M_TARGET=<h:mm>` for the current one. **Projected finish:** the pace of the latest milestone reached this run (its active time / its target), or of the current milestone if it's already past its target and slower, applied to the last milestone's target. Shown as a dashed marker and "on pace to finish at ~h:mm" on the clock bar, and as a `pace` line in `epoptes status` |
+| `backlog.md` | only a seed, imported onto the board and renamed (see board.jsonl). Milestones and their targets (active time from the start of the run) then live on the board. The dashboard splits the progress bar by milestone, and marks each target on the clock bar (reached on time, late, overdue, upcoming) with a dot where the `milestone` event that names it (`"M2: …"`) actually landed. `epoptes clock` adds `MILESTONE=<id> M_TARGET=<h:mm>` for the current one. **Projected finish:** the pace of the latest milestone reached this run (its active time / its target), or of the current milestone if it's already past its target and slower, applied to the last milestone's target. Shown as a dashed marker and "on pace to finish at ~h:mm" on the clock bar, and as a `pace` line in `epoptes status` |
 | `progress.md` | table, one row per round: `\| c<N> \| <elapsed> \| <task ids> \| ok/blocked \| <note> \|` |
 | `lessons.md` | ≤ 30 lines of rules |
 | `decisions.md` | append-only `date · decision · why` |
@@ -197,7 +205,7 @@ The skill generates these with caps in `goal.json.state_caps`. The dashboard rea
 
 ## Cycle environment
 The runner starts each cycle in `<project>/` with:
-- `EPOPTES_GOAL_DIR`, `EPOPTES_RUN`, `EPOPTES_CYCLE`, `EPOPTES_MODE`, so `epoptes event …` and `epoptes feedback …` need no arguments inside a cycle.
+- `EPOPTES_GOAL_DIR`, `EPOPTES_RUN`, `EPOPTES_CYCLE`, `EPOPTES_MODE`, so `epoptes event …`, `epoptes board` and `epoptes card …` need no arguments inside a cycle.
 - `PATH` starting with `run/bin/`, which holds an `epoptes` shim for the exact CLI that started the runner (works without a global install). The Claude Code adapter always adds `Bash(epoptes *)` to the cycle's allow list.
 - `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0`: in dress2impress, background subagents were killed 600 s after the orchestrator's turn ended. The cycle timeout still bounds the cycle.
 
@@ -238,31 +246,37 @@ The runner owns timeouts: it calls `interrupt()` at the cycle timeout (capped by
 A local web server (`src/ui/`) plus static files (`ui/`, Preact via `htm`'s standalone build, no build step). It only reads and writes the goal files, and it calls the same control code as the CLI.
 - **Binding:** `127.0.0.1:4747` by default (`--port`, or `port` in `~/.epoptes/config.json`). `--lan` binds `0.0.0.0` after a warning; there is no login in v1.
 - **Guards:** requests must carry `Host: 127.0.0.1|localhost|[::1]:<port>` (DNS-rebinding guard; skipped with `--lan`). Every write needs `X-Epoptes: 1` and a JSON body, and a present `Origin` must match; that forces a CORS preflight the server never answers, so other sites can't post feedback (which ends up in prompts) or start runs. A strict CSP allows only `'self'`.
-- **Updates:** the server polls each goal every second (inotify doesn't work on WSL's `/mnt` drives), tails the JSONL files incrementally, and pushes `update` events over SSE (`/api/stream`): `{id, parts, events, feedback, activity, cycle}`. After a write it polls that goal at once.
-- **API:** `GET /api/state` (all goal summaries + newest `limits` per source), `GET /api/goals/<id>` (detail), `GET /api/goals/<id>/cycles/<n>` (one cycle's result and activity), `GET /api/goals/<id>/time` (where the time went, below), `POST /api/goals/<id>/control {action: start|pause|stop|extend|reset, seconds?}`, `POST /api/goals/<id>/feedback {text, resume?}` (`resume`: also resume a `needs_input` run), `POST /api/goals/<id>/feedback/<F-n> {status?, note?}`, `{text}` (edit) or `{decision: approved|rejected, note?}`, `POST /api/goals/<id>/seen`.
+- **Updates:** the server polls each goal every second (inotify doesn't work on WSL's `/mnt` drives), tails the JSONL files incrementally, and pushes `update` events over SSE (`/api/stream`): `{id, parts, events, board, activity, cycle}`. After a write it polls that goal at once.
+- **API:** `GET /api/state` (all goal summaries + newest `limits` per source), `GET /api/goals/<id>` (detail), `GET /api/goals/<id>/cycles/<n>` (one cycle's result and activity), `GET /api/goals/<id>/time` (where the time went, below), `POST /api/goals/<id>/control {action: start|pause|stop|extend|reset, seconds?}`, `POST /api/goals/<id>/cards {title, steer?, resume?}` (a backlog card; `resume`: also resume a `needs_input` run), `POST /api/goals/<id>/cards/<card id>` with `{column?, title?, milestone?, assignee?, priority?, blocked?, cut?, scope?}`, `{comment, steer?}` or `{decision: approved|rejected, note?}`, `POST /api/goals/<id>/seen`.
 - **Waiting for you:** a goal that is `needs_input` or has pending approvals shows a ⚑ line on its card, a highlighted panel at the top of its page (the reason, Approve / Disapprove with an optional note, and a reply box with "Send & resume"), and `⚑ <n>` in the page title.
 - **Where the time went** (`src/timeuse.ts`, panel under the cycles): *phases* from events: cycle durations, waits by reason (cut at the run's next event when a wait ended early), and gaps between runs when the human held the run (after `needs_you` → waiting for you; after `paused | stopped | crashed | failed` → paused; gaps after DONE or the time box don't count). *Roles* from activity: agent time per subagent type (start→end; parallel subagents add up) and `orchestrator (alone)` = the cycle minus the union of subagent spans. *Tools*: each call's time runs to the same agent's next step (capped at 15 min); background shell tasks (`agent#…` with no subagent type) count as `background commands`. Finished cycles are cached. The chart shows four phases (running = cycles + between-cycles gaps; rate limits + cooldowns; waiting for you; paused), bar lists for roles and tools, hover tooltips, and a table view.
 - **Output link:** "Output ↗" in the controls and "Open the output ↗" in the done banner. URLs open as they are. Project files are served by a second, read-only server on the next free port after the dashboard's (`src/ui/output.ts`, `http://127.0.0.1:<port+1>/<goal id>/<path>`): a separate origin, so an agent-built page runs normally but can't call the dashboard API. It serves only files inside a registered project (symlinks resolved), never a path with a dot segment (`.epoptes`, `.git`, `.env`), lists folders without an index.html, shows Markdown and text as plain text, and is off in `--lan` mode.
 - **Favicon:** drawn on a canvas and swapped as a `data:` PNG (allowed by the CSP). On a goal's page it follows that goal; on the list, the most urgent goal: needs you (amber, blinking `!`) > failed or crashed (red `!`) > running (green arcs turning) > rate-limited or cooling down (amber, slow pulse) > between cycles (green pulse) > done (purple check) > idle (grey). Static under `prefers-reduced-motion`.
-- **Unread badges:** feedback updates by the orchestrator and `milestone | blocked | needs_you | done | warn | run.end` events newer than the goal's cursor in `~/.epoptes/ui.json`. Opening a goal moves the cursor; a goal seen for the first time starts at "now".
+- **Unread badges:** agent notes and agents' comments on the board, and `milestone | blocked | needs_you | done | warn | run.end` events newer than the goal's cursor in `~/.epoptes/ui.json`. Opening a goal moves the cursor; a goal seen for the first time starts at "now".
 - **Notifications:** toasts and the activity feed for the same events plus rate-limit waits and failed cycles; desktop notifications (browser Notification API, opt-in button) for the types in `goal.notify`. Milestones and DONE get a small confetti burst, skipped under `prefers-reduced-motion`, which also turns off every animation.
 
 ## CLI
 ```
 epoptes add [dir]                      validate .epoptes/goal.json and register it
 epoptes list
-epoptes status [goal]                  one screen: state, mode, clock, cycle, backlog, handoff head, open feedback
+epoptes status [goal]                  one screen: state, mode, clock, cycle, board, approvals, steering, handoff head
 epoptes clock [goal]                   one line for orchestrators: CYCLE RUN MODE ACTIVE TO_WRAPUP TO_END TO_HARD_STOP CYCLE_ELAPSED
-epoptes start | pause | stop [goal]       start: --new-run after DONE; --follow-up to handle open feedback only, no time box
-epoptes feedback <F-n> scope auto|tweak|new_run   how a follow-up treats the item
+epoptes start | pause | stop [goal]       start: --new-run after DONE; --follow-up to handle the human's open cards and comments only, no time box
 epoptes extend [goal] <dur>            e.g. 2h, 30m
 epoptes reset-clock [goal]
 epoptes run [goal] --dry-run           check claude + files + guardrails (lint), print the next cycle's command; never starts the clock
-epoptes feedback [goal] "<text>" [--steer]     --steer: interrupt the running cycle and replan around it now
-epoptes feedback [goal] [--open]       list (--open: new, seen, in progress, blocked)
-epoptes feedback <F-n> <status> ["note"]
-epoptes feedback <F-n> approve|reject ["note"]   the human's answer to an approval
-epoptes approval "<what>" [--ref <task>]        (orchestrator) ask before doing something on the approval list
+epoptes board [goal] [--open] [--all]          the current epic's cards by column (--open: hide done; --all: every epic)
+epoptes feedback [goal] "<text>" [--steer]     a backlog card; --steer: interrupt the running cycle and replan around it now
+epoptes card add "<title>" [--column c] [--milestone M] [--assign role] [--priority p]
+epoptes card <id>                              one card with its comments
+epoptes card <id> backlog|todo|doing|review|done ["note"]   move (takes the set flags too)
+epoptes card <id> cut|block "<why>" | unblock
+epoptes card <id> comment "<text>" [--steer] [--as role]
+epoptes card <id> set [--title t] [--milestone M] [--assign r] [--priority p|none] [--epic e] [--scope auto|tweak|new_run]
+epoptes card <id> approve|reject ["note"]      the human's answer to an approval
+epoptes milestone [goal] | milestone add M<n> "<title>" [--target h:mm]
+epoptes feedback <id> new|seen|in_progress|done|blocked|wont_do|note|edit|scope …   the old item commands, mapped onto cards
+epoptes approval "<what>" [--ref <card>]       (orchestrator) ask before doing something on the approval list
 epoptes wait-for-human "<what>"                 (orchestrator) end the run after this cycle as needs_input
 epoptes event <milestone|blocked|note|artifact|round|wrapup|done> "<text>"
 epoptes job [goal] | job new "<title>" [--id s]  list jobs | start the next job in this harness
@@ -276,10 +290,10 @@ epoptes skill install | path           link plugin/skills/epoptes into ~/.claude
 
 ## Jobs (`src/jobs.ts`)
 One project keeps one harness; each new piece of work in it is a **job**.
-- `epoptes job new "<title>" [--id slug]` (refused while a runner is live): moves the current job's working state (`state/backlog.md`, `handoff.md`, `progress.md`, `scores.jsonl`) into `state/archive/<previous job id>/`, writes a fresh backlog, handoff and progress, resets the clock (the next `start` is a new run, no `--new-run`), sets `goal.json` `job: {id, title}`, and emits `{type: job, id, title, previous, previous_title, archived}`. Harness memory stays: goal settings, roles, permissions, `state/lessons.md`, `state/decisions.md`, feedback (open items carry over; the CLI lists them).
+- `epoptes job new "<title>" [--id slug]` (refused while a runner is live): moves the current job's working state (`handoff.md`, `progress.md`, `scores.jsonl`) into `state/archive/<previous job id>/`, writes a fresh handoff and progress, opens a new epic on the board, resets the clock (the next `start` is a new run, no `--new-run`), sets `goal.json` `job: {id, title}`, and emits `{type: job, id, title, previous, previous_title, archived}`. Harness memory stays: goal settings, roles, permissions, `state/lessons.md`, `state/decisions.md`, and the board: the old epic's cards stay in it, and its untriaged backlog cards move to the new epic (the CLI lists them).
 - **A job is a window of history** from its `job` event to the next; history before the first one is the first job (named by `previous` / `previous_title`, default `job-1` and the goal's name). `run.start` also records `job`.
-- **Scoping:** goal cards, `epoptes status` and the dashboard's numbers count the current job; with several jobs the goal page has a "This job / All jobs" switch (`GET /api/goals/<id>?jobs=all`, `…/time?jobs=all`). `epoptes report` covers the current job by default (`--job <id>` or `all`; the dashboard: Report / Report: all jobs, `?job=`); a finished job's report reads its archived backlog and scores. Feedback belongs to every job it was added or touched in. `epoptes report --all` (every goal) covers whole histories.
-- `epoptes job` lists the jobs with cycles and cost. The skill's "new job in an existing harness" path runs a short interview about what changes, `job new`, then updates goal.json, the job-specific parts of loop.md and the backlog.
+- **Scoping:** goal cards, `epoptes status` and the dashboard's numbers count the current job; with several jobs the goal page has a "This job / All jobs" switch (`GET /api/goals/<id>?jobs=all`, `…/time?jobs=all`). `epoptes report` covers the current job by default (`--job <id>` or `all`; the dashboard: Report / Report: all jobs, `?job=`); a job's report reads its epic's cards and its archived scores; the human's cards in the epic are its feedback. `epoptes report --all` (every goal) covers whole histories.
+- `epoptes job` lists the jobs with cycles and cost. The skill's "new job in an existing harness" path runs a short interview about what changes, `job new`, then updates goal.json, the job-specific parts of loop.md and seeds the new epic.
 
 ## Brain (`src/brain.ts`, `~/.epoptes/brain/`)
 What past harnesses taught, for designing the next one. Token-free and local only.
@@ -290,9 +304,9 @@ What past harnesses taught, for designing the next one. Token-free and local onl
 - **Dashboard:** "Brain" on the goal list (`#/brain`, `GET /api/brain`, `POST /api/brain` to gather first).
 
 ## Reports (`src/report.ts`)
-Built only from recorded files: `events.jsonl`, `cycles/*/result.json`, `feedback.jsonl`, `state/backlog.md`, `state/scores.jsonl`, and git (commits since the first run for `git`, snapshot count for `shadow`). Markdown and a self-contained HTML page (inline CSS and SVG, no scripts, light/dark, printable). `epoptes report` writes both to `.epoptes/reports/` (gitignored); `--all` writes an across-goals report to `~/.epoptes/reports/`. The dashboard serves them at `/goals/<id>/report.html` and `/report.html` with a CSP that allows inline styles and nothing else.
+Built only from recorded files: `events.jsonl`, `cycles/*/result.json`, `board.jsonl`, `state/scores.jsonl`, and git (commits since the first run for `git`, snapshot count for `shadow`). Markdown and a self-contained HTML page (inline CSS and SVG, no scripts, light/dark, printable). `epoptes report` writes both to `.epoptes/reports/` (gitignored); `--all` writes an across-goals report to `~/.epoptes/reports/`. The dashboard serves them at `/goals/<id>/report.html` and `/report.html` with a CSP that allows inline styles and nothing else.
 - **Wall time:** first `run.start` to last `run.end` (or now). **Active time:** each runner process's `run.start`→`run.end` span, minus rate-limit waits when `pause_on_rate_limit` is set; this matches the clock and survives past runs' clocks being replaced.
-- **What's in it:** totals, tokens and cost by model, runs, cost per cycle (⚠ over 2× median), milestones/wrap-up/done, tasks done (`[x]`), commits or snapshots, artifacts, feedback with the cycle and note that closed it, blocked and cut tasks, scores (both `{scores:{…}}` and flat lines), cycles, and deduplicated warnings.
+- **What's in it:** totals, tokens and cost by model, runs, cost per cycle (⚠ over 2× median), milestones/wrap-up/done, cards done, commits or snapshots, artifacts, the human's cards with the cycle and note that closed them, blocked and cut cards, scores (both `{scores:{…}}` and flat lines), cycles, and deduplicated warnings.
 - Costs carry `≈` and "API-equivalent estimate, not billed" whenever any cycle's `cost_basis` is `estimate`.
 
 **Importer** (`src/importers/runsh.ts`): reads `harness/logs/watchdog.log` (run boundaries, times, rc, timeouts, rate-limit waits), `harness/logs[/run<k>]/cycle-*.json`, `harness/state/*`, `FEEDBACK.md` (`→ F-n`) and git tags (`m<k>-done` → milestones, others → releases), and writes one monotonic cycle sequence into `<project>/.epoptes/`. It refuses to import into a goal that already has records.
@@ -300,5 +314,5 @@ Built only from recorded files: `events.jsonl`, `cycles/*/result.json`, `feedbac
 ## Skill (`plugin/`)
 A Claude Code plugin (`plugin/.claude-plugin/plugin.json`) with one skill, `plugin/skills/epoptes/`: `SKILL.md` (process + CLI reference), `reference/{interview,design,guardrails}.md`, and `templates/` (`goal.json`, `loop.md`, `settings.json`, `FEEDBACK.md`, `agents/{worker,checker,reviewer}.md`, `state/*.md`). Templates use `{{placeholders}}` and `<!-- template: … -->` notes; the dry-run lint rejects any that are left. Load it with `claude --plugin-dir plugin` (shows as `epoptes:epoptes`) or `epoptes skill install` (a symlink, so it tracks the repo).
 
-**Dry-run lint** (`src/lint.ts`): problems (exit 1) for template leftovers and role files without a description; warnings for credential-looking strings (reported by file, never printed), a deny list missing `git push` / `reset --hard` / `clean -fdx`, broad allows (`Bash(*)`), a loop that never runs `epoptes event done` or reads `epoptes feedback`, roles without a model, state files over their caps, an empty approval list, and all-manual done checks.
+**Dry-run lint** (`src/lint.ts`): problems (exit 1) for template leftovers and role files without a description; warnings for credential-looking strings (reported by file, never printed), a deny list missing `git push` / `reset --hard` / `clean -fdx`, broad allows (`Bash(*)`), a loop that never runs `epoptes event done` or reads `epoptes board`, roles without a model, state files over their caps, an empty approval list, and all-manual done checks.
 The npm package is `@ramigbcom/epoptes`; the binary is `epoptes`.

@@ -5,13 +5,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { parseFrontmatter } from './adapters/claude-code.ts';
 import { readEvents } from './events.ts';
-import { readFeedback } from './feedback.ts';
+import { boardMilestones, currentEpic, readBoard } from './board.ts';
 import { nowIso, readJson, writeJson, writeText } from './fsx.ts';
 import { loadGoal } from './goal.ts';
 import { epoptesHome, goalPaths, type GoalPaths } from './paths.ts';
 import { readRegistry } from './registry.ts';
 import { readResults } from './report.ts';
-import { backlogMilestones } from './summary.ts';
 
 export const LESSON_TOPICS = ['roles', 'briefs', 'cycles', 'checks', 'tools', 'state', 'cost', 'steering', 'other'] as const;
 export type LessonTopic = (typeof LESSON_TOPICS)[number];
@@ -41,7 +40,7 @@ export interface Digest {
     approvals: number;
     waits_for_human: number;
     feedback: number;
-    /** planned = milestones in the backlog; on_time/late only where the target and the reach time are both known */
+    /** planned = milestones on the board; on_time/late only where the target and the reach time are both known */
     milestones: { planned: number; reached: number; on_time: number; late: number };
     done: boolean;
   };
@@ -88,7 +87,8 @@ export function digestGoal(p: GoalPaths): Digest {
   const goal = loadGoal(p);
   const events = readEvents(p);
   const results = readResults(p);
-  const fb = [...readFeedback(p).values()];
+  const board = readBoard(p);
+  const cards = [...board.cards.values()];
   const exits: Record<string, number> = {};
   for (const r of results) exits[r.exit] = (exits[r.exit] ?? 0) + 1;
   const costs = results.map((r) => r.cost_usd);
@@ -101,8 +101,8 @@ export function digestGoal(p: GoalPaths): Digest {
   } catch {
     // no role files
   }
-  // Milestones: planned from backlog targets, reached from `milestone` events that name them.
-  const planned = backlogMilestones(p);
+  // Milestones: planned on the board (current epic) with targets, reached from `milestone` events that name them.
+  const planned = boardMilestones(board, currentEpic(p));
   let onTime = 0;
   let late = 0;
   let reached = 0;
@@ -150,9 +150,9 @@ export function digestGoal(p: GoalPaths): Digest {
       median_cycle_cost_usd: median(costs.filter((c): c is number => c != null)),
       rate_limit_waits: events.filter((e) => e.type === 'wait' && e.reason === 'rate_limit').length,
       steers: events.filter((e) => e.type === 'control' && e.action === 'steer').length,
-      approvals: fb.filter((f) => f.kind === 'approval').length,
+      approvals: cards.filter((c) => c.approval).length,
       waits_for_human: events.filter((e) => e.type === 'needs_you').length,
-      feedback: fb.filter((f) => f.kind === 'feedback' && f.src !== 'orchestrator').length,
+      feedback: cards.filter((c) => c.src !== 'orchestrator').length,
       milestones: { planned: planned.length, reached, on_time: onTime, late },
       done: events.some((e) => e.type === 'done' || (e.type === 'run.end' && e.reason === 'done')),
     },

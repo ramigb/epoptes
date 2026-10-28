@@ -2,7 +2,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { parseFrontmatter } from './adapters/claude-code.ts';
-import { pendingInbox } from './feedback.ts';
+import { pendingInbox } from './board.ts';
 import { readJson } from './fsx.ts';
 import type { Goal } from './goal.ts';
 import type { GoalPaths } from './paths.ts';
@@ -81,7 +81,7 @@ export function lintGoal(p: GoalPaths, goal: Goal): LintResult {
   try {
     const loop = fs.readFileSync(path.join(p.root, goal.adapter.prompt), 'utf8');
     if (!loop.includes('epoptes event done')) warnings.push(`${goal.adapter.prompt} never runs \`epoptes event done\`, so the run can only end on the clock`);
-    if (!loop.includes('epoptes feedback')) warnings.push(`${goal.adapter.prompt} never reads \`epoptes feedback\`, so feedback is ignored`);
+    if (!/epoptes (board|feedback)\b/.test(loop)) warnings.push(`${goal.adapter.prompt} never reads \`epoptes board\`, so the human's cards and comments are ignored`);
   } catch {
     // reported by the dry run itself
   }
@@ -105,7 +105,7 @@ export function lintGoal(p: GoalPaths, goal: Goal): LintResult {
     }
   }
   const pending = pendingInbox(p).length;
-  if (pending) warnings.push(`FEEDBACK.md has ${pending} new bullet${pending === 1 ? '' : 's'}; each becomes feedback for the orchestrator at the next cycle, so leave it empty unless the human wrote them`);
+  if (pending) warnings.push(`FEEDBACK.md has ${pending} new bullet${pending === 1 ? '' : 's'}; each becomes a backlog card for the orchestrator at the next cycle, so leave it empty unless the human wrote them`);
   if (!goal.approval_required.length) warnings.push('approval_required is empty: nothing will ever wait for you');
   if (goal.done.every((d) => d.verify.type === 'manual')) warnings.push('every done check is manual, so the run can never finish on its own');
   return { problems, warnings };

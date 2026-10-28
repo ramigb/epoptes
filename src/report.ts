@@ -1,16 +1,16 @@
-// Reports built only from recorded data: events, cycle results, feedback, state files and checkpoints.
+// Reports built only from recorded data: events, cycle results, the board, state files and checkpoints.
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { CycleResult, ModelUsage } from './adapters/types.ts';
 import { readEvents, type EpoptesEvent } from './events.ts';
-import { readFeedback } from './feedback.ts';
+import { isBlocked, readBoard } from './board.ts';
 import { exists, hm, nowIso, readJson, readJsonl } from './fsx.ts';
 import { loadGoal, type Goal } from './goal.ts';
 import type { GoalPaths } from './paths.ts';
 import { readStatus } from './status.ts';
 import { inJob, jobStateDir, jobsOf, pickJob } from './jobs.ts';
-import { backlogItems, totalCost } from './summary.ts';
+import { totalCost } from './summary.ts';
 
 type Result = CycleResult & { cycle: number; run: string };
 
@@ -135,7 +135,7 @@ export function buildReport(p: GoalPaths, now = Date.now(), { job: which = 'curr
   const within = (ts: string) => !job || inJob(ts, job);
   const events = allEvents.filter((e) => within(e.ts));
   const results = readResults(p).filter((r) => within(r.started_at));
-  // A finished job's backlog and scores were archived with it.
+  // A finished job's scores were archived with it.
   const stateOf = { state: jobStateDir(p.root, job) };
   const status = readStatus(p);
 
@@ -166,11 +166,11 @@ export function buildReport(p: GoalPaths, now = Date.now(), { job: which = 'curr
   const first = runs[0]?.started_at ?? results[0]?.started_at;
   const lastEnd = runs.at(-1)?.ended_at ? Date.parse(runs.at(-1)!.ended_at!) : now;
 
-  const items = backlogItems({ ...p, ...stateOf });
-  // Feedback belongs to a job if it was added or touched during it.
-  const fb = [...readFeedback(p).values()].filter((f) => f.history.some((o) => within(o.ts))).map((f) => {
-    const closing = [...f.history].reverse().find((o) => o.op === 'status' && ['done', 'wont_do', 'blocked'].includes(o.status));
-    return { id: f.id, text: f.text, status: f.status, src: f.src, created_at: f.created_at, closed_cycle: (closing && 'cycle' in closing ? closing.cycle : null) ?? null, note: closing && 'note' in closing ? (closing.note ?? null) : null };
+  // A job's cards are its epic on the board; the human's cards are its feedback.
+  const cards = [...readBoard(p).cards.values()].filter((c) => !job || c.epic === job.id);
+  const fb = cards.filter((c) => c.src !== 'orchestrator').map((c) => {
+    const status = c.cut ? 'cut' : isBlocked(c) ? 'blocked' : c.column;
+    return { id: c.id, text: c.title, status, src: c.src, created_at: c.created_at, closed_cycle: c.column === 'done' ? c.cycle : null, note: c.cut ?? c.blocked ?? c.comments.findLast((m) => m.by !== 'user')?.text ?? null };
   });
 
   const problems = new Map<string, { text: string; count: number; last: string }>();
@@ -213,10 +213,10 @@ export function buildReport(p: GoalPaths, now = Date.now(), { job: which = 'curr
     median_cost: med,
     milestones: events.filter((e) => ['milestone', 'wrapup', 'done'].includes(e.type)).map((e) => ({ ts: e.ts, run: e.run, cycle: e.cycle, type: e.type, text: String(e.text ?? '') })),
     tasks: {
-      done: items.filter((t) => t.mark === 'done').map((t) => t.text),
-      blocked: items.filter((t) => t.mark === 'blocked').map((t) => t.text),
-      cut: items.filter((t) => t.mark === 'cut').map((t) => t.text),
-      open: items.filter((t) => t.mark === 'todo' || t.mark === 'doing').length,
+      done: cards.filter((c) => c.column === 'done' && !c.cut).map((c) => c.title),
+      blocked: cards.filter((c) => c.column !== 'done' && isBlocked(c)).map((c) => `${c.title} (${c.blocked ?? 'waiting for approval'})`),
+      cut: cards.filter((c) => c.cut).map((c) => c.title),
+      open: cards.filter((c) => c.column !== 'done' && !isBlocked(c)).length,
     },
     commits: commits.slice(0, 80),
     snapshots,

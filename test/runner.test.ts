@@ -17,7 +17,7 @@ function setup(extra: Record<string, unknown> = {}) {
   const project = path.join(base, 'project');
   const root = path.join(project, '.epoptes');
   fs.mkdirSync(path.join(root, 'agents'), { recursive: true });
-  fs.writeFileSync(path.join(root, 'loop.md'), 'Read `epoptes feedback --open`, do one small thing, then `epoptes event done` when finished.\n');
+  fs.writeFileSync(path.join(root, 'loop.md'), 'Read `epoptes board --open`, do one small thing, then `epoptes event done` when finished.\n');
   fs.writeFileSync(path.join(root, 'agents', 'scribe.md'), '---\nname: scribe\ndescription: Writes files\nmodel: haiku\n---\nWrite the file.\n');
   fs.writeFileSync(path.join(root, 'settings.json'), JSON.stringify({ permissions: { allow: ['Read'], deny: ['Bash(git push *)', 'Bash(git reset --hard *)', 'Bash(git clean -fdx *)'] } }));
   const goal = {
@@ -113,7 +113,7 @@ test('stop interrupts the cycle; start resumes the same run', async () => {
   assert.deepEqual(g.events().filter((e) => e.type === 'control').map((e) => e.action), ['start', 'stop', 'resume']);
 });
 
-test('pause after this cycle, extend, feedback and events from the CLI', async () => {
+test('pause after this cycle, extend, the board and events from the CLI', async () => {
   const g = setup();
   g.run(['start', g.project], { FAKE_CLAUDE: 'slow' });
   await until(() => g.read('run/status.json').state === 'running');
@@ -126,30 +126,39 @@ test('pause after this cycle, extend, feedback and events from the CLI', async (
   g.run(['extend', g.project, '30m']);
   assert.equal(g.read('run/clock.json').timebox_s, before + 1800);
 
-  assert.match(g.run(['feedback', g.project, 'make the title bigger']), /added F-1/);
+  assert.match(g.run(['feedback', g.project, 'make the title bigger']), /added C-1 to the backlog/);
   const inCycle = { EPOPTES_GOAL_DIR: g.root, EPOPTES_CYCLE: '4', EPOPTES_RUN: 'r1' };
-  g.run(['feedback', 'F-1', 'in_progress'], inCycle);
-  g.run(['feedback', 'F-1', 'done', 'bigger', 'title'], inCycle);
+  assert.match(g.run(['board', '--open'], inCycle), /BACKLOG \(untriaged.*\n {2}C-1 +\[from the human\] \[new: triage it\] make the title bigger/);
+  g.run(['card', 'C-1', 'todo'], inCycle);
+  g.run(['card', 'C-1', 'set', '--assign', 'scribe', '--milestone', 'M1'], inCycle);
+  g.run(['card', 'C-1', 'doing'], inCycle);
+  g.run(['card', 'C-1', 'review', 'bigger', 'title', '--as', 'scribe'], inCycle);
+  g.run(['feedback', 'C-1', 'done'], inCycle); // the old feedback commands still work
   g.run(['event', 'milestone', 'M1', 'done'], inCycle);
-  g.run(['event', 'wrapup', 'backlog clear'], inCycle);
+  g.run(['event', 'wrapup', 'board clear'], inCycle);
   assert.ok(fs.existsSync(path.join(g.root, 'run', 'WRAPUP')));
-  const fb = readJsonl<any>(path.join(g.root, 'feedback.jsonl'));
-  assert.deepEqual(fb.map((f) => f.status ?? f.op), ['add', 'in_progress', 'done']);
-  assert.equal(fb[2].note, 'bigger title');
-  assert.equal(fb[2].by, 'orchestrator');
+  const ops = readJsonl<any>(path.join(g.root, 'board.jsonl'));
+  assert.deepEqual(ops.map((o) => o.column ?? o.op), ['backlog', 'todo', 'set', 'doing', 'review', 'comment', 'done']);
+  assert.deepEqual([ops[5].text, ops[5].by, ops[5].cycle, ops[1].by], ['bigger title', 'scribe', 4, 'orchestrator']);
+  assert.match(g.run(['card', 'C-1', '--goal', g.project]), /C-1 +M1 @scribe \[from the human\] make the title bigger {2}\(1 comment\)\ncolumn done .*\n {2}scribe c4 .*: bigger title/);
   const ms = g.events().find((e) => e.type === 'milestone');
   assert.deepEqual([ms.src, ms.cycle, ms.text], ['orchestrator', 4, 'M1 done']);
   assert.equal(typeof ms.active_s, 'number', 'milestones record active time for the clock bar');
-  fs.writeFileSync(path.join(g.root, 'state', 'backlog.md'), '**Current milestone: M2**\n## M1 · A (target 0:40)\n- [x] M1-1 a\n## M2 · B (target 1:20)\n- [ ] M2-1 b\n');
+  // Seeding: a backlog.md in the seed format goes onto the board; milestones can also be added by hand.
+  fs.writeFileSync(path.join(g.root, 'state', 'backlog.md'), '## M1 · A (target 0:40)\n- [x] M1-1 a\n## M2 · B (target 1:20)\n- [ ] M2-1 b\n');
   assert.match(g.run(['clock', g.project]), / MILESTONE=M2 M_TARGET=1h20m$/m);
-  assert.match(g.run(['status', g.project]), /feedback 0 new · 0 open · 0 blocked · 1 closed/);
+  g.run(['milestone', 'add', 'm3', 'Polish', '--target', '2:00', '--goal', g.project]);
+  assert.match(g.run(['milestone', g.project]), /^\* M2 +1h20m {2}0\/1 done {2}B\n {2}M3 +2h00m {2}0\/0 done {2}Polish$/m);
+  assert.match(g.run(['status', g.project]), /board 2\/3 done · 0 backlog · 1 todo · 0 doing · 0 review · 0 blocked · 0 cut · milestone M2/);
 
-  // Inside a cycle, adding feedback files an agent note; the human can correct or dismiss it.
-  assert.match(g.run(['feedback', 'research says use SQLite, not JSON files: replan M2'], inCycle), /added F-2 \(agent note/);
-  assert.match(g.run(['feedback', g.project, '--open']), /F-2 +new +\[agent note\] research says use SQLite/);
-  g.run(['feedback', 'F-2', 'edit', 'use SQLite for M2 only', '--goal', g.project]);
-  assert.match(g.run(['feedback', g.project, '--open']), /F-2 +new +\[agent note, edited by the human\] use SQLite for M2 only/);
-  for (const op of readJsonl<any>(path.join(g.root, 'feedback.jsonl'))) assert.deepEqual(validate('feedback', op), [], JSON.stringify(op));
+  // Inside a cycle, adding feedback files an agent note; the human can correct or cut it.
+  assert.match(g.run(['feedback', 'research says use SQLite, not JSON files: replan M2'], inCycle), /added C-4 to the backlog \(agent note/);
+  assert.match(g.run(['board', g.project, '--open']), /C-4 +\[agent note\] research says use SQLite/);
+  g.run(['card', 'C-4', 'set', '--title', 'use SQLite for M2 only', '--goal', g.project]);
+  assert.match(g.run(['board', g.project, '--open']), /C-4 +\[agent note\] use SQLite for M2 only/);
+  assert.throws(() => g.run(['card', 'C-4', 'cut', '--goal', g.project]), /say why/);
+  assert.throws(() => g.run(['card', 'C-4', 'shipped', '--goal', g.project]), /unknown card action/);
+  for (const op of readJsonl<any>(path.join(g.root, 'board.jsonl'))) assert.deepEqual(validate('board', op), [], JSON.stringify(op));
 });
 
 test('approvals: the run waits for the human, and answering the last one resumes it', async () => {
@@ -158,39 +167,39 @@ test('approvals: the run waits for the human, and answering the last one resumes
   await until(() => g.read('run/status.json').state === 'needs_input');
   const s = g.read('run/status.json');
   assert.deepEqual(validate('status', s), []);
-  assert.equal(s.needs.reason, 'approve or reject F-1 (the font)');
+  assert.equal(s.needs.reason, 'approve or reject C-1 (the font)');
   assert.equal(s.pid, null);
   assert.ok(g.read('run/clock.json').paused_at, 'the clock stops while it waits');
   assert.equal(fs.existsSync(path.join(g.root, 'run', 'control.json')), false);
   const ev = g.events();
   for (const e of ev) assert.deepEqual(validate('event', e), [], JSON.stringify(e));
   const blocked = ev.find((e) => e.type === 'blocked');
-  assert.deepEqual([blocked.src, blocked.text, blocked.ref], ['orchestrator', 'needs approval: buy a $5 font licence', 'F-1']);
-  assert.equal(ev.find((e) => e.type === 'needs_you').text, 'approve or reject F-1 (the font)');
+  assert.deepEqual([blocked.src, blocked.text, blocked.ref], ['orchestrator', 'needs approval: buy a $5 font licence', 'C-1']);
+  assert.equal(ev.find((e) => e.type === 'needs_you').text, 'approve or reject C-1 (the font)');
   assert.equal(ev.at(-1).reason, 'needs_you');
-  for (const op of readJsonl<any>(path.join(g.root, 'feedback.jsonl'))) assert.deepEqual(validate('feedback', op), [], JSON.stringify(op));
+  for (const op of readJsonl<any>(path.join(g.root, 'board.jsonl'))) assert.deepEqual(validate('board', op), [], JSON.stringify(op));
 
-  assert.match(g.run(['status', g.project]), /WAITING FOR YOU .*approve or reject F-1/);
-  assert.match(g.run(['status', g.project]), /approval F-1 waits for you: buy a \$5 font licence/);
-  assert.match(g.run(['feedback', g.project]), /F-1 +blocked +\[approval: waiting for the human; do not do it yet\] buy a \$5 font licence \(M1-2\)/);
-  assert.throws(() => g.run(['feedback', 'F-1', 'approve'], { EPOPTES_GOAL_DIR: g.root, EPOPTES_CYCLE: '9', EPOPTES_RUN: 'r1' }), /only the human/);
+  assert.match(g.run(['status', g.project]), /WAITING FOR YOU .*approve or reject C-1/);
+  assert.match(g.run(['status', g.project]), /approval C-1 waits for you: buy a \$5 font licence/);
+  assert.match(g.run(['board', g.project]), /TODO\n {2}C-1 +\[approval: waiting for the human; do not do it yet\] M1-2: buy a \$5 font licence/);
+  assert.throws(() => g.run(['card', 'C-1', 'approve'], { EPOPTES_GOAL_DIR: g.root, EPOPTES_CYCLE: '9', EPOPTES_RUN: 'r1' }), /only the human/);
 
   // Answering the only open approval resumes the run, with the answer visible to the next cycle.
-  const out = g.run(['feedback', 'F-1', 'approve', 'test', 'licence', 'only', '--goal', g.project], { FAKE_DONE_AT: '2' });
-  assert.match(out, /F-1 approved; the run resumes/);
+  const out = g.run(['card', 'C-1', 'approve', 'test', 'licence', 'only', '--goal', g.project], { FAKE_DONE_AT: '2' });
+  assert.match(out, /C-1 approved; the run resumes/);
   await until(() => g.read('run/status.json').state === 'done');
   assert.equal(g.read('run/status.json').needs, null);
   assert.equal(g.read('cycles/000002/result.json').run, 'r1', 'resumed the same run');
-  assert.match(g.run(['feedback', g.project, '--open']), /F-1 +new +\[approval: APPROVED "test licence only"\]/);
-  for (const op of readJsonl<any>(path.join(g.root, 'feedback.jsonl'))) assert.deepEqual(validate('feedback', op), [], JSON.stringify(op));
+  assert.match(g.run(['board', g.project, '--open']), /C-1 +\[approval: APPROVED "test licence only"\] \[the human commented: read it\]/);
+  for (const op of readJsonl<any>(path.join(g.root, 'board.jsonl'))) assert.deepEqual(validate('board', op), [], JSON.stringify(op));
 });
 
-test('steering feedback interrupts the running cycle; the next cycle replans around it first', async () => {
+test('steering interrupts the running cycle; the next cycle replans around it first', async () => {
   const g = setup();
   g.run(['start', g.project], { FAKE_CLAUDE: 'slowfirst', FAKE_DONE_AT: '2' });
   await until(() => g.read('run/status.json').state === 'running');
   const t0 = Date.now();
-  assert.match(g.run(['feedback', g.project, 'switch everything to a dark theme', '--steer']), /added F-1 \(steering\): the running cycle is interrupted now/);
+  assert.match(g.run(['feedback', g.project, 'switch everything to a dark theme', '--steer']), /added C-1 \(steering\): the running cycle is interrupted now/);
   await until(() => g.read('run/status.json').state === 'done');
   assert.ok(Date.now() - t0 < 15000, 'the steering cycle starts right away');
 
@@ -198,34 +207,37 @@ test('steering feedback interrupts the running cycle; the next cycle replans aro
   const ev = g.events();
   for (const e of ev) assert.deepEqual(validate('event', e), [], JSON.stringify(e));
   assert.equal(ev.find((e) => e.type === 'cycle.end' && e.cycle === 1).steered, true);
-  assert.deepEqual(ev.find((e) => e.type === 'cycle.start' && e.cycle === 2).steer, ['F-1']);
-  assert.deepEqual(ev.filter((e) => e.type === 'control').map((e) => [e.action, e.ref]), [['start', undefined], ['steer', 'F-1']]);
+  assert.deepEqual(ev.find((e) => e.type === 'cycle.start' && e.cycle === 2).steer, ['C-1']);
+  assert.deepEqual(ev.filter((e) => e.type === 'control').map((e) => [e.action, e.ref]), [['start', undefined], ['steer', 'C-1']]);
   assert.equal(g.read('run/status.json').fails_in_row, 0, 'steering is not a failure');
   const prompt = g.read('cycles/000002/fake-argv.json').prompt;
-  assert.match(prompt, /^> \*\*Epoptes runner: STEERING\.\*\* The human sent steering feedback \(F-1\) and interrupted the previous cycle/);
-  assert.match(prompt, /F-1: "switch everything to a dark theme"/);
+  assert.match(prompt, /^> \*\*Epoptes runner: STEERING\.\*\* The human is steering \(C-1\) and interrupted the previous cycle/);
+  assert.match(prompt, /C-1: "switch everything to a dark theme"/);
   assert.match(prompt, /ripple effect/);
-  assert.match(prompt, /Read `epoptes feedback --open`/, 'loop.md follows the preamble');
+  assert.match(prompt, /Read `epoptes board --open`/, 'loop.md follows the preamble');
+  assert.doesNotMatch(prompt, /THE BOARD/, 'a loop.md that uses the board gets no migration note');
   assert.doesNotMatch(g.read('cycles/000001/fake-argv.json').prompt, /STEERING/);
-  assert.match(g.run(['feedback', g.project]), /F-1 +new +\[STEERING: replan around this first\]/);
+  assert.match(g.run(['board', g.project]), /C-1 +\[from the human\] \[STEERING: replan around this first\]/);
 
-  // Without a live runner, steering just waits for the next start.
+  // Without a live runner, steering just waits for the next start; a steering comment on a card counts too.
   assert.match(g.run(['feedback', g.project, 'and bigger buttons', '--steer']), /the next cycle replans around it first/);
-  assert.match(g.run(['status', g.project]), /steering F-2 waits for the next cycle/);
+  g.run(['card', 'C-1', 'todo'], { EPOPTES_GOAL_DIR: g.root, EPOPTES_CYCLE: '3', EPOPTES_RUN: 'r1' });
+  assert.match(g.run(['card', 'C-1', 'comment', 'only the editor, not the menus', '--steer', '--goal', g.project]), /C-1: steering comment added; the next cycle replans/);
+  assert.match(g.run(['status', g.project]), /steering C-1 waits for the next cycle: switch everything to a dark theme\n {2}steering C-2 waits/);
 });
 
-test('follow-up after DONE: only open feedback, no time box, agent triage with human overrides', async () => {
+test('follow-up after DONE: only the human\'s open cards and comments, no time box, agent triage with human overrides', async () => {
   const g = setup();
   g.run(['start', g.project], { FAKE_DONE_AT: '1' });
   await until(() => g.read('run/status.json').state === 'done');
-  assert.throws(() => g.run(['start', g.project, '--follow-up']), /no open feedback to follow up on/);
+  assert.throws(() => g.run(['start', g.project, '--follow-up']), /no open feedback or comments to follow up on/);
 
   g.run(['feedback', g.project, 'make the title blue']);
   g.run(['feedback', g.project, 'rebuild it as a mobile app']);
-  g.run(['feedback', 'F-2', 'scope', 'new_run', '--goal', g.project]);
-  g.run(['feedback', 'F-1', 'scope', 'tweak', '--goal', g.project]);
-  assert.throws(() => g.run(['start', g.project]), /1 open feedback item: `epoptes start --follow-up`/);
-  assert.match(g.run(['status', g.project]), /1 open item since DONE/);
+  g.run(['card', 'C-2', 'set', '--scope', 'new_run', '--goal', g.project]);
+  g.run(['feedback', 'C-1', 'scope', 'tweak', '--goal', g.project]);
+  assert.throws(() => g.run(['start', g.project]), /1 open card of yours: `epoptes start --follow-up`/);
+  assert.match(g.run(['status', g.project]), /1 open card of yours since DONE/);
 
   g.run(['start', g.project, '--follow-up'], { FAKE_CLAUDE: 'fixall' });
   await until(() => g.read('run/status.json').state === 'done' && g.read('run/status.json').cycle === 2);
@@ -236,7 +248,7 @@ test('follow-up after DONE: only open feedback, no time box, agent triage with h
   const argv = g.read('cycles/000002/fake-argv.json');
   assert.equal(argv.env.mode, 'followup');
   assert.match(argv.prompt, /^> \*\*Epoptes runner: FOLLOW-UP \(MODE=followup\)\.\*\*/);
-  assert.match(argv.prompt, /F-1: "make the title blue" \(the human marked it a quick tweak: do it in place\)/);
+  assert.match(argv.prompt, /C-1: "make the title blue" \(the human marked it a quick tweak: do it in place\)/);
   assert.doesNotMatch(argv.prompt, /mobile app/, 'items marked new_run are left for a new run');
   const ev = g.events();
   for (const e of ev) assert.deepEqual(validate('event', e), [], JSON.stringify(e));
@@ -244,12 +256,17 @@ test('follow-up after DONE: only open feedback, no time box, agent triage with h
   assert.deepEqual(ev.filter((e) => e.type === 'control').map((e) => e.action), ['start', 'follow_up']);
   // The fake fixed F-1 without saying DONE; the runner ends the follow-up once nothing is left.
   assert.equal(ev.filter((e) => e.type === 'cycle.start' && e.run === 'r2').length, 1);
-  assert.deepEqual([ev.at(-2).type, ev.at(-2).text, ev.at(-1).reason], ['done', 'follow-up: every feedback item is handled', 'done']);
+  assert.deepEqual([ev.at(-2).type, ev.at(-2).text, ev.at(-1).reason], ['done', 'follow-up: every card is handled', 'done']);
   assert.match(g.run(['clock', g.project]), /MODE=followup .*TO_END=none/);
-  for (const op of readJsonl<any>(path.join(g.root, 'feedback.jsonl'))) assert.deepEqual(validate('feedback', op), [], JSON.stringify(op));
+  for (const op of readJsonl<any>(path.join(g.root, 'board.jsonl'))) assert.deepEqual(validate('board', op), [], JSON.stringify(op));
 
+  // A comment on a done card reopens it and counts as follow-up work too.
+  g.run(['card', 'C-1', 'comment', 'a darker blue, please', '--goal', g.project]);
+  assert.match(g.run(['card', 'C-1', '--goal', g.project]), /column todo/);
+  assert.throws(() => g.run(['start', g.project]), /1 open card of yours/);
+  g.run(['card', 'C-1', 'cut', 'the human withdrew it', '--goal', g.project]);
   // A follow-up that never finishes pauses after a few cycles instead of running away.
-  g.run(['feedback', 'F-2', 'scope', 'auto', '--goal', g.project]);
+  g.run(['card', 'C-2', 'set', '--scope', 'auto', '--goal', g.project]);
   g.run(['start', g.project, '--follow-up']);
   await until(() => g.read('run/status.json').state === 'paused');
   assert.equal(g.events().filter((e) => e.type === 'cycle.start' && e.run === 'r3').length, 3);
@@ -293,7 +310,7 @@ test('dry run checks the setup and never starts the clock', () => {
   assert.match(failed, /allows Bash\(\*\)/);
 
   // Bullets left in FEEDBACK.md would become feedback on the first cycle; already-ingested ones are fine.
-  fs.writeFileSync(path.join(g.root, 'FEEDBACK.md'), '# Feedback inbox\n\n- handled → F-1\n- is it fun?\n- does it feel right?\n');
+  fs.writeFileSync(path.join(g.root, 'FEEDBACK.md'), '# Feedback inbox\n\n- handled → C-1\n- is it fun?\n- does it feel right?\n');
   try {
     g.run(['run', g.project, '--dry-run']);
   } catch (e) {
@@ -327,7 +344,7 @@ test('Codex runs fresh cycles through DONE, records usage and resumes after stop
     assert.equal(r.models['test-model'].cache_read, 80);
     assert.equal(r.cost_usd, null);
     assert.deepEqual(validate('cycle-result', r), []);
-    assert.match(g.read(`${dir}/fake-argv.json`).prompt, /epoptes feedback/);
+    assert.match(g.read(`${dir}/fake-argv.json`).prompt, /epoptes board/);
     const activity = readJsonl<any>(path.join(g.root, dir, 'activity.jsonl'));
     assert.ok(activity.some((a) => a.path === 'out.txt'));
   }
@@ -372,7 +389,7 @@ test('pi runs fresh cycles through DONE with the deny list as a guard, records c
     assert.equal(r.models['openrouter/test-model'].cache_read, 160);
     assert.deepEqual(validate('cycle-result', r), []);
     const argv = g.read(`${dir}/fake-argv.json`);
-    assert.match(argv.prompt, /epoptes feedback/);
+    assert.match(argv.prompt, /epoptes board/);
     assert.ok(argv.guard.rules.some((x: any) => x.rule === 'Bash(git push *)'), 'settings.json deny rules reach the guard');
     const activity = readJsonl<any>(path.join(g.root, dir, 'activity.jsonl'));
     assert.ok(activity.some((a) => a.tool === 'Write' && a.path === 'out.txt'));
@@ -437,27 +454,27 @@ test('brain: lessons and digests reach ~/.epoptes/brain when a run ends, and `ep
   for (const e of g.events()) assert.deepEqual(validate('event', e), [], JSON.stringify(e));
 });
 
-test('backlog clear: with no real work left the runner steers the cycle to the done checks, not new tasks', async () => {
+test('board clear: with no real work left the runner steers the cycle to the done checks, not new cards', async () => {
   const g = setup();
   const backlog = (lines: string[]) => fs.writeFileSync(path.join(g.root, 'state', 'backlog.md'), lines.join('\n'));
   backlog(['## Review fixes', '- [ ] R-1 [low] nicer shadow', '## M1 · A (target 0:10)', '- [x] M1-1 a', '- [x] M1-2 b']);
   g.run(['start', g.project], { FAKE_DONE_AT: '1' });
   await until(() => g.read('run/status.json').state === 'done');
   const p1 = g.read('cycles/000001/fake-argv.json').prompt;
-  assert.match(p1, /^> \*\*Epoptes runner: BACKLOG CLEAR\.\*\* No open tasks are left in the backlog except 1 low\/med review fix, and no feedback is waiting/);
+  assert.match(p1, /^> \*\*Epoptes runner: BOARD CLEAR\.\*\* No open cards are left on the board except 1 low\/med priority card, and nothing waits for triage or a reply/);
   assert.match(p1, /time box is a limit, not a target/);
   assert.equal(g.events().find((e) => e.type === 'cycle.start').backlog_clear, true);
 
   // Open work or waiting feedback: no note.
-  backlog(['## M1 · A', '- [x] M1-1 a', '- [ ] M1-2 b']);
+  backlog(['## M2 · B', '- [ ] M2-1 b']);
   g.run(['start', g.project, '--new-run'], { FAKE_DONE_AT: '2' });
   await until(() => g.read('run/status.json').state === 'done' && g.read('run/status.json').cycle === 2);
-  assert.doesNotMatch(g.read('cycles/000002/fake-argv.json').prompt, /BACKLOG CLEAR/);
-  backlog(['## M1 · A', '- [x] M1-1 a']);
+  assert.doesNotMatch(g.read('cycles/000002/fake-argv.json').prompt, /BOARD CLEAR/);
+  g.run(['card', 'C-4', 'done', '--goal', g.project]);
   g.run(['feedback', g.project, 'one more thing']);
   g.run(['start', g.project, '--new-run'], { FAKE_DONE_AT: '3' });
   await until(() => g.read('run/status.json').state === 'done' && g.read('run/status.json').cycle === 3);
-  assert.doesNotMatch(g.read('cycles/000003/fake-argv.json').prompt, /BACKLOG CLEAR/);
+  assert.doesNotMatch(g.read('cycles/000003/fake-argv.json').prompt, /BOARD CLEAR/);
   for (const e of g.events()) assert.deepEqual(validate('event', e), [], JSON.stringify(e));
 });
 
@@ -473,11 +490,12 @@ test('jobs: a new job in the same harness archives the old one, keeps harness me
   assert.throws(() => g.run(['job', 'new', '', '--goal', g.project]), /usage: epoptes job new/);
   const out = g.run(['job', 'new', 'Import from Notion', '--goal', g.project]);
   assert.match(out, /new job import-from-notion: Import from Notion/);
-  assert.match(out, /archived backlog\.md, handoff\.md of job-1 into \.epoptes\/state\/archive\/job-1\//);
-  assert.match(out, /1 feedback item is still open and will reach the new job: F-1/);
+  assert.match(out, /archived handoff\.md of job-1 into \.epoptes\/state\/archive\/job-1\//);
+  assert.match(out, /1 untriaged backlog card moved to the new epic: C-2/);
   const st = path.join(g.root, 'state');
-  assert.match(fs.readFileSync(path.join(st, 'archive', 'job-1', 'backlog.md'), 'utf8'), /M1-1 csv/);
-  assert.match(fs.readFileSync(path.join(st, 'backlog.md'), 'utf8'), /^# Backlog: Import from Notion/);
+  assert.match(fs.readFileSync(path.join(st, 'handoff.md'), 'utf8'), /^New job: Import from Notion\..*epoptes board --open/m);
+  assert.match(g.run(['board', g.project]), /^== epic import-from-notion: Import from Notion \(current\)\nBACKLOG.*\n {2}C-2 /m);
+  assert.match(g.run(['board', g.project, '--all']), /== epic job-1: E2E\n(.*\n)*DONE\n {2}C-1 +M1 M1-1 csv/);
   assert.equal(fs.readFileSync(path.join(st, 'lessons.md'), 'utf8'), '- keep briefs short\n', 'harness memory stays');
   assert.deepEqual(g.read('goal.json').job, { id: 'import-from-notion', title: 'Import from Notion' });
   assert.equal(fs.existsSync(path.join(g.root, 'run', 'clock.json')), false, 'clock reset');
@@ -499,13 +517,14 @@ test('jobs: a new job in the same harness archives the old one, keeps harness me
   assert.match(current, /\| Cycles \| 1 \(0 failed\) \|/);
   assert.match(g.run(['report', g.project, '--stdout', '--job', 'all']), /\| Cycles \| 2 \(0 failed\) \|/);
   const old = g.run(['report', g.project, '--stdout', '--job', 'job-1']);
-  assert.match(old, /M1-1 csv/, "an old job's report reads its archived backlog");
+  assert.match(old, /M1-1 csv/, "an old job's report reads its epic's cards");
+  assert.doesNotMatch(current, /M1-1 csv/);
   assert.throws(() => g.run(['report', g.project, '--stdout', '--job', 'nope']), /no job "nope"/);
 
   // A second new job gets a fresh archive, and ids stay unique.
   g.run(['job', 'new', 'Import from Notion', '--goal', g.project]);
   assert.deepEqual(g.read('goal.json').job.id, 'import-from-notion-2');
-  assert.ok(fs.existsSync(path.join(st, 'archive', 'import-from-notion', 'backlog.md')));
+  assert.ok(fs.existsSync(path.join(st, 'archive', 'import-from-notion', 'handoff.md')));
 });
 
 test('re-adding a goal whose id was renamed updates the registry', () => {

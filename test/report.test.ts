@@ -46,7 +46,9 @@ test('report totals, runs, flags and feedback come from the recorded files', () 
   assert.equal(r.totals.models['claude-sonnet-5'].cost_usd, 6.4);
   assert.deepEqual(r.cycles.map((c) => c.flagged), [false, false, false, true], 'over twice the median');
   assert.equal(r.runs[0].end_reason, 'done');
-  assert.deepEqual(r.tasks, { done: ['A one'], blocked: ['C three (needs key)'], cut: ['D four'], open: 1 });
+  // A goal from before the board: its feedback.jsonl and backlog.md are imported, the feedback card done like a task.
+  assert.deepEqual(r.tasks, { done: ['<script>alert(1)</script> bigger title', 'A one'], blocked: ['C three (needs key)'], cut: ['D four'], open: 1 });
+  assert.equal(r.feedback[0].note, 'title is bigger');
   assert.equal(r.feedback[0].closed_cycle, 4);
   assert.deepEqual(r.scores.criteria.sort(), ['accuracy', 'clarity'], 'both score shapes are read');
   assert.ok(r.estimate);

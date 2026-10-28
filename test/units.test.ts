@@ -3,18 +3,23 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { backlogMilestones } from '../src/summary.ts';
 import { agentsFromDir, parseFrontmatter, StreamParser } from '../src/adapters/claude-code.ts';
 import { activeS, clockState, newClock, pauseClock, resumeClock, readClock, writeClock } from '../src/clock.ts';
-import { addFeedback, ingestInbox, readFeedback, setFeedbackStatus } from '../src/feedback.ts';
+import { addCard, askApproval, boardCounts, boardMilestones, commentCard, currentCards, decide, followUpCards, ingest, isBlocked, openWork, pendingApprovals, readBoard, setCard } from '../src/board.ts';
 import { hm, parseDuration } from '../src/fsx.ts';
 import { goalPaths } from '../src/paths.ts';
 import { validate } from '../src/schema.ts';
-import { backlogCounts } from '../src/summary.ts';
 import { idleStatus, reconcile, writeStatus } from '../src/status.ts';
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'epoptes-test-'));
 const iso = (s: number) => new Date(s * 1000).toISOString();
+/** A project with a bare goal.json: enough for the board (it reads goal.json without validating it). */
+const tmpGoal = () => {
+  const p = goalPaths(tmp());
+  fs.mkdirSync(p.state, { recursive: true });
+  fs.writeFileSync(p.goal, JSON.stringify({ id: 'g', name: 'G' }));
+  return p;
+};
 
 test('own-cycle readers do not crash a runner hidden by a sandbox PID namespace', (t) => {
   const p = goalPaths(tmp());
@@ -75,24 +80,85 @@ test('durations', () => {
   assert.equal(hm(-720), '-0h12m');
 });
 
-test('feedback: ids, status fold, inbox ingestion is idempotent', () => {
-  const p = goalPaths(tmp());
-  fs.mkdirSync(p.root, { recursive: true });
-  assert.equal(addFeedback(p, 'the bow is too small', 'cli'), 'F-1');
-  fs.writeFileSync(p.inbox, '# Inbox\n\nWrite notes here.\n\n- arms clip into dresses\n- \n- already handled → F-1\n* add a spin dance\n');
-  assert.deepEqual(ingestInbox(p), ['F-2', 'F-3']);
-  assert.deepEqual(ingestInbox(p), []);
-  assert.match(fs.readFileSync(p.inbox, 'utf8'), /- arms clip into dresses → F-2\n- \n- already handled → F-1\n\* add a spin dance → F-3\n/);
+test('board: ids, inbox ingestion, whose turn it is, reopening and approvals', () => {
+  const p = tmpGoal();
+  assert.equal(addCard(p, 'the bow is too small', 'cli'), 'C-1');
+  fs.writeFileSync(p.inbox, '# Inbox\n\nWrite notes here.\n\n- arms clip into dresses\n- \n- already handled → C-1\n* add a spin dance\n');
+  assert.deepEqual(ingest(p), ['C-2', 'C-3']);
+  assert.deepEqual(ingest(p), []);
+  assert.match(fs.readFileSync(p.inbox, 'utf8'), /- arms clip into dresses → C-2\n- \n- already handled → C-1\n\* add a spin dance → C-3\n/);
 
-  setFeedbackStatus(p, 'F-2', 'in_progress', 'orchestrator', 11);
-  setFeedbackStatus(p, 'F-2', 'done', 'orchestrator', 12, 'arms clear skirts');
-  const items = readFeedback(p);
-  assert.equal(items.get('F-2')!.status, 'done');
-  assert.equal(items.get('F-2')!.history.length, 3);
-  assert.equal(items.get('F-3')!.src, 'file');
-  assert.throws(() => setFeedbackStatus(p, 'F-9', 'done', 'user', null));
-  assert.throws(() => setFeedbackStatus(p, 'F-1', 'finished' as never, 'user', null));
-  for (const line of fs.readFileSync(p.feedback, 'utf8').trim().split('\n')) assert.deepEqual(validate('feedback', JSON.parse(line)), []);
+  let c = readBoard(p).cards;
+  assert.deepEqual([c.get('C-1')!.column, c.get('C-1')!.epic, c.get('C-1')!.waiting, c.get('C-3')!.src], ['backlog', 'job-1', true, 'file']);
+  // The orchestrator triages it: no longer waiting. The human comments: waiting again. Any agent reply answers it.
+  setCard(p, 'C-1', { column: 'todo', milestone: 'm1' }, 'orchestrator', 3);
+  assert.deepEqual([readBoard(p).cards.get('C-1')!.waiting, readBoard(p).cards.get('C-1')!.milestone], [false, 'M1']);
+  commentCard(p, 'C-1', 'make it red too', 'user', null, true);
+  assert.deepEqual([readBoard(p).cards.get('C-1')!.waiting, readBoard(p).cards.get('C-1')!.steering], [true, true]);
+  commentCard(p, 'C-1', 'will do', 'worker', 4);
+  c = readBoard(p).cards;
+  assert.deepEqual([c.get('C-1')!.waiting, c.get('C-1')!.steering, c.get('C-1')!.cycle], [false, false, 4]);
+  // Done, then the human comments: back to TODO. Cut, then moved: the cut reason goes.
+  setCard(p, 'C-1', { column: 'done' }, 'orchestrator', 5);
+  commentCard(p, 'C-1', 'still too small on phones', 'user');
+  assert.deepEqual([readBoard(p).cards.get('C-1')!.column, readBoard(p).cards.get('C-1')!.waiting], ['todo', true]);
+  setCard(p, 'C-2', { column: 'done', cut: 'not a bug' }, 'orchestrator', 5);
+  assert.equal(readBoard(p).cards.get('C-2')!.cut, 'not a bug');
+  setCard(p, 'C-2', { column: 'todo' }, 'user');
+  assert.equal(readBoard(p).cards.get('C-2')!.cut, null);
+
+  // An approval goes on the card it gates; a ref that isn't a card gets a new one.
+  assert.equal(askApproval(p, 'buy a font', 'C-3', 'orchestrator', 6), 'C-3');
+  assert.equal(askApproval(p, 'use a paid API', 'M2-1', 'orchestrator', 6), 'C-4');
+  c = readBoard(p).cards;
+  assert.deepEqual([isBlocked(c.get('C-3')!), c.get('C-4')!.title, c.get('C-4')!.column], [true, 'M2-1: use a paid API', 'todo']);
+  assert.deepEqual(pendingApprovals([...c.values()]).map((x) => x.id), ['C-3', 'C-4']);
+  assert.throws(() => decide(p, 'C-2', 'approved'), /no approval request/);
+  decide(p, 'C-3', 'rejected', 'free fonts only');
+  c = readBoard(p).cards;
+  assert.deepEqual([isBlocked(c.get('C-3')!), c.get('C-3')!.waiting, c.get('C-3')!.comments.at(-1)!.text], [false, true, 'rejected: free fonts only']);
+
+  assert.throws(() => setCard(p, 'C-9', { column: 'done' }, 'user'), /no card C-9/);
+  assert.throws(() => setCard(p, 'C-1', { column: 'finished' as never }, 'user'), /unknown column/);
+  assert.throws(() => commentCard(p, 'C-1', '  ', 'user'), /empty/);
+  for (const line of fs.readFileSync(p.board, 'utf8').trim().split('\n')) assert.deepEqual(validate('board', JSON.parse(line)), [], line);
+});
+
+test('board: a harness from before the board is imported once (feedback.jsonl, backlog.md)', () => {
+  const p = tmpGoal();
+  const ops = [
+    { ts: '2026-09-28T10:00:00.000Z', op: 'add', id: 'F-1', text: 'bigger title', src: 'dashboard' },
+    { ts: '2026-09-28T10:01:00.000Z', op: 'add', id: 'F-2', text: 'buy a font', src: 'orchestrator', kind: 'approval', ref: 'M1-2' },
+    { ts: '2026-09-28T10:02:00.000Z', op: 'decide', id: 'F-2', decision: 'approved', by: 'user' },
+    { ts: '2026-09-28T10:03:00.000Z', op: 'add', id: 'F-3', text: 'rebuild as an app', src: 'cli' },
+    { ts: '2026-09-28T10:04:00.000Z', op: 'status', id: 'F-3', status: 'blocked', by: 'orchestrator', cycle: 2, note: 'needs a new run: big' },
+    { ts: '2026-09-28T10:05:00.000Z', op: 'add', id: 'F-4', text: 'stray idea', src: 'cli' },
+    { ts: '2026-09-28T10:06:00.000Z', op: 'status', id: 'F-4', status: 'wont_do', by: 'orchestrator', cycle: 2, note: 'out of scope' },
+  ];
+  fs.writeFileSync(p.feedback, ops.map((o) => JSON.stringify(o)).join('\n') + '\n');
+  fs.writeFileSync(path.join(p.state, 'backlog.md'), [
+    '# Backlog', '**Current milestone: M1**', '## Feedback (from `epoptes feedback`)', '- [x] F-1 bigger title',
+    '## M1 · Form works (target 0:40)', '- [x] M1-1 a', '- [~] M1-2 b', '- [blocked: needs key] M1-3 c', '- [cut] M1-4 d',
+    '## Review fixes', '- [ ] R-1 [low] nicer shadow',
+  ].join('\n'));
+  const b = readBoard(p);
+  assert.ok(fs.existsSync(`${p.feedback}.imported`) && !fs.existsSync(p.feedback));
+  assert.ok(fs.existsSync(path.join(p.state, 'backlog.md.imported')));
+  const c = (id: string) => b.cards.get(id)!;
+  assert.deepEqual([c('F-1').column, c('F-1').waiting], ['done', false], 'the backlog line moved the feedback card');
+  assert.deepEqual([c('F-2').approval!.decision, c('F-2').waiting], ['approved', true]);
+  assert.deepEqual([c('F-3').blocked, c('F-4').cut, c('F-4').comments[0].text], ['needs a new run: big', "won't do", 'out of scope']);
+  assert.deepEqual([...b.cards.values()].filter((x) => x.id.startsWith('C-')).map((x) => [x.title, x.column, x.milestone, x.blocked, x.cut, x.priority]), [
+    ['M1-1 a', 'done', 'M1', null, null, null], ['M1-2 b', 'doing', 'M1', null, null, null], ['M1-3 c', 'todo', 'M1', 'needs key', null, null],
+    ['M1-4 d', 'done', 'M1', null, 'cut', null], ['R-1 [low] nicer shadow', 'todo', null, null, null, 'low'],
+  ]);
+  const cards = currentCards(p);
+  assert.deepEqual(boardCounts(cards, boardMilestones(b, 'job-1')), { backlog: 0, todo: 2, doing: 1, review: 0, done: 2, blocked: 2, cut: 2, milestone: 'M1' });
+  assert.deepEqual(followUpCards(cards).map((x) => x.id), ['F-2'], 'blocked, cut and done cards are not follow-up work');
+  // Seeding again later adds to the board; the old feedback log is never read again.
+  fs.writeFileSync(path.join(p.state, 'backlog.md'), '## M2 · Next (target 1:20)\n- [ ] M2-1 e\n');
+  assert.equal(readBoard(p).cards.size, b.cards.size + 1);
+  for (const line of fs.readFileSync(p.board, 'utf8').trim().split('\n')) assert.deepEqual(validate('board', JSON.parse(line)), [], line);
 });
 
 test('stream parser: subagents, tools, limits and the last result', () => {
@@ -170,13 +236,6 @@ test('stream parser: usage so far counts each API message once, across subagents
   });
 });
 
-test('backlog markers', () => {
-  const p = goalPaths(tmp());
-  fs.mkdirSync(p.state, { recursive: true });
-  fs.writeFileSync(path.join(p.state, 'backlog.md'), '**Current milestone: M2**\n- [x] A\n- [ ] B\n- [~] C\n- [blocked: needs key] D\n- [cut] E\n  - [X] F\n');
-  assert.deepEqual(backlogCounts(p), { todo: 1, doing: 1, done: 2, blocked: 1, cut: 1, milestone: 'M2' });
-});
-
 test('skill templates: goal.json validates once filled in, and every template file is lint-clean after adaptation', () => {
   const tpl = new URL('../plugin/skills/epoptes/templates/', import.meta.url);
   const raw = fs.readFileSync(new URL('goal.json', tpl), 'utf8');
@@ -191,10 +250,9 @@ test('skill templates: goal.json validates once filled in, and every template fi
   for (const ref of skill.matchAll(/\]\(([^)#]+)\)/g)) assert.ok(fs.existsSync(new URL(`../plugin/skills/epoptes/${ref[1]}`, import.meta.url)), `SKILL.md links to missing ${ref[1]}`);
 });
 
-test('milestones from backlog headings, with targets and task counts', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'epoptes-ms-'));
-  fs.mkdirSync(path.join(dir, '.epoptes', 'state'), { recursive: true });
-  fs.writeFileSync(path.join(dir, '.epoptes', 'state', 'backlog.md'), [
+test('milestones from a seeded backlog: targets, card counts, the current one', () => {
+  const p = tmpGoal();
+  fs.writeFileSync(path.join(p.state, 'backlog.md'), [
     '# Backlog', '', '**Current milestone: M2 · Templates**', '',
     '## Feedback (from `epoptes feedback`)', '- [ ] F-1 bigger title', '',
     '## M1 · Form works (target 0:40)', '- [x] M1-1 a', '- [x] M1-2 b', '- [cut] M1-3 c', '',
@@ -202,7 +260,7 @@ test('milestones from backlog headings, with targets and task counts', () => {
     '## Review fixes', '- [ ] R-1 [high] x', '',
     '### M3: Polish', '- [ ] M3-1 a',
   ].join('\n'));
-  const ms = backlogMilestones(goalPaths(dir));
+  const ms = boardMilestones(readBoard(p), 'job-1');
   assert.deepEqual(ms.map((m) => [m.id, m.title, m.target_s, m.done, m.doing, m.blocked, m.cut, m.todo, m.current]), [
     ['M1', 'Form works', 2400, 2, 0, 0, 1, 0, false],
     ['M2', 'Templates', 4800, 1, 1, 1, 0, 1, true],
@@ -237,17 +295,16 @@ test('time use: phases from events, roles and tools from activity', async () => 
   });
 });
 
-test('open work ignores low/med review fixes; projection follows milestone pace', async () => {
-  const { openWork, projectFinish } = await import('../src/summary.ts');
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'epoptes-work-'));
-  fs.mkdirSync(path.join(dir, '.epoptes', 'state'), { recursive: true });
-  const write = (lines: string[]) => fs.writeFileSync(path.join(dir, '.epoptes', 'state', 'backlog.md'), lines.join('\n'));
-  write(['## Review fixes', '- [ ] R-1 [low] ui: nicer shadow', '- [ ] R-2 [med] copy: shorter intro', '## M1 · A', '- [x] M1-1 a', '- [blocked: needs approval F-2] M1-2 b']);
-  assert.deepEqual(openWork(goalPaths(dir)), { open: 0, blocked: 1, minor: 2 });
-  write(['- [ ] R-3 [high] crash on load', '- [x] M1-1 a']);
-  assert.deepEqual(openWork(goalPaths(dir)), { open: 1, blocked: 0, minor: 0 });
-  write(['# nothing yet']);
-  assert.equal(openWork(goalPaths(dir)), null);
+test('open work ignores low/med cards; projection follows milestone pace', async () => {
+  const { projectFinish } = await import('../src/summary.ts');
+  const p = tmpGoal();
+  assert.equal(openWork(currentCards(p)), null);
+  fs.writeFileSync(path.join(p.state, 'backlog.md'), ['## Review fixes', '- [ ] R-1 [low] ui: nicer shadow', '- [ ] R-2 [med] copy: shorter intro', '## M1 · A', '- [x] M1-1 a', '- [blocked: needs approval] M1-2 b'].join('\n'));
+  assert.deepEqual(openWork(currentCards(p)), { open: 0, blocked: 1, minor: 2, untriaged: 0, waiting: 0 });
+  const id = addCard(p, 'crash on load', 'cli');
+  assert.deepEqual(openWork(currentCards(p)), { open: 0, blocked: 1, minor: 2, untriaged: 1, waiting: 1 });
+  setCard(p, id, { column: 'review', priority: 'high' }, 'orchestrator');
+  assert.deepEqual(openWork(currentCards(p)), { open: 1, blocked: 1, minor: 2, untriaged: 0, waiting: 0 });
 
   const m = (id: string, target_s: number | null, active_s: number | null) => ({ id, title: id, target_s, todo: 0, doing: 0, done: 0, blocked: 0, cut: 0, current: false, reached: active_s == null ? null : { at: '', run: 'r1', active_s } });
   // M1 planned for 2h, done in 30 min: the run is on a quarter of the plan, so a 10h plan lands at ~2h30m.

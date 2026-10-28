@@ -8,8 +8,7 @@ import { gatherGoal, rebuildIndex } from './brain.ts';
 import type { Activity, Cycle, CycleExit } from './adapters/types.ts';
 import { clockState, newClock, newFollowUpClock, runFinished, pauseClock, readClock, resumeClock, writeClock, type Clock, type Mode } from './clock.ts';
 import { emit, readEvents } from './events.ts';
-import { followUpItems, ingestInbox, isOpen, pendingApprovals, pendingSteers, readFeedback, type FeedbackItem } from './feedback.ts';
-import { openWork } from './summary.ts';
+import { currentCards, followUpCards, ingest, lastAsk, openWork, pendingSteers, type Card } from './board.ts';
 import { appendJsonl, exists, nowIso, readJson, rm, touch, writeJson } from './fsx.ts';
 import { loadGoal, type Goal } from './goal.ts';
 import { goalPaths, type GoalPaths } from './paths.ts';
@@ -75,35 +74,35 @@ function shadowSnapshot(p: GoalPaths, n: number) {
 }
 
 /**
- * A note the runner puts in front of loop.md when steering feedback is waiting, so the cycle replans first.
+ * A note the runner puts in front of loop.md when the human is steering, so the cycle replans first.
  * It lives here rather than in loop.md so harnesses generated before steering existed get it too.
  */
-export function steerPreamble(items: FeedbackItem[], interrupted: boolean): string {
-  if (!items.length) return '';
-  const ids = items.map((f) => f.id).join(', ');
-  const list = items.map((f) => `>   - ${f.id}: ${JSON.stringify(f.text)}`).join('\n');
+export function steerPreamble(cards: Card[], interrupted: boolean): string {
+  if (!cards.length) return '';
+  const ids = cards.map((c) => c.id).join(', ');
+  const list = cards.map((c) => `>   - ${c.id}: ${JSON.stringify(lastAsk(c))}`).join('\n');
   return [
-    `> **Epoptes runner: STEERING.** The human sent steering feedback (${ids})${interrupted ? ' and interrupted the previous cycle to do it' : ''}. It outranks everything else. Before normal work:`,
+    `> **Epoptes runner: STEERING.** The human is steering (${ids})${interrupted ? ' and interrupted the previous cycle to do it' : ''}. It outranks everything else. Before normal work:`,
     `> 1. Orient as usual.${interrupted ? ' The last cycle was cut off mid-task, so do the interrupted-work check carefully.' : ''}`,
-    `> 2. Read it with \`epoptes feedback --open\`:`,
+    '> 2. Read each with `epoptes card <id>`:',
     list,
-    `> 3. Replan with the ripple effect: walk every open task and milestone in the backlog, then cut, rewrite, reorder or add tasks so the whole plan follows the new direction (not just one task). Check the current milestone and the wrap-up list still make sense. Record the change in \`state/decisions.md\`.`,
-    `> 4. Run \`epoptes feedback <id> in_progress\`, then \`epoptes feedback <id> note "replanned: <what changed in the plan>"\`, and carry on with the new plan.`,
+    "> 3. Replan with the ripple effect: walk every open card and milestone on the board (`epoptes board --open`), then cut, rewrite, reorder or add cards so the whole plan follows the new direction (not just one card). Check the current milestone and the wrap-up list still make sense. Record the change in `state/decisions.md`.",
+    '> 4. Answer on each card: `epoptes card <id> comment "replanned: <what changed in the plan>"`, move it where it belongs, and carry on with the new plan.',
     '',
     '',
   ].join('\n');
 }
 
 /**
- * The note in front of loop.md when the backlog has run out of real work in build mode: check done, then wrap up.
+ * The note in front of loop.md when the board has run out of real work in build mode: check done, then wrap up.
  * Without it an orchestrator with hours left on the clock tends to invent tasks to fill them.
  */
 export function backlogClearPreamble(w: { blocked: number; minor: number }): string {
   return [
-    `> **Epoptes runner: BACKLOG CLEAR.** No open tasks are left in the backlog${w.minor ? ` except ${w.minor} low/med review fix${w.minor > 1 ? 'es' : ''}` : ''}${w.blocked ? `, and ${w.blocked} blocked` : ''}, and no feedback is waiting. Unused time is fine: the time box is a limit, not a target. This cycle:`,
+    `> **Epoptes runner: BOARD CLEAR.** No open cards are left on the board${w.minor ? ` except ${w.minor} low/med priority card${w.minor > 1 ? 's' : ''}` : ''}${w.blocked ? `, and ${w.blocked} blocked` : ''}, and nothing waits for triage or a reply. Unused time is fine: the time box is a limit, not a target. This cycle:`,
     '> 1. Orient as usual, then run every done check from goal.json.',
-    '> 2. All pass → `epoptes event wrapup "<why>"` and do the wrap-up checklist. One fails → add only the tasks that make it pass (say which check each is for), and do them.',
-    `> 3. Don't add tasks for anything else. Ideas go in the handoff's next-tasks list for the human.${w.blocked ? ' If what\'s left is blocked on the human, `epoptes wait-for-human "<what you need>"` after wrapping up what you can.' : ''}`,
+    '> 2. All pass → `epoptes event wrapup "<why>"` and do the wrap-up checklist. One fails → add only the cards that make it pass (say which check each is for), and do them.',
+    `> 3. Don't add cards for anything else. Ideas go in the handoff's next-tasks list for the human.${w.blocked ? ' If what\'s left is blocked on the human, `epoptes wait-for-human "<what you need>"` after wrapping up what you can.' : ''}`,
     '',
     '',
   ].join('\n');
@@ -112,22 +111,34 @@ export function backlogClearPreamble(w: { blocked: number; minor: number }): str
 const SCOPE_NOTE = { auto: 'triage it yourself', tweak: 'the human marked it a quick tweak: do it in place', new_run: '' };
 
 /**
- * The note in front of loop.md during a follow-up run: handle exactly these feedback items, each judged on its
- * own, with no time box, and nothing else. Minor items get done; major ones are flagged for a new run.
+ * The note in front of loop.md during a follow-up run: handle exactly these cards, each judged on its own, with no
+ * time box, and nothing else. Minor items get done; major ones are flagged for a new run.
  */
-export function followUpPreamble(items: FeedbackItem[]): string {
-  const list = items.map((f) => `>   - ${f.id}: ${JSON.stringify(f.text)} (${f.kind === 'approval' ? `approval ${f.decision}; ` : ''}${SCOPE_NOTE[f.scope]})`).join('\n');
+export function followUpPreamble(cards: Card[]): string {
+  const list = cards.map((c) => `>   - ${c.id}: ${JSON.stringify(lastAsk(c))} (${c.approval?.decision ? `approval ${c.approval.decision}; ` : ''}${SCOPE_NOTE[c.scope]})`).join('\n');
   return [
-    '> **Epoptes runner: FOLLOW-UP (MODE=followup).** This goal was already finished. The human started a follow-up for their feedback. There is no time box: take the time each item needs, judged on its own, and nothing more. The items:',
+    "> **Epoptes runner: FOLLOW-UP (MODE=followup).** This goal was already finished. The human started a follow-up for their cards and comments. There is no time box: take the time each item needs, judged on its own, and nothing more. The items (read each with `epoptes card <id>`):",
     list,
     '> For each item you triage:',
-    '> - **Minor** (adjust what exists: a colour, a size, wording, a small bug, a small addition) → do it, verify it, checkpoint, then `epoptes feedback <id> done "<what changed>"`.',
-    '> - **Major** (restart the job, a new version of the output, a change of direction, or more than about one cycle of work) → do not start it. Run `epoptes feedback <id> blocked "needs a new run: <why, and a rough size>"`.',
-    "> Don't pick up backlog tasks, review fixes, agent notes or polish that no item asks for. Skip the wrap-up checklist. When every item is done or blocked, update the handoff, then `epoptes event done \"follow-up: <one line>\"` and exit.",
+    '> - **Minor** (adjust what exists: a colour, a size, wording, a small bug, a small addition) → do it, verify it, checkpoint, then `epoptes card <id> done "<what changed>"`.',
+    '> - **Major** (restart the job, a new version of the output, a change of direction, or more than about one cycle of work) → do not start it. Run `epoptes card <id> block "needs a new run: <why, and a rough size>"`.',
+    '> - **Just a question or a remark** → answer it: `epoptes card <id> comment "<reply>"`.',
+    "> Don't pick up other cards, review fixes, agent notes or polish that no item asks for. Skip the wrap-up checklist. When every item is done, blocked or answered, update the handoff, then `epoptes event done \"follow-up: <one line>\"` and exit.",
     '',
     '',
   ].join('\n');
 }
+
+/** For a loop.md written before the board: what replaced backlog.md and `epoptes feedback`. */
+export const BOARD_PREAMBLE = [
+  "> **Epoptes runner: THE BOARD.** This harness's loop.md predates the board. Work is tracked on a kanban board now, not in state/backlog.md or the feedback list:",
+  '> - `epoptes board --open` replaces reading backlog.md and `epoptes feedback --open`; `epoptes card <id>` shows one card with its comments.',
+  '> - Columns: backlog (untriaged: the human\'s feedback, agent notes) → todo → doing → review (being verified) → done. Triage each backlog card: `epoptes card <id> todo`, or `cut "<why>"`.',
+  '> - Move cards with `epoptes card <id> doing|review|done ["note"]`, `block "<why>"`, `cut "<why>"`; add one with `epoptes card add "<task>" --column todo --milestone M<n>`. Do this wherever loop.md says to tick, add or block a backlog task or set a feedback status. Never create or edit state/backlog.md.',
+  '> - When the human comments on a card, act on it or just reply: `epoptes card <id> comment "<reply>"`.',
+  '',
+  '',
+].join('\n');
 
 function capWarnings(p: GoalPaths, goal: Goal): string[] {
   const out: string[] = [];
@@ -180,7 +191,7 @@ export async function runGoal(project: string, { followUp = false } = {}) {
 
   // ---- signals, heartbeat, cancellable sleep ----
   let stopRequested = false;
-  let steerRequested = false; // SIGUSR2 from `epoptes feedback --steer`: interrupt this cycle, start the next at once
+  let steerRequested = false; // SIGUSR2 from steering (`epoptes feedback --steer`, a steer comment): interrupt this cycle, start the next at once
   let current: Cycle | null = null;
   let wake: (() => void) | null = null;
   const sleep = (ms: number) =>
@@ -201,7 +212,7 @@ export async function runGoal(project: string, { followUp = false } = {}) {
     wake?.();
   };
   const onSteer = () => {
-    log('steering feedback: interrupting the cycle to replan');
+    log('steering: interrupting the cycle to replan');
     if (current) {
       steerRequested = true;
       current.interrupt();
@@ -255,7 +266,7 @@ export async function runGoal(project: string, { followUp = false } = {}) {
 
   // ---- the loop ----
   let fails = 0;
-  let lastSteered = false; // the previous cycle was interrupted by steering feedback
+  let lastSteered = false; // the previous cycle was interrupted by steering
   let backoff = goal.rate_limit.backoff_s;
   let lastMode: Mode | null = status.mode;
 
@@ -285,15 +296,16 @@ export async function runGoal(project: string, { followUp = false } = {}) {
       setStatus({ mode: st.mode });
       if (st.mode === 'stop') return finish('timebox');
 
-      for (const id of ingestInbox(p)) log(`feedback ${id} ingested from FEEDBACK.md`);
+      for (const id of ingest(p)) log(`card ${id} added from FEEDBACK.md`);
+      const cards = currentCards(p);
 
       let preamble = '';
       if (isFollowUp) {
-        const items = followUpItems(readFeedback(p));
+        const items = followUpCards(cards);
         if (!items.length) {
-          // Every item is done or flagged for a new run: nothing left to spend a cycle on.
+          // Every item is done, answered or flagged for a new run: nothing left to spend a cycle on.
           touch(p.done);
-          emit(p, { src: 'runner', type: 'done', run, cycle: status.cycle || null, text: 'follow-up: every feedback item is handled' });
+          emit(p, { src: 'runner', type: 'done', run, cycle: status.cycle || null, text: 'follow-up: every card is handled' });
           return finish('done');
         }
         const ran = readEvents(p).filter((e) => e.type === 'cycle.start' && e.run === run).length;
@@ -309,14 +321,13 @@ export async function runGoal(project: string, { followUp = false } = {}) {
       const timeoutS = Math.round(Math.max(60, Math.min(timeoutMin * 60, st.toHard)));
       const cycleDir = p.cycleDir(n);
       fs.mkdirSync(cycleDir, { recursive: true });
-      const fb = readFeedback(p);
-      const steers = pendingSteers(fb);
+      const steers = pendingSteers(cards);
       // Build mode with nothing real left to do: steer the cycle to the done checks and wrap-up, not new work.
-      const work = st.mode === 'build' && !exists(p.wrapup) ? openWork(p) : null;
-      const waitingFeedback = [...fb.values()].some((f) => isOpen(f) && f.status !== 'blocked' && !pendingApprovals([f]).length);
-      const clear = Boolean(work && work.open === 0 && !waitingFeedback && !steers.length);
+      const work = st.mode === 'build' && !exists(p.wrapup) ? openWork(cards) : null;
+      const clear = Boolean(work && work.open === 0 && !work.untriaged && !work.waiting && !steers.length);
       if (clear) preamble += backlogClearPreamble(work!);
-      const prompt = steerPreamble(steers, lastSteered) + preamble + fs.readFileSync(path.join(p.root, goal.adapter.prompt), 'utf8');
+      const loop = fs.readFileSync(path.join(p.root, goal.adapter.prompt), 'utf8');
+      const prompt = steerPreamble(steers, lastSteered) + preamble + (/epoptes (board|card)\b/.test(loop) ? '' : BOARD_PREAMBLE) + loop;
 
       const spec = {
         cwd: p.project,

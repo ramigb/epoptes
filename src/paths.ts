@@ -20,8 +20,10 @@ export function goalPaths(project: string) {
     settings: path.join(root, 'settings.json'),
     inbox: path.join(root, 'FEEDBACK.md'),
     state: path.join(root, 'state'),
+    board: path.join(root, 'board.jsonl'),
+    boardLock: path.join(root, '.board.lock'),
+    /** the feedback log from before the board; imported once, then renamed */
     feedback: path.join(root, 'feedback.jsonl'),
-    feedbackLock: path.join(root, '.feedback.lock'),
     events: path.join(root, 'events.jsonl'),
     snapshots: path.join(root, 'snapshots.git'),
     gitignore: path.join(root, '.gitignore'),

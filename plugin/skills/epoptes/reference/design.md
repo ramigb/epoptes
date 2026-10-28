@@ -25,17 +25,17 @@ Name roles after the work. Each role file sets `model`, `effort`, `maxTurns` and
 - Short goals (≤ 1 h) do better with 1 round per cycle and a 20–30 min soft cap.
 - `cycle.max_budget_usd`: Claude Code only; offer it for API-key users, and for anyone worried about runaway cycles.
 
-## Tasks and the backlog
-- **Split the work into milestones,** each ending in something checkable. Give each a target time so the orchestrator can cut scope when it's behind.
-- **Task IDs are stable** (`M1-3`, `F-2`, `R-4`). Tasks look like `- [ ] M1-3 <what>`, with the markers `[ ]`, `[~]`, `[x]`, `[blocked: why]` and `[cut]`. The dashboard counts these, so keep the format exact.
+## Tasks and the board
+- **Every task is a card on the board**: backlog (untriaged feedback and agent notes) → TODO → DOING → REVIEW (being verified) → DONE. Each job is an epic; each card carries a milestone, and optionally an assignee (role) and a priority. The human comments on cards; the orchestrator acts on a comment or replies.
+- **Split the work into milestones,** each ending in something checkable. Give each a target time so the orchestrator can cut scope when it's behind. A milestone is current until its cards are done, cut or blocked.
+- **Seed the board with `state/backlog.md`:** `## M1 · <title> (target h:mm)` headings, then `- [ ] M1-1 <what>` lines (`[~]`, `[x]`, `[blocked: why]`, `[cut]` work too). Epoptes imports it into the current epic and renames it; keep the task label (`M1-1`) at the start of the title so humans can refer to it.
 - **Parallel tasks must own separate files or folders.** Two writers appending to one file duplicated its content in a test run. If two tasks touch one file, run them in sequence.
 - **Milestone events** should trigger on "≥ n done", never on "the round that reaches n": rounds can skip numbers.
 
-## State files (all under `.epoptes/state/`)
+## State files (all under `.epoptes/state/`; the board lives in `.epoptes/board.jsonl`, changed only through `epoptes card`)
 | file | written | cap |
 |---|---|---|
 | `handoff.md` | overwritten every cycle: state, half-done work, the next 3 tasks, gotchas | 25 lines |
-| `backlog.md` | tick, add or cut tasks; move the current-milestone line | the header and current milestone stay short; old milestones collapse to one line |
 | `progress.md` | one table row per round | 1 line per round |
 | `lessons.md` | a rule only when a mistake cost more than one fix round and could recur | 30 lines |
 | `decisions.md` | append-only `date · decision · why` | — |

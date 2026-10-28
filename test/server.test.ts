@@ -48,7 +48,7 @@ test('state and detail views', async () => {
   const s = await req('GET', '/api/state');
   assert.equal(s.status, 200);
   assert.equal(s.json.goals[0].id, 'ui-test');
-  assert.deepEqual(s.json.goals[0].backlog, { todo: 1, doing: 0, done: 1, blocked: 0, cut: 0, milestone: null });
+  assert.deepEqual(s.json.goals[0].board, { backlog: 0, todo: 1, doing: 0, review: 0, done: 1, blocked: 0, cut: 0, milestone: null }, 'the seeded backlog.md is on the board');
   const d = await req('GET', '/api/goals/ui-test');
   assert.equal(d.json.state, 'idle');
   assert.deepEqual(d.json.cycles_detail, []);
@@ -61,22 +61,21 @@ test('state and detail views', async () => {
 
 test('rejects foreign hosts and cross-site writes', async () => {
   assert.equal((await req('GET', '/api/state', { headers: { Host: `evil.example:${port}` } })).status, 403);
-  assert.equal((await req('POST', '/api/goals/ui-test/feedback', { body: { text: 'x' }, headers: { 'Content-Type': 'application/json' } })).status, 403);
-  assert.equal((await req('POST', '/api/goals/ui-test/feedback', { body: { text: 'x' }, headers: { 'Content-Type': 'text/plain', 'X-Epoptes': '1' } })).status, 403);
-  assert.equal((await post('/api/goals/ui-test/feedback', { text: 'x' }, { Origin: 'http://evil.example' })).status, 403);
-  assert.equal(fs.existsSync(path.join(project, '.epoptes', 'feedback.jsonl')), false, 'nothing was written');
+  assert.equal((await req('POST', '/api/goals/ui-test/cards', { body: { title: 'x' }, headers: { 'Content-Type': 'application/json' } })).status, 403);
+  assert.equal((await req('POST', '/api/goals/ui-test/cards', { body: { title: 'x' }, headers: { 'Content-Type': 'text/plain', 'X-Epoptes': '1' } })).status, 403);
+  assert.equal((await post('/api/goals/ui-test/cards', { title: 'x' }, { Origin: 'http://evil.example' })).status, 403);
+  assert.ok(!fs.readFileSync(path.join(project, '.epoptes', 'board.jsonl'), 'utf8').includes('"x"'), 'nothing was written');
 });
 
-test('feedback from the dashboard streams to clients', async () => {
+test('cards from the dashboard stream to clients; moves, comments and bad fields', async () => {
   const got = new Promise<any>((resolve, reject) => {
     const r = http.get({ host: '127.0.0.1', port, path: '/api/stream', headers: { Host: `127.0.0.1:${port}` } }, (res) => {
       let buf = '';
       res.on('data', (d) => {
         buf += d;
-        const m = /event: update\ndata: (.*)\n\n/.exec(buf);
-        if (m) {
+        for (const m of buf.matchAll(/event: update\ndata: (.*)\n\n/g)) {
           const u = JSON.parse(m[1]);
-          if (u.feedback.length) {
+          if (u.board.some((o: any) => o.title === 'bigger title')) {
             r.destroy();
             resolve(u);
           }
@@ -86,33 +85,38 @@ test('feedback from the dashboard streams to clients', async () => {
     r.on('error', (e) => (e.message.includes('socket hang up') ? null : reject(e)));
   });
   await new Promise((r) => setTimeout(r, 300));
-  const add = await post('/api/goals/ui-test/feedback', { text: 'bigger title' });
-  assert.deepEqual(add.json, { id: 'F-1' });
+  const add = await post('/api/goals/ui-test/cards', { title: 'bigger title' });
+  assert.deepEqual(add.json, { id: 'C-3' });
   const u = await got;
   assert.equal(u.id, 'ui-test');
-  assert.equal(u.feedback[0].text, 'bigger title');
-  assert.equal(u.feedback[0].src, 'dashboard');
+  const op = u.board.find((o: any) => o.id === 'C-3');
+  assert.deepEqual([op.src, op.column, op.epic], ['dashboard', 'backlog', 'job-1']);
 
-  assert.equal((await post('/api/goals/ui-test/feedback/F-1', { status: 'wont_do', note: 'not now' })).status, 200);
-  assert.equal((await post('/api/goals/ui-test/feedback/F-1', { status: 'finished' })).status, 400);
+  assert.equal((await post('/api/goals/ui-test/cards/C-3', { column: 'todo', milestone: 'M1' })).status, 200);
+  assert.equal((await post('/api/goals/ui-test/cards/C-3', { comment: 'and bold' })).status, 200);
+  assert.equal((await post('/api/goals/ui-test/cards/C-3', { column: 'finished' })).status, 400);
+  assert.equal((await post('/api/goals/ui-test/cards/C-3', { assignee: { evil: 1 } })).status, 400);
+  assert.equal((await post('/api/goals/ui-test/cards/C-3', { pid: 1 })).status, 400, 'unknown fields change nothing');
+  assert.equal((await post('/api/goals/ui-test/cards/C-99', { column: 'done' })).status, 400);
   const d = await req('GET', '/api/goals/ui-test');
-  assert.equal(d.json.feedback[0].status, 'wont_do');
+  const c = d.json.board_cards.find((x: any) => x.id === 'C-3');
+  assert.deepEqual([c.column, c.milestone, c.waiting, c.comments[0].text], ['todo', 'M1', true, 'and bold']);
+  assert.deepEqual(d.json.epics, [{ id: 'job-1', title: 'UI test', current: true }]);
 });
 
 test('approvals are answered from the dashboard', async () => {
-  const { addFeedback } = await import('../src/feedback.ts');
+  const { askApproval } = await import('../src/board.ts');
   const { goalPaths } = await import('../src/paths.ts');
-  const id = addFeedback(goalPaths(project), 'use a paid map API', 'orchestrator', { kind: 'approval', ref: 'M2-1' });
+  const id = askApproval(goalPaths(project), 'use a paid map API', 'C-2', 'orchestrator', 4);
   await new Promise((r) => setTimeout(r, 300)); // let the watcher poll the file
   let d = await req('GET', '/api/goals/ui-test');
-  assert.deepEqual(d.json.pending_approvals, [{ id, text: 'use a paid map API', ref: 'M2-1' }]);
-  assert.equal(d.json.feedback.find((f: any) => f.id === id).status, 'blocked');
-  assert.equal((await post(`/api/goals/ui-test/feedback/F-1`, { decision: 'approved' })).status, 400, 'only approvals take a decision');
-  const r = await post(`/api/goals/ui-test/feedback/${id}`, { decision: 'rejected', note: 'use the free one' });
+  assert.deepEqual(d.json.pending_approvals, [{ id: 'C-2', text: 'use a paid map API', ref: 'B' }]);
+  assert.equal((await post('/api/goals/ui-test/cards/C-1', { decision: 'approved' })).status, 400, 'only cards with an approval take a decision');
+  const r = await post(`/api/goals/ui-test/cards/${id}`, { decision: 'rejected', note: 'use the free one' });
   assert.deepEqual(r.json, { ok: true, resumed: false }, 'an idle goal is not started');
   d = await req('GET', '/api/goals/ui-test');
-  const f = d.json.feedback.find((x: any) => x.id === id);
-  assert.deepEqual([f.decision, f.status, d.json.pending_approvals.length], ['rejected', 'new', 0]);
+  const c = d.json.board_cards.find((x: any) => x.id === id);
+  assert.deepEqual([c.approval.decision, c.waiting, d.json.pending_approvals.length], ['rejected', true, 0]);
 });
 
 test('controls report errors instead of crashing', async () => {

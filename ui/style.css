@@ -388,25 +388,28 @@ td.r { white-space: nowrap; }
 .approvals { list-style: none; margin: 0 0 4px; padding: 0; display: grid; gap: 10px; }
 .approvals li { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; background: var(--panel-2); }
 .approval-text { overflow-wrap: anywhere; }
-.approval-text .id, .fb .kind { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+.approval-text .id, .kind { font-family: var(--mono); font-size: 12px; color: var(--muted); }
 .approval-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; align-items: center; }
 .btn.approve { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, var(--line)); }
 .btn.reject { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 45%, var(--line)); }
 .btn.ghost { border-color: transparent; background: transparent; color: var(--muted); }
 .approval-note { flex: 1 1 100%; }
 .needs-reply { margin: 12px 0 0; }
-.fb .kind.approval { padding: 0 6px; border-radius: 6px; background: var(--accent-soft); color: var(--accent); }
-.fb .kind.steer { padding: 0 6px; border-radius: 6px; background: var(--wait-soft); color: var(--wait); }
-.fb .actions select.scope { margin-left: auto; }
+.kind { padding: 0 6px; border-radius: 6px; background: var(--idle-soft); font-size: 11.5px; }
+.kind.approval { background: var(--accent-soft); color: var(--accent); }
+.kind.steer { background: var(--wait-soft); color: var(--wait); }
+.kind.blocked { background: var(--bad-soft); color: var(--bad); cursor: help; }
+.kind.you { background: var(--accent-soft); color: var(--accent); }
+.kind.waiting { background: var(--warn-soft); color: var(--warn); }
 .needs-run { margin-top: 8px; font-size: 12.5px; color: var(--bad); }
 .send-btns { display: inline-flex; gap: 6px; }
 .btn.steer { color: var(--wait); border-color: color-mix(in srgb, var(--wait) 45%, var(--line)); }
-.fb .kind.agent { padding: 0 6px; border-radius: 6px; background: var(--done-soft); color: var(--done); cursor: help; }
+.kind.agent { background: var(--done-soft); color: var(--done); cursor: help; }
 .decision { font-size: 11.5px; font-weight: 600; }
 .decision.approved { color: var(--ok); }
 .decision.rejected { color: var(--bad); }
 
-/* ---------- feedback ---------- */
+/* ---------- forms ---------- */
 .fb-form { display: grid; gap: 8px; margin-bottom: 14px; }
 textarea, input[type='text'], select {
   width: 100%; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2);
@@ -416,39 +419,52 @@ textarea:focus, input:focus, select:focus, .btn:focus-visible, .iconbtn:focus-vi
   outline: 2px solid var(--accent); outline-offset: 1px;
 }
 .fb-form .row { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
-.fb-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
-.fb { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; background: var(--panel-2); transition: border-color 0.4s, background-color 0.4s; }
-.fb.updated { border-color: var(--accent); }
-.fb .head { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
-.fb .id { font-family: var(--mono); font-size: 12px; color: var(--muted); }
-.fb .text { white-space: pre-wrap; overflow-wrap: anywhere; }
-.fb .meta { font-size: 12px; color: var(--faint); margin-top: 6px; display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
-.fb details { margin-top: 6px; font-size: 12.5px; }
-.fb summary { cursor: pointer; color: var(--muted); }
-.fb .hist { list-style: none; padding: 6px 0 0 0; margin: 0; display: grid; gap: 3px; }
-.fb .hist li { color: var(--muted); }
-.fb .actions { display: flex; gap: 6px; margin-top: 8px; align-items: center; }
-.fb .actions select { width: auto; padding: 3px 8px; font-size: 12.5px; }
-.st { padding: 1px 8px; border-radius: 999px; font-size: 11.5px; font-weight: 600; background: var(--idle-soft); color: var(--idle); transition: background-color 0.5s, color 0.5s; }
-.st.new { background: var(--accent-soft); color: var(--accent); }
-.st.seen, .st.in_progress { background: var(--wait-soft); color: var(--wait); }
-.st.done { background: var(--ok-soft); color: var(--ok); }
-.st.blocked { background: var(--bad-soft); color: var(--bad); }
 .new-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); display: inline-block; }
 
-/* ---------- backlog ---------- */
+/* ---------- board ---------- */
 .progress { display: flex; height: 10px; border-radius: 5px; overflow: hidden; background: var(--idle-soft); margin-bottom: 8px; }
 .progress span { transition: flex-grow 0.8s ease; }
 .progress .done { background: var(--ok); }
 .progress .doing { background: var(--wait); }
 .progress .blocked { background: var(--bad); }
 .progress .cut { background: var(--faint); }
-.tasks { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 4px; font-size: 13px; }
-.tasks li { display: flex; gap: 8px; }
-.tasks .m { font-family: var(--mono); font-size: 12px; width: 18px; flex: none; text-align: center; }
-.tasks .doing .m { color: var(--wait); }
-.tasks .blocked .m { color: var(--bad); }
-.tasks .todo .m { color: var(--faint); }
+.board-panel { margin-top: 16px; }
+.board-panel h2 select.epic { width: auto; padding: 2px 8px; font-size: 12.5px; text-transform: none; letter-spacing: 0; }
+.board { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; align-items: start; }
+@media (max-width: 980px) { .board { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 640px) { .board { grid-template-columns: minmax(0, 1fr); } }
+.lane { background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px; padding: 8px; display: grid; gap: 8px; align-content: start; min-height: 80px; transition: border-color 0.2s; }
+.lane.over { border-color: var(--accent); }
+.lane h3 { margin: 0 2px; font-size: 11.5px; letter-spacing: 0.06em; color: var(--muted); display: flex; justify-content: space-between; cursor: help; }
+.lane .empty { padding: 2px; text-align: center; }
+.kcard { display: grid; gap: 4px; text-align: left; width: 100%; font: inherit; color: inherit; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 8px 9px; cursor: grab; box-shadow: var(--shadow); }
+.kcard:hover, .kcard.selected { border-color: var(--accent); }
+.kcard:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.kcard.blocked { border-left: 3px solid var(--bad); }
+.kcard.cut .kc-title { text-decoration: line-through; color: var(--muted); }
+.kc-head, .kc-tags, .kd-head, .kd-actions { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; }
+.kc-head .id, .kd-head .id { font-family: var(--mono); font-size: 11.5px; color: var(--muted); }
+.kc-title { font-size: 13px; overflow-wrap: anywhere; }
+.kc-tags { font-size: 11.5px; }
+.kc-tags:empty { display: none; }
+.prio { font-size: 11px; font-weight: 650; text-transform: uppercase; }
+.prio.high { color: var(--bad); }
+.prio.med { color: var(--warn); }
+.prio.low { color: var(--faint); }
+.kdetail { margin-top: 12px; border: 1px solid var(--accent); border-radius: 10px; padding: 12px; background: var(--panel-2); display: grid; gap: 8px; }
+.kd-head .close { margin-left: auto; }
+.kd-title { font-size: 15px; font-weight: 550; white-space: pre-wrap; overflow-wrap: anywhere; }
+.kd-actions label { display: inline-flex; gap: 6px; align-items: center; font-size: 12.5px; color: var(--muted); }
+.kd-actions select { width: auto; padding: 3px 8px; font-size: 12.5px; }
+.kd-actions select.scope { margin-left: auto; }
+.comments { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.comments li { border-left: 3px solid var(--line); padding: 2px 0 2px 10px; }
+.comments li.mine { border-left-color: var(--accent); }
+.comments .by { display: flex; gap: 6px; align-items: center; font-size: 12.5px; }
+.comments .text { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; }
+.kdetail .fb-form { margin-bottom: 0; }
+.steer-box { display: inline-flex; gap: 6px; align-items: center; }
+.steer-box input { width: auto; }
 
 /* ---------- handoff / feed / commits ---------- */
 .handoff { font-size: 13px; white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; max-height: 380px; overflow: auto; }

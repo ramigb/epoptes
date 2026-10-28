@@ -82,7 +82,6 @@ const clockTime = (iso) => new Date(iso).toLocaleTimeString([], { hour: '2-digit
 const tokens = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}k` : String(n ?? 0));
 const shortModel = (m) => m.replace(/^claude-/, '').replace(/-\d{8}$/, '');
 const pct = (x) => `${Math.round(x * 100)}%`;
-const STATUS_LABEL = { new: 'new', seen: 'seen', in_progress: 'in progress', done: 'done', blocked: 'blocked', wont_do: "won't do" };
 const STATE_LABEL = {
   idle: 'idle', running: 'running', waiting: 'between cycles', rate_limited: 'rate-limited', cooldown: 'cooling down',
   pausing: 'pausing after cycle', paused: 'paused', needs_input: 'waiting for you', stopped: 'stopped', crashed: 'crashed', failed: 'failed', done: 'done', timeboxed: 'time box over',
@@ -237,10 +236,10 @@ function announce(u) {
       desktop(goal, 'run.end', `${name}: run ${e.reason}`, `After cycle ${e.cycle ?? '–'}`);
     }
   }
-  for (const f of u.feedback) {
-    if (f.op === 'add' && f.src === 'orchestrator' && f.kind !== 'approval') toast({ kind: 'info', title: `${name}: agent note ${f.id} for the next cycle`, body: f.text, ms: 10000 });
-    if (f.op === 'status' && f.by === 'orchestrator') toast({ kind: 'info', title: `${f.id} → ${STATUS_LABEL[f.status]}`, body: f.note || name });
-    if (f.op === 'note' && f.by === 'orchestrator') toast({ kind: 'info', title: `${f.id}: note from the orchestrator`, body: f.text });
+  // Card moves are routine; agent notes and replies are what the human wants to read.
+  for (const o of u.board) {
+    if (o.op === 'add' && o.src === 'orchestrator' && o.column === 'backlog') toast({ kind: 'info', title: `${name}: agent note ${o.id} for the next cycle`, body: o.title, ms: 10000 });
+    if (o.op === 'comment' && o.by !== 'user') toast({ kind: 'info', title: `${o.id}: ${o.by} replied`, body: o.text, ms: 8000 });
   }
 }
 
@@ -410,7 +409,7 @@ function NeedsYouLine({ g }) {
 
 function decideApproval(goalId, id, decision, note) {
   return api
-    .post(`/api/goals/${goalId}/feedback/${id}`, { decision, note: note || undefined })
+    .post(`/api/goals/${goalId}/cards/${id}`, { decision, note: note || undefined })
     .then((r) => {
       toast({ kind: 'info', title: `${id} ${decision === 'approved' ? 'approved' : 'disapproved'}`, body: r.resumed ? 'Nothing else was waiting, so the run resumes.' : r.problem ? `Not resumed: ${r.problem}` : 'The next cycle acts on it.', ms: 5000 });
       loadState();
@@ -440,12 +439,12 @@ function ApprovalButtons({ goalId, f }) {
 function NeedsYou({ d }) {
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
-  const pending = d.feedback.filter((f) => f.kind === 'approval' && !f.decision && !['done', 'wont_do'].includes(f.status));
+  const pending = d.board_cards.filter(pendingApproval);
   if (!d.needs && !pending.length) return null;
   const reply = (e) => {
     e?.preventDefault();
     setBusy(true);
-    const p = text.trim() ? api.post(`/api/goals/${d.id}/feedback`, { text: text.trim(), resume: true }) : api.post(`/api/goals/${d.id}/control`, { action: 'start' }).then(() => ({ resumed: true }));
+    const p = text.trim() ? api.post(`/api/goals/${d.id}/cards`, { title: text.trim(), resume: true }) : api.post(`/api/goals/${d.id}/control`, { action: 'start' }).then(() => ({ resumed: true }));
     p.then((r) => {
       setText('');
       toast({ kind: 'info', title: r.resumed ? 'Resuming' : r.id ? `${r.id} added` : 'Sent', body: r.problem ? `Not resumed: ${r.problem}` : d.name, ms: 4000 });
@@ -463,12 +462,12 @@ function NeedsYou({ d }) {
     ${d.needs && html`<p class="needs-reason">${d.needs.reason}</p>`}
     ${pending.length > 0 &&
     html`<ul class="approvals">${pending.map((f) => html`<li key=${f.id}>
-      <div class="approval-text"><span class="id">${f.id}</span> ${f.text}${f.ref ? html` <span class="chip">${f.ref}</span>` : ''}</div>
+      <div class="approval-text"><span class="id">${f.id}</span> ${f.approval.text}${f.approval.text !== f.title ? html` <span class="chip">${f.title}</span>` : ''}</div>
       <${ApprovalButtons} goalId=${d.id} f=${f} />
     </li>`)}</ul>`}
     ${d.needs &&
     html`<form class="fb-form needs-reply" onSubmit=${reply}>
-      <textarea rows="2" value=${text} disabled=${busy} placeholder=${pending.length ? 'Anything else to tell it? (optional)' : 'Your answer or opinion. It becomes a feedback item the next cycle reads first.'}
+      <textarea rows="2" value=${text} disabled=${busy} placeholder=${pending.length ? 'Anything else to tell it? (optional)' : 'Your answer or opinion. It becomes a backlog card the next cycle reads first.'}
         aria-label="Reply" onInput=${(e) => setText(e.currentTarget.value)} onKeyDown=${(e) => (e.ctrlKey || e.metaKey) && e.key === 'Enter' && reply(e)}></textarea>
       <div class="row"><span class="faint">${pending.length ? 'Answering the last approval resumes the run by itself.' : 'Ctrl+Enter to send'}</span>
         <button class="btn primary small" disabled=${busy}>${text.trim() ? 'Send & resume' : 'Resume'}</button></div>
@@ -484,13 +483,13 @@ function GoalCard({ g }) {
     return html`<div class="panel card error"><div class="top"><span class="name">${g.id}</span><span class="state failed">invalid</span></div><div class="objective">${g.error}</div><div class="facts mono">${g.path}</div></div>`;
   }
   const unread = g.unread.feedback + g.unread.events;
-  const b = g.backlog;
-  const total = b ? b.todo + b.doing + b.done + b.blocked : 0;
+  const b = g.board;
+  const total = b ? b.todo + b.doing + b.review + b.done + b.blocked : 0;
   const flash = Date.now() - (flashed.get(g.id) ?? 0) < 4000;
   return html`<a class=${`panel card ${flash ? 'flash' : ''}`} href=${`#/g/${g.id}`}>
     <div class="top">
       <span class="name">${g.name}</span>
-      ${unread > 0 && html`<span class="badge" title=${`${g.unread.events} new events, ${g.unread.feedback} feedback updates`}>${unread}</span>`}
+      ${unread > 0 && html`<span class="badge" title=${`${g.unread.events} new events, ${g.unread.feedback} agent notes and replies`}>${unread}</span>`}
       <${StatePill} state=${g.state} />
     </div>
     <div class="objective">${g.objective}</div>
@@ -500,7 +499,7 @@ function GoalCard({ g }) {
       ${g.mode && html`<span class="chip ${g.mode}">${g.mode}</span>`}
       ${g.job?.named && html`<span title="the current job of this harness">job <b>${g.job.title}</b></span>`}
       <span>cycle <b class="num">${g.cycle || '–'}</b>${g.round ? html` · round <b>${g.round}</b>` : ''}</span>
-      ${b && html`<span>backlog <b class="num">${b.done}/${total}</b></span>`}
+      ${b && html`<span>board <b class="num">${b.done}/${total}</b>${b.backlog ? ` · ${b.backlog} untriaged` : ''}</span>`}
       ${(g.cycles > 0 || g.live_usage?.cost_usd != null) && html`<span><${Money} usd=${g.cost_usd} basis=${g.cost_basis} /></span>`}
       ${g.cycle_started_at && g.state === 'running' && html`<span>this cycle <b class="num">${dur((now - Date.parse(g.cycle_started_at)) / 1000)}</b></span>`}
     </div>
@@ -545,13 +544,13 @@ function Controls({ d }) {
   const live = d.live;
   const finished = d.run_finished;
   const newRunText = d.done_marker
-    ? 'This goal is done. Start a new run?\n\nA new run gets a fresh time box and spends tokens. The orchestrator only finds work if you added feedback or backlog tasks since.'
+    ? 'This goal is done. Start a new run?\n\nA new run gets a fresh time box and spends tokens. The orchestrator only finds work if you added cards since.'
     : 'The time box is over. Start a new run with a fresh time box?\n\nTo continue this run instead, cancel and use +30m / +1h / +2h.';
   const start = () => (finished ? act('start', { new_run: true }, newRunText) : act('start'));
   const fu = d.followup_items;
   return html`<div class="controls">
     ${!live && finished && fu > 0 && html`<button class="btn primary" disabled=${busy} onClick=${() => act('start', { follow_up: true })}
-      title="Handle just the open feedback, with no time box. Minor items are fixed in place; anything that needs a restart or a new version is flagged for a new run instead.">▶ Follow up on ${fu} feedback item${fu > 1 ? 's' : ''}</button>`}
+      title="Handle just your open cards and comments, with no time box. Minor items are fixed in place; anything that needs a restart or a new version is flagged for a new run instead.">▶ Follow up on ${fu} card${fu > 1 ? 's' : ''}</button>`}
     ${!live && html`<button class=${`btn ${finished ? '' : 'primary'}`} disabled=${busy} onClick=${start} title=${d.needs ? 'Resume without answering' : ''}>▶ ${finished ? 'Start new run…' : d.clock ? 'Resume' : 'Start'}</button>`}
     ${live && html`<button class="btn" disabled=${busy || d.pause_requested} onClick=${() => act('pause')} title="Finish the current cycle, then pause (the clock pauses too)">‖ ${d.pause_requested ? 'Pausing after cycle' : 'Pause after cycle'}</button>`}
     ${live && html`<button class="btn danger" disabled=${busy} onClick=${() => act('stop', {}, 'Stop now? The current cycle is interrupted; the next start recovers its work.')}>■ Stop now</button>`}
@@ -608,14 +607,14 @@ function Stats({ d }) {
     totalIn += u.input + u.cache_read + u.cache_write;
   }
   const liveNote = live ? ' (including the running cycle so far)' : '';
-  const b = d.backlog;
-  const bt = b ? b.todo + b.doing + b.done + b.blocked : 0;
+  const b = d.board;
+  const bt = b ? b.todo + b.doing + b.review + b.done + b.blocked : 0;
   return html`<div class="stats">
     <div class="panel stat"><div class="k">Cycles</div><div class="v num">${all.length}${d.round ? html` <small>round ${d.round} now</small>` : ''}</div></div>
     <div class="panel stat" title=${live && live.cost_usd == null ? 'This CLI prices a cycle when it ends; the running cycle is not counted yet.' : `Cost${liveNote}`}><div class="k">Cost</div><div class="v"><${Money} usd=${all.length || live?.cost_usd != null ? d.cost_usd : null} basis=${d.cost_basis} /></div></div>
     <div class="panel stat" title=${`Cached input as a share of all input${liveNote}`}><div class="k">Cache-read share</div><div class="v num">${totalIn ? pct(read / totalIn) : '–'}</div></div>
     <div class="panel stat"><div class="k">Median cycle</div><div class="v"><${Money} usd=${d.cost_median || null} basis=${d.cost_basis} /></div></div>
-    <div class="panel stat"><div class="k">Backlog</div><div class="v num">${b ? html`${b.done}<small>/${bt} done</small>` : '–'}</div></div>
+    <div class="panel stat"><div class="k">Board</div><div class="v num">${b ? html`${b.done}<small>/${bt} done</small>` : '–'}</div></div>
   </div>`;
 }
 
@@ -908,99 +907,186 @@ function Feed({ d }) {
   </section>`;
 }
 
-const SRC_LABEL = { file: 'from FEEDBACK.md', orchestrator: 'from the orchestrator', dashboard: 'from the dashboard', cli: 'from the CLI' };
-const histVerb = (o) => (o.op === 'status' ? ` → ${STATUS_LABEL[o.status]}` : o.op === 'decide' ? (o.decision === 'approved' ? ' approved' : ' disapproved') : ' noted');
+const SRC_LABEL = { file: 'you, from FEEDBACK.md', orchestrator: 'the orchestrator', dashboard: 'you, from the dashboard', cli: 'you, from the CLI' };
+const COLS = [['backlog', 'Backlog'], ['todo', 'TODO'], ['doing', 'DOING'], ['review', 'REVIEW'], ['done', 'DONE']];
+const LANE_HINT = { backlog: 'Your feedback and agent notes, until the orchestrator triages them', todo: 'Planned', doing: 'Being worked on', review: 'Being verified', done: 'Done or cut' };
+const DONE_SHOWN = 8;
+const pendingApproval = (c) => c.approval && !c.approval.decision && c.column !== 'done';
 
-function FeedbackItem({ d, f, seen }) {
-  const [noting, setNoting] = useState(false);
-  const [note, setNote] = useState('');
+const postCard = (d, id, body) =>
+  api
+    .post(`/api/goals/${d.id}/cards/${id}`, body)
+    .then((r) => (loadDetail(), loadState(), r))
+    .catch((e) => toast({ kind: 'bad', title: `Could not update ${id}`, body: e.message }));
+
+function CardTile({ c, selected, onSelect, seen }) {
+  const fresh = seen && c.comments.some((m) => m.by !== 'user' && m.ts > seen);
+  return html`<button type="button" class=${`kcard ${selected ? 'selected' : ''} ${c.cut ? 'cut' : ''} ${c.blocked || pendingApproval(c) ? 'blocked' : ''}`} draggable="true"
+    onDragStart=${(e) => e.dataTransfer.setData('text/plain', c.id)} onClick=${() => onSelect(selected ? null : c.id)} aria-expanded=${selected}>
+    <span class="kc-head"><span class="id">${c.id}</span>${c.milestone && html`<span class="chip">${c.milestone}</span>`}${c.priority && html`<span class=${`prio ${c.priority}`}>${c.priority}</span>`}${c.assignee && html`<${Agent} name=${c.assignee} />`}${fresh && html`<span class="new-dot" title="new reply since you last looked"></span>`}</span>
+    <span class="kc-title">${c.title}</span>
+    <span class="kc-tags">
+      ${c.src !== 'orchestrator' && html`<span class="kind you">you</span>`}
+      ${c.src === 'orchestrator' && c.column === 'backlog' && html`<span class="kind agent" title="The orchestrator filed this for a later cycle. Edit or cut it if it's wrong.">agent note</span>`}
+      ${c.steering && html`<span class="kind steer">⚡ steer</span>`}
+      ${pendingApproval(c) && html`<span class="kind approval">approval: waiting for you</span>`}
+      ${c.approval?.decision && html`<span class=${`decision ${c.approval.decision}`}>${c.approval.decision === 'approved' ? '✓ approved' : '✕ disapproved'}</span>`}
+      ${c.blocked && html`<span class="kind blocked" title=${c.blocked}>blocked</span>`}
+      ${c.cut && html`<span class="kind" title=${c.cut}>cut</span>`}
+      ${c.waiting && !c.steering && html`<span class="kind waiting" title="The orchestrator hasn't read your latest yet">waiting for the agent</span>`}
+      ${c.comments.length > 0 && html`<span class="faint">${c.comments.length} comment${c.comments.length > 1 ? 's' : ''}</span>`}
+    </span>
+  </button>`;
+}
+
+function CardDetail({ d, c, onClose }) {
+  const [text, setText] = useState('');
+  const [steer, setSteer] = useState(false);
   const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(f.text);
-  const agentNote = f.kind !== 'approval' && f.src === 'orchestrator';
-  const closed = ['done', 'wont_do'].includes(f.status);
-  const updated = seen && f.history.some((o) => (o.op === 'add' ? o.src === 'orchestrator' : o.by === 'orchestrator') && o.ts > seen);
-  const post = (body) =>
-    api.post(`/api/goals/${d.id}/feedback/${f.id}`, body).then(() => loadDetail()).catch((e) => toast({ kind: 'bad', title: `Could not update ${f.id}`, body: e.message }));
-  const lastCycle = f.history.findLast((o) => o.cycle)?.cycle;
-  return html`<li class="fb ${updated ? 'updated' : ''}">
-    <div class="head"><span class="id">${f.id}</span>${f.kind === 'approval' && html`<span class="kind approval">approval</span>`}${f.steer && html`<span class="kind steer" title="Steering: the next cycle replans around this first">⚡ steer</span>`}${agentNote && html`<span class="kind agent" title="The orchestrator filed this for a later cycle. Edit or dismiss it if it's wrong.">agent note</span>`}<span class="st ${f.status}">${f.kind === 'approval' && !f.decision && f.status === 'blocked' ? 'waiting for you' : STATUS_LABEL[f.status]}</span>${f.decision && html`<span class="decision ${f.decision}">${f.decision === 'approved' ? '✓ approved' : '✕ disapproved'}</span>`}${updated && html`<span class="new-dot" title="updated since you last looked"></span>`}</div>
+  const [draft, setDraft] = useState(c.title);
+  const [busy, setBusy] = useState(false);
+  const ref = useRef(null);
+  useEffect(() => ref.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }), []);
+  const running = d.state === 'running' || d.state === 'pausing';
+  const closed = c.column === 'done';
+  const send = (e) => {
+    e?.preventDefault();
+    if (!text.trim()) return;
+    if (steer && running && !confirm(`Steer now?\n\nThis interrupts cycle ${d.cycle} (its work on disk is kept) and starts a fresh cycle that replans around your comment first.`)) return;
+    setBusy(true);
+    postCard(d, c.id, { comment: text.trim(), ...(steer ? { steer: true } : {}) })
+      .then((r) => {
+        if (!r) return;
+        setText('');
+        setSteer(false);
+        const body = steer ? (r.interrupted ? `Cycle ${d.cycle} is interrupted; a fresh cycle replans around it now.` : 'The next cycle replans around it first.') : closed ? 'The card is back in TODO for the next cycle.' : d.run_finished ? 'This goal is finished: press "Follow up" to have it handled (no time box).' : 'The next cycle reads it.';
+        toast({ kind: 'info', title: `${c.id}: comment sent`, body, ms: 5000 });
+      })
+      .finally(() => setBusy(false));
+  };
+  const cut = () => {
+    const why = prompt(`Cut ${c.id}? Say why (the orchestrator reads it).`, '');
+    if (why?.trim()) postCard(d, c.id, { column: 'done', cut: why.trim() });
+  };
+  return html`<div class="kdetail" ref=${ref} aria-label=${`Card ${c.id}`}>
+    <div class="kd-head"><span class="id">${c.id}</span>${c.milestone && html`<span class="chip">${c.milestone}</span>`}${c.assignee && html`<${Agent} name=${c.assignee} />`}
+      <span class="faint">from ${SRC_LABEL[c.src] ?? c.src} · ${ago(c.created_at)}${c.cycle ? ` · last touched in c${c.cycle}` : ''}</span>
+      <button class="btn small ghost close" onClick=${onClose} aria-label="Close the card">✕</button></div>
     ${editing
-      ? html`<form class="fb-form" style=${{ margin: '4px 0 0' }} onSubmit=${(e) => {
+      ? html`<form class="fb-form" onSubmit=${(e) => {
           e.preventDefault();
-          if (draft.trim() && draft.trim() !== f.text) post({ text: draft.trim() }).then(() => setEditing(false));
+          if (draft.trim() && draft.trim() !== c.title) postCard(d, c.id, { title: draft.trim() }).then(() => setEditing(false));
           else setEditing(false);
         }}>
-          <textarea rows="3" value=${draft} onInput=${(e) => setDraft(e.currentTarget.value)} aria-label=${`Text of ${f.id}`}></textarea>
-          <div class="row"><span class="faint">The next cycle reads the new text.</span><span><button type="button" class="btn small ghost" onClick=${() => (setDraft(f.text), setEditing(false))}>Cancel</button> <button class="btn primary small">Save</button></span></div>
+          <textarea rows="2" value=${draft} onInput=${(e) => setDraft(e.currentTarget.value)} aria-label=${`Title of ${c.id}`}></textarea>
+          <div class="row"><span class="faint">The next cycle reads the new text.</span><span><button type="button" class="btn small ghost" onClick=${() => setEditing(false)}>Cancel</button> <button class="btn primary small">Save</button></span></div>
         </form>`
-      : html`<div class="text">${f.text}${f.ref ? html` <span class="chip">${f.ref}</span>` : ''}${f.edited ? html` <span class="faint">(edited)</span>` : ''}</div>`}
-    <div class="meta"><span>${SRC_LABEL[f.src] ?? `from ${f.src}`} · ${ago(f.created_at)}</span>${lastCycle && html`<span>last touched in c${lastCycle}</span>`}</div>
-    ${f.kind === 'approval' && !f.decision && !['done', 'wont_do'].includes(f.status) && html`<${ApprovalButtons} goalId=${d.id} f=${f} />`}
-    ${f.status === 'blocked' && /^needs a new run/.test(f.history.findLast((o) => o.op === 'status')?.note ?? '') && html`<div class="needs-run">This needs a new run. Use <b>Start new run…</b> when you're ready.</div>`}
-    ${f.history.length > 1 &&
-    html`<details open=${updated}>
-      <summary>${f.history.length - 1} update${f.history.length > 2 ? 's' : ''}</summary>
-      <ul class="hist">${f.history.slice(1).map((o, i) => html`<li key=${i}>${o.cycle ? `c${o.cycle} · ` : ''}${o.by === 'user' ? 'you' : o.by}${histVerb(o)}${o.note || o.text ? `: ${o.note ?? o.text}` : ''} <span class="faint">· ${ago(o.ts)}</span></li>`)}</ul>
-    </details>`}
-    <div class="actions">
-      <select aria-label=${`Status of ${f.id}`} value=${f.status} onChange=${(e) => post({ status: e.currentTarget.value })}>
-        ${Object.entries(STATUS_LABEL).map(([k, l]) => html`<option key=${k} value=${k}>${l}</option>`)}
-      </select>
-      <button class="btn small" onClick=${() => setNoting(!noting)}>Note</button>
-      ${!closed && !editing && html`<button class="btn small" onClick=${() => (setDraft(f.text), setEditing(true))}>Edit</button>`}
-      ${agentNote && !closed && html`<button class="btn small ghost" title="Mark it won't do: the next cycle skips it" onClick=${() => post({ status: 'wont_do', note: 'dismissed by the human' })}>Dismiss</button>`}
-      ${(d.run_finished || d.clock?.followup) && !closed && !agentNote && f.kind !== 'approval' &&
-      html`<select class="scope" aria-label=${`How to handle ${f.id} after DONE`} value=${f.scope} onChange=${(e) => post({ scope: e.currentTarget.value })}
-        title="After DONE, a follow-up handles open feedback with no time box. Choose how this item is treated.">
+      : html`<div class="kd-title">${c.title}</div>`}
+    ${c.blocked && html`<div class="needs-run">Blocked: ${c.blocked}${/^needs a new run/.test(c.blocked) ? html` Use <b>Start new run…</b> when you're ready.` : ''}</div>`}
+    ${c.cut && html`<div class="faint">Cut: ${c.cut}</div>`}
+    ${c.approval && html`<div class="approval-text">Approval asked: ${c.approval.text}</div>`}
+    ${pendingApproval(c) && html`<${ApprovalButtons} goalId=${d.id} f=${c} />`}
+    <div class="kd-actions">
+      <label>Column <select value=${c.column} onChange=${(e) => postCard(d, c.id, { column: e.currentTarget.value })}>
+        ${COLS.map(([k, l]) => html`<option key=${k} value=${k}>${l}</option>`)}
+      </select></label>
+      ${!editing && html`<button class="btn small" onClick=${() => (setDraft(c.title), setEditing(true))}>Edit</button>`}
+      ${!closed && html`<button class="btn small ghost" onClick=${cut}>Cut</button>`}
+      ${c.blocked && html`<button class="btn small ghost" onClick=${() => postCard(d, c.id, { blocked: null })}>Unblock</button>`}
+      ${(d.run_finished || d.clock?.followup) && !closed &&
+      html`<select class="scope" aria-label=${`How a follow-up treats ${c.id}`} value=${c.scope} onChange=${(e) => postCard(d, c.id, { scope: e.currentTarget.value })}
+        title="After DONE, a follow-up handles your open cards and comments with no time box. Choose how this card is treated.">
         <option value="auto">agent decides</option><option value="tweak">quick tweak</option><option value="new_run">needs a new run</option>
       </select>`}
     </div>
-    ${noting &&
-    html`<form class="fb-form" style=${{ marginTop: '8px', marginBottom: 0 }} onSubmit=${(e) => {
-      e.preventDefault();
-      if (note.trim()) post({ note: note.trim() }).then(() => (setNote(''), setNoting(false)));
-    }}>
-      <input type="text" value=${note} onInput=${(e) => setNote(e.currentTarget.value)} placeholder="Add a note for the orchestrator" aria-label="Note" />
-    </form>`}
-  </li>`;
+    ${c.comments.length > 0 &&
+    html`<ul class="comments">${c.comments.map((m, i) => html`<li key=${i} class=${m.by === 'user' ? 'mine' : ''}>
+      <div class="by">${m.by === 'user' ? html`<b>you</b>` : html`<${Agent} name=${m.by} />`}${m.steer ? html` <span class="kind steer">⚡ steer</span>` : ''} <span class="faint">${m.cycle ? `c${m.cycle} · ` : ''}${ago(m.ts)}</span></div>
+      <div class="text">${m.text}</div>
+    </li>`)}</ul>`}
+    <form class="fb-form" onSubmit=${send}>
+      <textarea rows="2" value=${text} disabled=${busy} aria-label=${`Comment on ${c.id}`} onInput=${(e) => setText(e.currentTarget.value)} onKeyDown=${(e) => (e.ctrlKey || e.metaKey) && e.key === 'Enter' && send(e)}
+        placeholder=${closed ? 'Comment to reopen it: the next cycle looks at it again' : 'A comment for the agent on this card: it acts on it, or just replies'}></textarea>
+      <div class="row"><label class="faint steer-box"><input type="checkbox" checked=${steer} onChange=${(e) => setSteer(e.currentTarget.checked)} /> ⚡ Steer: ${running ? 'interrupt the running cycle and replan around it' : 'the next cycle replans around it first'}</label>
+        <button class="btn primary small" disabled=${busy || !text.trim()}>Comment</button></div>
+    </form>
+  </div>`;
 }
 
-function Feedback({ d }) {
+/** New cards land in the backlog; the next cycle triages them (or replans around them first, when steering). */
+function AddCard({ d }) {
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
-  const seen = store.seenAtOpen[d.id]?.feedback_at;
   const running = d.state === 'running' || d.state === 'pausing';
   const submit = (e, steer = false) => {
     e?.preventDefault();
     if (!text.trim()) return;
-    if (steer && running && !confirm(`Steer now?\n\nThis interrupts cycle ${d.cycle} (its work on disk is kept) and starts a fresh cycle that replans the backlog around your feedback before doing anything else.`)) return;
+    if (steer && running && !confirm(`Steer now?\n\nThis interrupts cycle ${d.cycle} (its work on disk is kept) and starts a fresh cycle that replans the board around your card before doing anything else.`)) return;
     setBusy(true);
     api
-      .post(`/api/goals/${d.id}/feedback`, { text: text.trim(), ...(steer ? { steer: true } : {}) })
+      .post(`/api/goals/${d.id}/cards`, { title: text.trim(), ...(steer ? { steer: true } : {}) })
       .then(({ id, interrupted }) => {
         setText('');
-        if (!steer && d.run_finished) toast({ kind: 'info', title: `${id} added`, body: 'This goal is finished: press "Follow up" to apply your feedback (no time box).', ms: 6000 });
+        if (!steer && d.run_finished) toast({ kind: 'info', title: `${id} added`, body: 'This goal is finished: press "Follow up" to have it handled (no time box).', ms: 6000 });
         else if (steer) toast({ kind: 'info', title: `${id}: steering`, body: interrupted ? `Cycle ${d.cycle} is interrupted; a fresh cycle replans around it now.` : 'The next cycle replans around it first.', ms: 5000 });
-        else toast({ kind: 'info', title: `${id} added`, body: 'The next cycle picks it up.', ms: 3500 });
+        else toast({ kind: 'info', title: `${id} added to the backlog`, body: 'The next cycle triages it.', ms: 3500 });
         loadDetail();
       })
-      .catch((e) => toast({ kind: 'bad', title: 'Could not add feedback', body: e.message }))
+      .catch((e) => toast({ kind: 'bad', title: 'Could not add the card', body: e.message }))
       .finally(() => setBusy(false));
   };
-  const open = d.feedback.filter((f) => !['done', 'wont_do'].includes(f.status)).length;
-  return html`<section class="panel">
-    <h2>Feedback <span class="right muted">${open} open</span></h2>
-    <form class="fb-form" onSubmit=${submit}>
-      <textarea rows="3" value=${text} disabled=${busy} placeholder="Tell the harness something. New items outrank the backlog."
-        aria-label="New feedback" onInput=${(e) => setText(e.currentTarget.value)} onKeyDown=${(e) => (e.ctrlKey || e.metaKey) && e.key === 'Enter' && submit(e)}></textarea>
-      <div class="row"><span class="faint">Ctrl+Enter to send</span>
-        <span class="send-btns">
-          <button type="button" class="btn small steer" disabled=${busy || !text.trim()} onClick=${(e) => submit(e, true)}
-            title=${running ? 'Interrupt the running cycle now and replan the whole backlog around this' : 'The next cycle replans the whole backlog around this before anything else'}>⚡ ${running ? 'Steer now' : 'Steer'}</button>
-          <button class="btn primary small" disabled=${busy || !text.trim()} title="Picked up at the start of the next cycle">Send</button>
-        </span></div>
-    </form>
-    ${d.feedback.length === 0 ? html`<p class="empty">No feedback yet.</p>` : html`<ul class="fb-list">${d.feedback.map((f) => html`<${FeedbackItem} key=${f.id} d=${d} f=${f} seen=${seen} />`)}</ul>`}
+  return html`<form class="fb-form add-card" onSubmit=${submit}>
+    <textarea rows="2" value=${text} disabled=${busy} placeholder="Feedback or a task for the harness. It lands in the backlog, and your cards outrank the rest."
+      aria-label="New card" onInput=${(e) => setText(e.currentTarget.value)} onKeyDown=${(e) => (e.ctrlKey || e.metaKey) && e.key === 'Enter' && submit(e)}></textarea>
+    <div class="row"><span class="faint">Ctrl+Enter to send · drag cards between columns, or open one to comment</span>
+      <span class="send-btns">
+        <button type="button" class="btn small steer" disabled=${busy || !text.trim()} onClick=${(e) => submit(e, true)}
+          title=${running ? 'Interrupt the running cycle now and replan the whole board around this' : 'The next cycle replans the whole board around this before anything else'}>⚡ ${running ? 'Steer now' : 'Steer'}</button>
+        <button class="btn primary small" disabled=${busy || !text.trim()} title="Triaged at the start of the next cycle">Add to backlog</button>
+      </span></div>
+  </form>`;
+}
+
+/** The kanban board: the backlog, then TODO → DOING → REVIEW → DONE, for one epic (a job) at a time. */
+function Board({ d }) {
+  const [epic, setEpic] = useState(null);
+  const [sel, setSel] = useState(null);
+  const [over, setOver] = useState(null);
+  const [allDone, setAllDone] = useState(false);
+  const seen = store.seenAtOpen[d.id]?.feedback_at;
+  const cur = d.epics.find((e) => e.current)?.id;
+  const ep = epic ?? cur;
+  const cards = d.board_cards.filter((c) => c.epic === ep);
+  const selected = cards.find((c) => c.id === sel);
+  const ms = ep === cur ? (d.milestones ?? []).filter((m) => m.todo + m.doing + m.done + m.blocked + m.cut > 0) : [];
+  const drop = (e, col) => {
+    e.preventDefault();
+    setOver(null);
+    const c = cards.find((x) => x.id === e.dataTransfer.getData('text/plain'));
+    if (c && c.column !== col) postCard(d, c.id, { column: col });
+  };
+  return html`<section class="panel board-panel">
+    <h2>Board
+      ${d.epics.length > 1 && html`<select class="epic" value=${ep} onChange=${(e) => (setEpic(e.currentTarget.value), setSel(null))} aria-label="Epic (job)">
+        ${d.epics.map((e) => html`<option key=${e.id} value=${e.id}>${e.title}${e.current ? ' (current job)' : ''}</option>`)}
+      </select>`}
+      <span class="right muted">${ep === cur && d.board?.milestone ? `milestone ${d.board.milestone}` : ''}</span></h2>
+    ${ms.length > 1 && html`<${MilestoneBar} ms=${ms} />`}
+    ${ep === cur && html`<${AddCard} d=${d} />`}
+    <div class="board">
+      ${COLS.map(([k, label]) => {
+        const list = cards.filter((c) => c.column === k);
+        if (k === 'done') list.reverse();
+        const shown = k === 'done' && !allDone ? list.slice(0, DONE_SHOWN) : list;
+        return html`<div key=${k} class=${`lane lane-${k} ${over === k ? 'over' : ''}`} onDragOver=${(e) => (e.preventDefault(), setOver(k))} onDragLeave=${() => setOver(null)} onDrop=${(e) => drop(e, k)}>
+          <h3 title=${LANE_HINT[k]}>${label} <span class="faint num">${list.length}</span></h3>
+          ${shown.map((c) => html`<${CardTile} key=${c.id} c=${c} selected=${sel === c.id} onSelect=${setSel} seen=${seen} />`)}
+          ${list.length > shown.length && html`<button class="btn small ghost" onClick=${() => setAllDone(true)}>${list.length - shown.length} more</button>`}
+          ${list.length === 0 && html`<p class="empty">–</p>`}
+        </div>`;
+      })}
+    </div>
+    ${selected && html`<${CardDetail} key=${selected.id} d=${d} c=${selected} onClose=${() => setSel(null)} />`}
   </section>`;
 }
 
@@ -1017,29 +1103,6 @@ function MilestoneBar({ ms }) {
       </div>`;
     })}
   </div>`;
-}
-
-function Backlog({ d }) {
-  const b = d.backlog;
-  if (!b) return html`<section class="panel"><h2>Backlog</h2><p class="empty">No state/backlog.md yet.</p></section>`;
-  const order = { doing: 0, blocked: 1, todo: 2 };
-  const open = d.backlog_items.filter((t) => t.mark in order).sort((a, b) => order[a.mark] - order[b.mark]);
-  const total = b.todo + b.doing + b.done + b.blocked + b.cut;
-  const ms = (d.milestones ?? []).filter((m) => m.todo + m.doing + m.done + m.blocked + m.cut > 0);
-  return html`<section class="panel">
-    <h2>Backlog <span class="right muted">${b.milestone ? `milestone ${b.milestone}` : ''}</span></h2>
-    ${ms.length > 1
-      ? html`<${MilestoneBar} ms=${ms} />`
-      : html`<div class="progress" title=${`${b.done} done · ${b.doing} in progress · ${b.blocked} blocked · ${b.cut} cut · ${b.todo} to do`}>
-      <span class="done" style=${{ flexGrow: b.done }}></span><span class="doing" style=${{ flexGrow: b.doing }}></span><span class="blocked" style=${{ flexGrow: b.blocked }}></span><span class="cut" style=${{ flexGrow: b.cut }}></span><span style=${{ flexGrow: b.todo }}></span>
-    </div>`}
-    <div class="muted num" style=${{ fontSize: '12.5px' }}>${b.done} of ${total} done · ${b.doing} in progress · ${b.blocked} blocked${b.cut ? ` · ${b.cut} cut` : ''}</div>
-    ${open.length > 0 &&
-    html`<ul class="tasks">
-      ${open.slice(0, 14).map((t, i) => html`<li key=${i} class=${t.mark}><span class="m">${{ doing: '~', blocked: '!', todo: '○' }[t.mark]}</span><span>${t.text}</span></li>`)}
-      ${open.length > 14 && html`<li class="faint">…and ${open.length - 14} more</li>`}
-    </ul>`}
-  </section>`;
 }
 
 function Checkpoints({ d }) {
@@ -1071,7 +1134,7 @@ function FirstRun({ d }) {
     <h2>Before the first cycle</h2>
     <ol>
       <li>Check the setup (it never starts the clock): <span class="mono">epoptes run ${d.id} --dry-run</span></li>
-      <li>Read <span class="mono">.epoptes/loop.md</span> and the backlog once: that's exactly what every cycle will do.</li>
+      <li>Read <span class="mono">.epoptes/loop.md</span> and the board once: that's exactly what every cycle will do.</li>
       <li>Press <b>Start</b>. The first cycle begins within seconds; this page follows it live.</li>
     </ol>
     <p class="muted">Time box ${dur(d.goal.timebox.total_min * 60)} of active time · orchestrator ${d.goal.adapter.model}/${d.goal.adapter.effort} · pausing or stopping never loses verified work.</p>
@@ -1106,6 +1169,7 @@ function GoalDetail({ id }) {
     </div>
     ${d.cycles === 0 && !d.live && html`<${FirstRun} d=${d} />`}
     <${Stats} d=${d} />
+    <${Board} d=${d} />
     <div class="grid">
       <div class="stack">
         <${Ticker} d=${d} />
@@ -1115,8 +1179,6 @@ function GoalDetail({ id }) {
         <${Feed} d=${d} />
       </div>
       <div class="stack">
-        <${Feedback} d=${d} />
-        <${Backlog} d=${d} />
         <section class="panel"><h2>Handoff</h2>${d.handoff ? html`<pre class="handoff"><${Rich} text=${d.handoff} /></pre>` : html`<p class="empty">No handoff yet.</p>`}</section>
         <${Checkpoints} d=${d} />
         <${About} d=${d} />

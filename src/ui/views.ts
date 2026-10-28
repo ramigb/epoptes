@@ -4,13 +4,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { CycleResult } from '../adapters/types.ts';
 import { clockState, readClock, runFinished } from '../clock.ts';
-import { fold, followUpItems, pendingApprovals } from '../feedback.ts';
+import { boardCounts, boardMilestones, fold, followUpCards, pendingApprovals } from '../board.ts';
 import { exists, nowIso, readJson, readJsonl, writeJson } from '../fsx.ts';
 import { loadGoal, type Goal } from '../goal.ts';
 import { inJob, jobsOf, type Job } from '../jobs.ts';
 import { epoptesHome } from '../paths.ts';
 import { LIVE_STATES, type LiveUsage, type Status } from '../status.ts';
-import { totalCost, backlogCounts, backlogItems, milestonesWithReach, outputOf, projectFinish } from '../summary.ts';
+import { totalCost, milestonesWithReach, outputOf, projectFinish } from '../summary.ts';
 import type { GoalWatch } from './watch.ts';
 
 type Result = CycleResult & { version: 1; cycle: number; run: string };
@@ -104,10 +104,6 @@ function output(w: GoalWatch, goal: Goal) {
   return { ...o, href };
 }
 
-// ---------- milestones ----------
-
-const milestones = (w: GoalWatch, run: string | null) => milestonesWithReach(w.p, w.events.items, run);
-
 // ---------- views ----------
 
 const median = (xs: number[]) => {
@@ -144,9 +140,10 @@ export function summary(w: GoalWatch) {
   const seen = readSeen(w.id);
   const cycleEvents = w.events.items.filter((e) => e.cycle === s?.cycle);
   const round = cycleEvents.findLast((e) => e.type === 'round')?.n ?? null;
-  const items = fold(w.feedback.items);
-  const ms = milestones(w, s?.run ?? null);
-  const pending = pendingApprovals(items);
+  const board = fold(w.board.items);
+  const cards = [...board.cards.values()].filter((x) => x.epic === job.id);
+  const ms = milestonesWithReach(boardMilestones(board, job.id), w.events.items, s?.run ?? null);
+  const pending = pendingApprovals(cards);
   return {
     id: w.id,
     name: goal.name,
@@ -170,13 +167,13 @@ export function summary(w: GoalWatch) {
     limits: s?.limits ? { ...s.limits, source: s.limits.source ?? 'claude-code' } : null,
     live_usage: liveUsage(s),
     needs: s?.state === 'needs_input' ? (s.needs ?? { reason: 'the orchestrator needs you', since: s.updated_at }) : null,
-    pending_approvals: pending.map((f) => ({ id: f.id, text: f.text, ref: f.ref })),
+    pending_approvals: pending.map((x) => ({ id: x.id, text: x.approval!.text, ref: x.title })),
     done_marker: exists(p.done),
     run_finished: runFinished(p),
     wrapup_marker: exists(p.wrapup),
     clock: c && cs ? { active: cs.active, timebox_s: c.timebox_s, wrapup_s: c.wrapup_s, grace_s: c.grace_s, to_end: Number.isFinite(cs.toEnd) ? cs.toEnd : null, paused: Boolean(c.paused_at), clock_mode: cs.mode, followup: c.kind === 'followup' } : null,
-    followup_items: followUpItems(items).length,
-    backlog: backlogCounts(p),
+    followup_items: followUpCards(cards).length,
+    board: cards.length ? boardCounts(cards, ms) : null,
     job: { id: job.id, title: job.title, n: jobs.length, named: Boolean(goal.job) || jobs.length > 1 },
     milestones: ms,
     projection: cs && c?.kind !== 'followup' && !runFinished(p) ? projectFinish(ms, cs.active) : null,
@@ -187,7 +184,8 @@ export function summary(w: GoalWatch) {
     last_exit: results.at(-1)?.exit ?? null,
     notify: goal.notify,
     unread: {
-      feedback: w.feedback.items.filter((o) => (o.op === 'add' ? o.src === 'orchestrator' : o.by === 'orchestrator') && o.ts > seen.feedback_at).length,
+      // the agents' replies and notes on the board
+      feedback: w.board.items.filter((o) => (o.op === 'add' ? o.src === 'orchestrator' && o.column === 'backlog' : o.op === 'comment' && o.by !== 'user') && o.ts > seen.feedback_at).length,
       events: w.events.items.filter((e) => NOTABLE.includes(e.type) && e.ts > seen.events_at).length,
     },
   };
@@ -221,8 +219,9 @@ export function detail(w: GoalWatch, { all = false } = {}) {
     goal: { objective: goal.objective, done: goal.done, non_goals: goal.non_goals, approval_required: goal.approval_required, timebox: goal.timebox, checkpoints: goal.checkpoints, adapter: goal.adapter, cycle: goal.cycle },
     seen: readSeen(w.id),
     handoff: read('handoff.md'),
-    backlog_items: backlogItems(p),
-    feedback: [...fold(w.feedback.items).values()].reverse(),
+    // Every epic's cards: the board switches between them.
+    board_cards: [...fold(w.board.items).cards.values()],
+    epics: jobsOf(w.events.items, goal).map((j) => ({ id: j.id, title: j.title, current: j.current })),
     events: w.events.items.filter((e) => within(e.ts)).slice(-500),
     cycles_detail: results.map((r) => ({ ...r, flagged: results.length >= 3 && med > 0 && (r.cost_usd ?? 0) > 2 * med })),
     cost_median: med,

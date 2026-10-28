@@ -23,7 +23,7 @@ function load() {
   return ajv;
 }
 
-export type SchemaId = 'goal' | 'clock' | 'status' | 'control' | 'registry' | 'event' | 'feedback' | 'activity' | 'cycle-result';
+export type SchemaId = 'goal' | 'clock' | 'status' | 'control' | 'registry' | 'event' | 'board' | 'activity' | 'cycle-result';
 
 /** Validates (and fills schema defaults into) value. Returns a list of readable errors; empty = valid. */
 export function validate(id: SchemaId, value: unknown): string[] {

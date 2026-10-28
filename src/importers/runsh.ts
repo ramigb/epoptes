@@ -209,6 +209,6 @@ export function importRunSh(project: string, { id, name }: { id?: string; name?:
     version: 1, state: lastRunDone ? 'done' : 'stopped', pid: null, run: `r${last.run}`, cycle: cycles.length, mode: null, cycle_started_at: null,
     heartbeat_at: last.end, waiting_until: null, wait_reason: null, pause_requested: false, fails_in_row: 0, limits: null, updated_at: last.end ?? last.start,
   });
-  fs.writeFileSync(p.gitignore, 'run/\ncycles/\nsnapshots.git/\nreports/\n*.tmp\n.feedback.lock\n');
+  fs.writeFileSync(p.gitignore, 'run/\ncycles/\nsnapshots.git/\nreports/\n*.tmp\n.board.lock\n');
   return { runs, cycles: cycles.length, events: events.length, feedback: fbOps.filter((o) => o.op === 'add').length, milestones };
 }

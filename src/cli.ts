@@ -9,8 +9,8 @@ import { adapters } from './adapters/index.ts';
 import { agentsFromDir } from './adapters/claude-code.ts';
 import { activeS, readClock, readClockState } from './clock.ts';
 import * as control from './control.ts';
+import { addCard, addMilestone, askApproval, boardCounts, boardMilestones, COLUMNS, commentCard, currentCards, currentEpic, followUpCards, isAgentNote, isBlocked, pendingApprovals, pendingSteers, readBoard, setCard, type Card, type Column, type Fields, type Priority, type Scope } from './board.ts';
 import { emit, readEvents } from './events.ts';
-import { addFeedback, editFeedback, followUpItems, ingestInbox, isAgentNote, noteFeedback, pendingApprovals, readFeedback, setFeedbackStatus, setScope, STATUSES, type FeedbackItem, type FeedbackStatus, type Scope } from './feedback.ts';
 import { exists, hm, parseDuration, readJson, touch } from './fsx.ts';
 import { loadGoal } from './goal.ts';
 import { inJob, jobsOf } from './jobs.ts';
@@ -19,18 +19,18 @@ import { epoptesHome, goalPaths } from './paths.ts';
 import { addGoal, readRegistry, resolveGoal } from './registry.ts';
 import { runGoal } from './runner.ts';
 import { reconcile } from './status.ts';
-import { backlogCounts, backlogMilestones, lastResult, milestonesWithReach, money, outputOf, projectFinish, readHead } from './summary.ts';
+import { lastResult, milestonesWithReach, money, outputOf, projectFinish, readHead } from './summary.ts';
 
 const HELP = `epoptes: create, run, watch and steer long-running Claude Code, Codex or pi harnesses
 
 Goals
   add [dir]                       validate <dir>/.epoptes/goal.json and register it
   list                            all registered goals
-  status [goal]                   state, clock, pace, cycle, backlog, feedback, output, handoff
+  status [goal]                   state, clock, pace, cycle, board, approvals, output, handoff
   clock [goal]                    one line for orchestrators: CYCLE MODE ACTIVE TO_WRAPUP TO_END …
   job [goal]                      this harness's jobs (the current one last)
-  job new "<title>" [--id slug]   start the next job in the same harness: archive the finished job's backlog,
-                                  handoff and progress, keep roles, lessons and decisions, reset the clock
+  job new "<title>" [--id slug]   start the next job (a new epic on the board): archive the finished job's handoff
+                                  and progress, keep roles, lessons and decisions, reset the clock
 
 Runs
   start [goal] [--new-run]        resume, or start (spawns a detached runner); --new-run after DONE / time box over
@@ -41,21 +41,25 @@ Runs
   reset-clock [goal]              clear the clock; the next start is a new run
   run [goal] --dry-run            check everything and print the next cycle's command
 
-Steering
-  feedback [goal] "<text>"        add a feedback item (F-<n>)
+The board (one per harness; each job is an epic; columns ${COLUMNS.join(' → ')})
+  board [goal] [--open] [--all]   the current epic's cards (--open: hide done; --all: every epic)
+  feedback [goal] "<text>"        add a card to the backlog (inside a cycle: an agent note)
            [--steer]              steer: interrupt the running cycle and replan around it now
-  feedback [goal] [--open]        list feedback (--open: only items that still need attention)
-  feedback <F-n> <status> [note]  set status: ${STATUSES.join(', ')}
-  feedback <F-n> note "<text>"    comment on an item
-  feedback <F-n> edit "<text>"    change an item's text (e.g. correct an agent note)
-  feedback <F-n> scope <s>        for follow-ups: auto (the agent triages) | tweak | new_run
-  feedback <F-n> approve|reject [note]  answer an approval request
+  card add "<title>"              add a card [--column c] [--milestone M1] [--assign role] [--priority high|med|low]
+  card <id>                       one card with its comments
+  card <id> <column> ["note"]     move it: ${COLUMNS.join(' | ')} (takes the set flags too)
+  card <id> cut|block "<why>"     drop it (into done) | mark it blocked;  card <id> unblock
+  card <id> comment "<text>"      comment [--steer] [--as role]; the human's comment on a done card reopens it
+  card <id> set                   [--title t] [--milestone M] [--assign r] [--priority p|none] [--epic e]
+                                  [--scope auto|tweak|new_run] (scope: how a follow-up after DONE treats it)
+  card <id> approve|reject [note] answer an approval request
+  milestone [goal]                the current epic's milestones
+  milestone add <M-id> "<title>" [--target h:mm]   add or rename one (target: active time from the run's start)
   event <type> "<text>"           milestone | blocked | note | artifact | round | wrapup | done
   event output <path|url> [text]  where the main deliverable is (the dashboard links to it)
 
 Inside cycles (orchestrators)
-  feedback "<text>"               an agent note: something the next cycle must act on (the human sees it)
-  approval "<what>" [--ref <task>]  ask the human before doing something on the approval list
+  approval "<what>" [--ref <card>]  ask the human before doing something on the approval list
   wait-for-human "<what>"         end the run after this cycle as "waiting for you" (nothing else can move)
   lesson "<rule>" [--topic t]     a harness lesson for the brain (topics: roles, briefs, cycles, checks, tools, state, cost, steering, other)
 
@@ -83,20 +87,58 @@ const EVENT_TYPES = ['milestone', 'blocked', 'note', 'artifact', 'output', 'roun
 
 const inCycle = () => Boolean(process.env.EPOPTES_CYCLE);
 
-/** One line per item in `epoptes feedback`; approvals say whether the human has answered. */
-function feedbackLine(f: FeedbackItem): string {
-  let tag = '';
-  if (f.kind === 'approval') tag = f.decision ? `[approval: ${f.decision.toUpperCase()}${decisionNote(f)}] ` : '[approval: waiting for the human; do not do it yet] ';
-  else if (isAgentNote(f)) tag = f.edited ? '[agent note, edited by the human] ' : '[agent note] ';
-  else if (f.steer) tag = '[STEERING: replan around this first] ';
-  if (f.scope === 'tweak') tag += '[quick tweak] ';
-  if (f.scope === 'new_run') tag += '[needs a new run] ';
-  return `${f.id.padEnd(6)} ${f.status.padEnd(12)} ${tag}${f.text}${f.ref ? ` (${f.ref})` : ''}`;
+/** One line per card in `epoptes board`, with what the orchestrator needs to know up front. */
+function cardLine(c: Card): string {
+  const tags: string[] = [];
+  if (c.milestone) tags.push(c.milestone);
+  if (c.assignee) tags.push(`@${c.assignee}`);
+  if (c.priority) tags.push(`[${c.priority}]`);
+  if (c.src !== 'orchestrator') tags.push('[from the human]');
+  else if (isAgentNote(c)) tags.push('[agent note]');
+  if (c.steering) tags.push('[STEERING: replan around this first]');
+  if (c.approval) tags.push(c.approval.decision ? `[approval: ${c.approval.decision.toUpperCase()}${c.approval.note ? ` "${c.approval.note}"` : ''}]` : '[approval: waiting for the human; do not do it yet]');
+  if (c.blocked) tags.push(`[blocked: ${c.blocked}]`);
+  if (c.cut) tags.push(`[cut: ${c.cut}]`);
+  if (c.scope === 'tweak') tags.push('[quick tweak]');
+  if (c.scope === 'new_run') tags.push('[needs a new run]');
+  if (c.waiting && !c.steering) tags.push(c.comments.at(-1)?.by === 'user' ? '[the human commented: read it]' : '[new: triage it]');
+  return `${c.id.padEnd(6)} ${tags.length ? `${tags.join(' ')} ` : ''}${c.title}${c.comments.length ? `  (${c.comments.length} comment${c.comments.length > 1 ? 's' : ''})` : ''}`;
 }
-const decisionNote = (f: FeedbackItem) => {
-  const op = f.history.findLast((o) => o.op === 'decide');
-  return op && op.op === 'decide' && op.note ? ` "${op.note}"` : '';
-};
+
+function boardText(project: string, { open = false, all = false } = {}): string {
+  const p = goalPaths(project);
+  const board = readBoard(p);
+  const epic = currentEpic(p);
+  const goal = loadGoal(p);
+  const out: string[] = [];
+  for (const j of jobsOf(readEvents(p), goal).filter((x) => all || x.id === epic)) {
+    const cards = [...board.cards.values()].filter((c) => c.epic === j.id);
+    const ms = boardMilestones(board, j.id);
+    const cur = ms.find((m) => m.current);
+    out.push(`== epic ${j.id}: ${j.title}${j.current ? ' (current)' : ''}${cur ? ` · milestone ${cur.id}${cur.title ? ` ${cur.title}` : ''}${cur.target_s != null ? ` (target ${hm(cur.target_s)})` : ''}` : ''}`);
+    if (ms.length) out.push(`milestones: ${ms.map((m) => `${m.id}${m.target_s != null ? `@${hm(m.target_s)}` : ''} ${m.done}/${m.todo + m.doing + m.done + m.blocked}`).join(' · ')}`);
+    for (const col of COLUMNS) {
+      const list = cards.filter((c) => c.column === col);
+      if (col === 'done' && open) {
+        out.push(`${col.toUpperCase()} (${list.length}; \`epoptes board\` lists them)`);
+        continue;
+      }
+      out.push(`${col.toUpperCase()}${col === 'backlog' && list.length ? ' (untriaged: move each to todo, or cut it with a reason)' : ''}`);
+      for (const c of list) out.push(`  ${cardLine(c)}`);
+    }
+    out.push('');
+  }
+  return out.join('\n').trimEnd();
+}
+
+function cardText(c: Card): string {
+  const out = [cardLine(c), `column ${c.column}${isBlocked(c) ? ' (blocked)' : ''} · epic ${c.epic} · from ${c.src === 'orchestrator' ? 'the orchestrator' : `the human (${c.src})`} · added ${ago(c.created_at)} ago${c.cycle ? ` · last touched in c${c.cycle}` : ''}`];
+  if (c.approval) out.push(`approval: ${c.approval.text}${c.approval.decision ? ` → ${c.approval.decision}${c.approval.note ? `: ${c.approval.note}` : ''}` : ' (waiting for the human)'}`);
+  for (const m of c.comments) out.push(`  ${m.by === 'user' ? 'human' : m.by}${m.cycle ? ` c${m.cycle}` : ''} (${ago(m.ts)} ago)${m.steer ? ' STEERING' : ''}: ${m.text}`);
+  if (c.waiting) out.push(c.comments.at(-1)?.by === 'user' ? '→ the human is waiting for an answer: act on it, or reply with `epoptes card <id> comment "…"`.'.replace('<id>', c.id) : '→ new from the human: triage it.');
+  return out.join('\n');
+}
+
 const envCycle = () => (process.env.EPOPTES_CYCLE ? Number(process.env.EPOPTES_CYCLE) : null);
 const tilde = (p: string) => (p.startsWith(os.homedir()) ? '~' + p.slice(os.homedir().length) : p);
 const ago = (iso: string | null) => (iso ? hm((Date.now() - Date.parse(iso)) / 1000) : '–');
@@ -123,19 +165,19 @@ function statusText(project: string): string {
   if (exists(p.done)) out.push('DONE marker set');
   if (exists(p.wrapup)) out.push('WRAPUP marker set (early finish)');
 
-  const b = backlogCounts(p);
-  const proj = cs && c && c.kind !== 'followup' && !exists(p.done) ? projectFinish(milestonesWithReach(p, readEvents(p), s.run), cs.active) : null;
+  const board = readBoard(p);
+  const cards = currentCards(p, board);
+  const ms = boardMilestones(board, currentEpic(p));
+  const proj = cs && c && c.kind !== 'followup' && !exists(p.done) ? projectFinish(milestonesWithReach(ms, readEvents(p), s.run), cs.active) : null;
   if (proj && c) out.push(`pace ${proj.basis} ${proj.pace > 1 ? 'is running at' : 'took'} ${Math.round(proj.pace * 100)}% of its planned time · on pace to finish at ~${hm(proj.end_s)} of ${hm(c.timebox_s)}${proj.end_s > c.timebox_s ? ' (over the time box)' : ''}`);
-  if (b) out.push(`backlog ${b.done}/${b.todo + b.doing + b.done + b.blocked} done · ${b.doing} in progress · ${b.blocked} blocked · ${b.cut} cut${b.milestone ? ` · milestone ${b.milestone}` : ''}`);
-  ingestInbox(p);
-  const fb = [...readFeedback(p).values()];
-  if (fb.length) {
-    const n = (st: FeedbackStatus[]) => fb.filter((f) => st.includes(f.status)).length;
-    out.push(`feedback ${n(['new'])} new · ${n(['seen', 'in_progress'])} open · ${n(['blocked'])} blocked · ${n(['done', 'wont_do'])} closed`);
-    const fu = followUpItems(fb).length;
-    if (fu && s.state === 'done') out.push(`  ${fu} open item${fu > 1 ? 's' : ''} since DONE: \`epoptes start --follow-up\` handles just those (no time box)`);
-    for (const f of fb.filter((x) => x.steer && x.status === 'new')) out.push(`  steering ${f.id} waits for the next cycle: ${f.text}`);
-    for (const f of pendingApprovals(fb)) out.push(`  approval ${f.id} waits for you: ${f.text}  (epoptes feedback ${f.id} approve|reject ["note"])`);
+  if (cards.length) {
+    const b = boardCounts(cards, ms);
+    out.push(`board ${b.done}/${b.todo + b.doing + b.review + b.done + b.blocked} done · ${b.backlog} backlog · ${b.todo} todo · ${b.doing} doing · ${b.review} review · ${b.blocked} blocked · ${b.cut} cut${b.milestone ? ` · milestone ${b.milestone}` : ''}`);
+    const fu = followUpCards(cards).length;
+    if (fu && s.state === 'done') out.push(`  ${fu} open card${fu > 1 ? 's' : ''} of yours since DONE: \`epoptes start --follow-up\` handles just those (no time box)`);
+    for (const x of pendingSteers(cards)) out.push(`  steering ${x.id} waits for the next cycle: ${x.title}`);
+    for (const x of cards.filter((y) => y.waiting && !y.steering)) out.push(`  ${x.id} waits for the orchestrator: ${x.title}`);
+    for (const x of pendingApprovals(cards)) out.push(`  approval ${x.id} waits for you: ${x.approval!.text}  (epoptes card ${x.id} approve|reject ["note"])`);
   }
   if (s.limits) {
     const w = Object.entries(s.limits.windows).map(([k, v]) => `${k} ${Math.round(v.utilization * 100)}%`).join(' · ');
@@ -211,6 +253,15 @@ async function main(argv: string[]) {
       kind: { type: 'string' },
       id: { type: 'string' },
       job: { type: 'string' },
+      column: { type: 'string' },
+      milestone: { type: 'string' },
+      assign: { type: 'string' },
+      priority: { type: 'string' },
+      title: { type: 'string' },
+      epic: { type: 'string' },
+      scope: { type: 'string' },
+      as: { type: 'string' },
+      target: { type: 'string' },
     },
   });
   const [cmd, ...rest] = positionals;
@@ -260,7 +311,7 @@ async function main(argv: string[]) {
       const elapsed = s.cycle_started_at ? ` CYCLE_ELAPSED=${hm((Date.now() - Date.parse(s.cycle_started_at)) / 1000)}` : '';
       const left = (x: number) => (Number.isFinite(x) ? hm(x) : 'none');
       // The current milestone's target lets the orchestrator see whether it's ahead of or behind plan.
-      const m = backlogMilestones(p).find((x) => x.current);
+      const m = boardMilestones(readBoard(p), currentEpic(p)).find((x) => x.current);
       const ms = m ? ` MILESTONE=${m.id}${m.target_s != null ? ` M_TARGET=${hm(m.target_s)}` : ''}` : '';
       console.log(`CYCLE=${envCycle() ?? s.cycle} RUN=${c.run} MODE=${cs.mode} ACTIVE=${hm(cs.active)} TO_WRAPUP=${left(cs.toWrapup)} TO_END=${left(cs.toEnd)} TO_HARD_STOP=${left(cs.toHard)}${elapsed}${ms}`);
       return;
@@ -317,29 +368,77 @@ async function main(argv: string[]) {
       if (!values['dry-run']) throw new Error('use `epoptes start` to run; `epoptes run --dry-run` checks the setup');
       await dryRun(resolveGoal(goalArg()));
       return;
-    case 'feedback': {
-      const by = inCycle() ? 'orchestrator' : 'user';
-      if (/^F-\d+$/.test(rest[0] ?? '')) {
-        const p = goalPaths(resolveGoal(values.goal));
-        const [id, what, ...text] = rest;
-        if (what === 'note') {
-          noteFeedback(p, id, text.join(' '), by, envCycle());
-          console.log(`${id}: note added`);
-        } else if (what === 'scope') {
-          setScope(p, id, text[0] as Scope);
-          console.log(`${id}: scope ${text[0]}`);
-        } else if (what === 'edit') {
-          editFeedback(p, id, text.join(' '), by);
-          console.log(`${id}: text changed`);
-        } else if (what === 'approve' || what === 'reject') {
-          if (inCycle()) throw new Error('only the human answers approvals');
-          const r = await control.decide(p.project, id, what === 'approve' ? 'approved' : 'rejected', text.join(' ') || undefined);
-          console.log(`${id} ${what === 'approve' ? 'approved' : 'rejected'}${r.resumed ? '; the run resumes' : r.problem ? `; not resumed: ${r.problem}` : ''}`);
-        } else {
-          setFeedbackStatus(p, id, what as FeedbackStatus, by, envCycle(), text.join(' ') || undefined);
-          console.log(`${id} → ${what}`);
+    case 'board':
+      console.log(boardText(resolveGoal(goalArg()), { open: Boolean(values.open), all: Boolean(values.all) }));
+      return;
+    case 'card': {
+      const p = goalPaths(resolveGoal(values.goal));
+      const by = inCycle() ? (values.as ?? 'orchestrator') : 'user';
+      const [id, what, ...words] = rest;
+      const text = words.join(' ').trim();
+      if (id === 'add') {
+        const title = [what, ...words].join(' ');
+        const nid = addCard(p, title, inCycle() ? 'orchestrator' : 'cli', { column: (values.column as Column) ?? (inCycle() ? 'todo' : 'backlog'), milestone: values.milestone, assignee: values.assign, priority: values.priority as Priority, cycle: envCycle(), steer: Boolean(values.steer) && !inCycle() });
+        return console.log(`added ${nid}`);
+      }
+      if (!/^[A-Z]+-\d+$/.test(id ?? '')) throw new Error('usage: epoptes card add "<title>" | epoptes card <id> [<column>|cut|block|unblock|comment|set|approve|reject] …');
+      if (!what) {
+        const c = readBoard(p).cards.get(id);
+        if (!c) throw new Error(`no card ${id}`);
+        return console.log(cardText(c));
+      }
+      const none = (v: string | undefined) => (v === 'none' ? null : v);
+      const flags: Fields = Object.fromEntries(Object.entries({ title: values.title, milestone: none(values.milestone), assignee: none(values.assign), priority: none(values.priority), epic: values.epic, scope: values.scope }).filter(([, v]) => v !== undefined));
+      if ((COLUMNS as readonly string[]).includes(what)) {
+        setCard(p, id, { column: what as Column, ...flags }, by, envCycle());
+        if (text) commentCard(p, id, text, by, envCycle());
+      } else if (what === 'cut') {
+        if (!text) throw new Error(`say why: epoptes card ${id} cut "<why>"`);
+        setCard(p, id, { column: 'done', cut: text }, by, envCycle());
+      } else if (what === 'block') {
+        if (!text) throw new Error(`say why: epoptes card ${id} block "<why>"`);
+        setCard(p, id, { blocked: text }, by, envCycle());
+      } else if (what === 'unblock') setCard(p, id, { blocked: null }, by, envCycle());
+      else if (what === 'comment') {
+        if (values.steer) {
+          if (inCycle()) throw new Error('steering is for the human');
+          const r = control.steer(p.project, text, 'cli', id);
+          return console.log(`${id}: steering comment added${r.interrupted ? '; the running cycle is interrupted now and a fresh one replans around it' : '; the next cycle replans around it first'}`);
         }
-        return;
+        commentCard(p, id, text, by, envCycle());
+      } else if (what === 'set') setCard(p, id, flags, by, envCycle());
+      else if (what === 'approve' || what === 'reject') {
+        if (inCycle()) throw new Error('only the human answers approvals');
+        const r = await control.decide(p.project, id, what === 'approve' ? 'approved' : 'rejected', text || undefined);
+        return console.log(`${id} ${what === 'approve' ? 'approved' : 'rejected'}${r.resumed ? '; the run resumes' : r.problem ? `; not resumed: ${r.problem}` : ''}`);
+      } else throw new Error(`unknown card action "${what}" (use ${COLUMNS.join(', ')}, cut, block, unblock, comment, set, approve, reject)`);
+      console.log(`${id}: ${what}${text && what !== 'comment' ? ` (${text})` : ''}`);
+      return;
+    }
+    case 'milestone': {
+      if (rest[0] === 'add') {
+        const p = goalPaths(resolveGoal(values.goal));
+        addMilestone(p, rest[1] ?? '', rest.slice(2).join(' '), values.target);
+        return console.log(`milestone ${rest[1].toUpperCase()} recorded`);
+      }
+      const p = goalPaths(resolveGoal(goalArg()));
+      const ms = boardMilestones(readBoard(p), currentEpic(p));
+      if (!ms.length) return console.log('no milestones yet: `epoptes milestone add M1 "<what is checkable at the end>" --target 1:00`');
+      for (const m of ms) console.log(`${m.current ? '*' : ' '} ${m.id.padEnd(5)} ${m.target_s != null ? hm(m.target_s) : '  –  '}  ${m.done}/${m.todo + m.doing + m.done + m.blocked} done${m.blocked ? ` · ${m.blocked} blocked` : ''}  ${m.title}`);
+      return;
+    }
+    case 'feedback': {
+      // Before the board this was its own list; now feedback is a backlog card. Item commands map onto `card`.
+      if (/^[A-Z]+-\d+$/.test(rest[0] ?? '')) {
+        const verb: Record<string, string[]> = { new: ['backlog'], seen: ['todo'], in_progress: ['doing'], done: ['done'], wont_do: ['cut'], blocked: ['block'], note: ['comment'] };
+        const [id, what, ...text] = rest;
+        if (what === 'edit' || what === 'scope') {
+          setCard(goalPaths(resolveGoal(values.goal)), id, what === 'edit' ? { title: text.join(' ') } : { scope: text[0] as Scope }, inCycle() ? 'orchestrator' : 'user', envCycle());
+          return console.log(`${id}: ${what}`);
+        }
+        const mapped = verb[what] ?? [what];
+        if ((what === 'wont_do' || what === 'blocked') && !text.length) text.push(what === 'wont_do' ? "won't do" : 'blocked');
+        return main(['card', id, ...mapped, ...text, ...(values.goal ? ['--goal', values.goal] : [])]);
       }
       const isGoalRef = (s?: string) => {
         if (!s) return false;
@@ -351,14 +450,7 @@ async function main(argv: string[]) {
       };
       // One argument: a goal to list, or text to add. Two: goal, then text.
       const [ref, text] = rest.length >= 2 ? rest : isGoalRef(rest[0]) ? [rest[0], undefined] : [values.goal, rest[0]];
-      if (!text) {
-        const p = goalPaths(resolveGoal(ref));
-        ingestInbox(p);
-        const items = [...readFeedback(p).values()].filter((f) => !values.open || !['done', 'wont_do'].includes(f.status));
-        if (!items.length) console.log(values.open ? 'no open feedback' : 'no feedback yet');
-        for (const f of items) console.log(feedbackLine(f));
-        return;
-      }
+      if (!text) return console.log(boardText(resolveGoal(ref), { open: Boolean(values.open) }));
       if (values.steer) {
         if (inCycle()) throw new Error('steering is for the human; file an agent note instead');
         const r = control.steer(resolveGoal(ref), text, 'cli');
@@ -366,18 +458,18 @@ async function main(argv: string[]) {
         return;
       }
       // Inside a cycle this is an agent note: something the next cycle must act on, shown to the human too.
-      const id = addFeedback(goalPaths(resolveGoal(ref)), text, inCycle() ? 'orchestrator' : 'cli');
-      console.log(inCycle() ? `added ${id} (agent note for the next cycle; the human can edit or dismiss it)` : `added ${id}`);
+      const id = addCard(goalPaths(resolveGoal(ref)), text, inCycle() ? 'orchestrator' : 'cli', { cycle: envCycle() });
+      console.log(inCycle() ? `added ${id} to the backlog (agent note for the next cycle; the human can edit or cut it)` : `added ${id} to the backlog`);
       return;
     }
     case 'approval': {
       const text = rest.join(' ').trim();
-      if (!text) throw new Error('usage: epoptes approval "<what needs approval>" [--ref <task id>]');
+      if (!text) throw new Error('usage: epoptes approval "<what needs approval>" [--ref <card id>]');
       const p = goalPaths(resolveGoal(values.goal));
       const s = reconcile(p);
-      const id = addFeedback(p, text, inCycle() ? 'orchestrator' : 'cli', { kind: 'approval', ref: values.ref });
+      const id = askApproval(p, text, values.ref, inCycle() ? 'orchestrator' : 'user', envCycle());
       emit(p, { src: inCycle() ? 'orchestrator' : 'user', type: 'blocked', run: process.env.EPOPTES_RUN ?? s.run, cycle: envCycle() ?? (s.cycle || null), text: `needs approval: ${text}`, ref: id });
-      console.log(`${id}: approval requested. Carry on with other work; the decision shows in \`epoptes feedback --open\`.`);
+      console.log(`${id}: approval requested; the card is blocked until the human answers. Carry on with other work; the answer shows in \`epoptes board --open\`.`);
       return;
     }
     case 'job': {
@@ -387,8 +479,8 @@ async function main(argv: string[]) {
         console.log(`new job ${r.id}: ${r.title}`);
         console.log(r.archived.length ? `  archived ${r.archived.join(', ')} of ${r.previous} into .epoptes/${r.archiveDir}/` : `  nothing to archive from ${r.previous}`);
         console.log('  kept: goal settings, roles, permissions, state/lessons.md, state/decisions.md · clock reset (the next start is a new run)');
-        if (r.openFeedback.length) console.log(`  ${r.openFeedback.length} feedback item${r.openFeedback.length > 1 ? 's are' : ' is'} still open and will reach the new job: ${r.openFeedback.map((f) => f.id).join(', ')} (close any that belonged to the old one)`);
-        console.log('Next: update goal.json (objective, done checks, time box, output) and the job-specific parts of loop.md, seed state/backlog.md, then `epoptes run --dry-run`.');
+        if (r.carried.length) console.log(`  ${r.carried.length} untriaged backlog card${r.carried.length > 1 ? 's' : ''} moved to the new epic: ${r.carried.join(', ')} (cut any that belonged to the old job)`);
+        console.log('Next: update goal.json (objective, done checks, time box, output) and the job-specific parts of loop.md, seed the board (write state/backlog.md in the seed format, or `epoptes milestone add` + `epoptes card add`), then `epoptes run --dry-run`.');
         return;
       }
       if (rest[0] && rest[0] !== 'list') values.goal ??= rest[0]; // `epoptes job <goal>`

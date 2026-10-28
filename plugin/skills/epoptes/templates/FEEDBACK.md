@@ -1,4 +1,4 @@
 # Feedback inbox
 
-Write a note here at any time, one bullet each. Before each cycle Epoptes moves new bullets into the feedback log and marks them `→ F-<n>`; the orchestrator handles them ahead of other work. You can also use the dashboard or `epoptes feedback "<text>"`.
+Write a note here at any time, one bullet each. Before each cycle Epoptes puts new bullets in the board's backlog and marks them `→ C-<n>`; the orchestrator triages them ahead of other work. You can also use the dashboard's board or `epoptes feedback "<text>"`.
 

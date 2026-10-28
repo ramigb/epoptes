@@ -3,7 +3,7 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import { readClock, runFinished, writeClock } from './clock.ts';
 import { emit, readEvents } from './events.ts';
-import { addFeedback, decideApproval, followUpItems, pendingApprovals, readFeedback, type Decision, type Src } from './feedback.ts';
+import { addCard, commentCard, currentCards, decide as decideCard, followUpCards, pendingApprovals, type Decision, type Src } from './board.ts';
 import { exists, nowIso, rm, writeJson } from './fsx.ts';
 import { adapters } from './adapters/index.ts';
 import { loadGoal } from './goal.ts';
@@ -15,7 +15,7 @@ const isLive = (s: Status) => LIVE_STATES.includes(s.state);
 /**
  * Spawns a detached runner for the goal and waits until it reports in. Resumes the current run; a goal whose
  * run is over (DONE, or past its hard stop) only starts again with newRun, because a new run spends tokens
- * and finds work only if feedback or backlog tasks were added since.
+ * and finds work only if cards were added since.
  */
 export async function start(project: string, { newRun = false, followUp = false } = {}): Promise<Status> {
   const p = goalPaths(project);
@@ -26,15 +26,15 @@ export async function start(project: string, { newRun = false, followUp = false 
   const check = await adapters[goal.adapter.type].check();
   if (!check.ok) throw new Error(check.problem);
   const finished = runFinished(p);
-  const open = followUpItems(readFeedback(p)).length;
+  const open = followUpCards(currentCards(p)).length;
   if (followUp) {
-    if (!finished) throw new Error('a follow-up is for a finished goal; this run is still going, so feedback reaches it anyway');
-    if (!open) throw new Error('no open feedback to follow up on. Add some first (`epoptes feedback "<text>"`).');
+    if (!finished) throw new Error('a follow-up is for a finished goal; this run is still going, so your cards reach it anyway');
+    if (!open) throw new Error('no open feedback or comments to follow up on. Add some first (`epoptes feedback "<text>"`, or comment on a card).');
   } else if (finished && !newRun) {
-    const hint = open ? ` You have ${open} open feedback item${open > 1 ? 's' : ''}: \`epoptes start --follow-up\` handles just those, with no time box.` : '';
+    const hint = open ? ` You have ${open} open card${open > 1 ? 's' : ''} of yours: \`epoptes start --follow-up\` handles just those, with no time box.` : '';
     throw new Error(
       exists(p.done)
-        ? `this goal is done.${hint} \`epoptes start --new-run\` begins a new run with a fresh time box (the orchestrator only finds work if you added feedback or backlog tasks).`
+        ? `this goal is done.${hint} \`epoptes start --new-run\` begins a new run with a fresh time box (the orchestrator only finds work if you added cards).`
         : `the time box is over.${hint} Use \`epoptes extend <dur>\` to continue this run, or \`epoptes start --new-run\` to begin a new one.`,
     );
   }
@@ -95,8 +95,7 @@ export function waitForHuman(project: string, reason: string) {
  * unanswered approval, the run resumes by itself.
  */
 export async function decide(project: string, id: string, decision: Decision, note?: string): Promise<{ resumed: boolean; problem?: string }> {
-  const p = goalPaths(project);
-  decideApproval(p, id, decision, note);
+  decideCard(goalPaths(project), id, decision, note);
   return resumeIfAnswered(project);
 }
 
@@ -105,7 +104,7 @@ export async function resumeIfAnswered(project: string, { force = false } = {}):
   const p = goalPaths(project);
   const s = reconcile(p);
   if (s.state !== 'needs_input') return { resumed: false };
-  if (!force && pendingApprovals(readFeedback(p)).length) return { resumed: false };
+  if (!force && pendingApprovals(currentCards(p)).length) return { resumed: false };
   try {
     await start(project);
   } catch (e) {
@@ -116,13 +115,15 @@ export async function resumeIfAnswered(project: string, { force = false } = {}):
 }
 
 /**
- * Steering feedback: adds the item and, if a cycle is running, interrupts it (SIGUSR2 to the runner) so a fresh
- * cycle starts at once and replans around it. Work on disk is kept; the next cycle recovers it. When no runner is
- * live, the item waits and the next start replans first.
+ * Steering: adds a backlog card (or, with `card`, a comment on that card) and, if a cycle is running, interrupts it
+ * (SIGUSR2 to the runner) so a fresh cycle starts at once and replans around it. Work on disk is kept; the next
+ * cycle recovers it. When no runner is live, it waits and the next start replans first.
  */
-export function steer(project: string, text: string, src: Src): { id: string; interrupted: boolean } {
+export function steer(project: string, text: string, src: Src, card?: string): { id: string; interrupted: boolean } {
   const p = goalPaths(project);
-  const id = addFeedback(p, text, src, { steer: true });
+  let id = card;
+  if (id) commentCard(p, id, text, 'user', null, true);
+  else id = addCard(p, text, src, { steer: true });
   const s = reconcile(p);
   let interrupted = false;
   if (isLive(s) && s.pid) {

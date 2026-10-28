@@ -4,8 +4,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import * as control from './control.ts';
+import { readBoard, setCard } from './board.ts';
 import { emit, readEvents, type EpoptesEvent } from './events.ts';
-import { isOpen, readFeedback, type FeedbackItem } from './feedback.ts';
 import { readJson, writeJson, writeText } from './fsx.ts';
 import { loadGoal, type Goal } from './goal.ts';
 import { goalPaths } from './paths.ts';
@@ -59,8 +59,8 @@ export function jobStateDir(root: string, job: Job | null): string {
 
 const slug = (s: string) => s.toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'job';
 
-/** Working state of one job; everything else in state/ (lessons, decisions) is harness memory and carries over. */
-export const JOB_FILES = ['backlog.md', 'handoff.md', 'progress.md', 'scores.jsonl'];
+/** Working state of one job; everything else in state/ (lessons, decisions) is harness memory and carries over. Cards stay on the board in their epic. */
+export const JOB_FILES = ['handoff.md', 'progress.md', 'scores.jsonl'];
 
 export interface NewJob {
   id: string;
@@ -68,13 +68,14 @@ export interface NewJob {
   previous: string;
   archived: string[];
   archiveDir: string;
-  openFeedback: FeedbackItem[];
+  /** untriaged backlog cards moved to the new epic */
+  carried: string[];
 }
 
 /**
  * Starts the next job in the same harness: archives the current job's working state, writes fresh files, resets the
- * clock (so the next start is a new run without --new-run), records the job in goal.json and marks the boundary
- * with a `job` event. Refused while a runner is live.
+ * clock (so the next start is a new run without --new-run), records the job in goal.json, marks the boundary
+ * with a `job` event (a new epic on the board) and carries untriaged backlog cards over. Refused while a runner is live.
  */
 export function newJob(project: string, title: string, idArg?: string): NewJob {
   const p = goalPaths(project);
@@ -84,6 +85,7 @@ export function newJob(project: string, title: string, idArg?: string): NewJob {
   const s = reconcile(p);
   if (LIVE_STATES.includes(s.state)) throw new Error(`can't start a new job while ${s.state}: pause or stop it first`);
 
+  const board = readBoard(p); // imports a pending seed into the finishing epic first
   const jobs = jobsOf(readEvents(p), goal);
   const prev = jobs.at(-1)!;
   let id = slug(idArg ?? title);
@@ -102,20 +104,7 @@ export function newJob(project: string, title: string, idArg?: string): NewJob {
     archived.push(f);
   }
   const rel = path.relative(p.root, archiveDir);
-  writeText(path.join(p.state, 'backlog.md'), [
-    `# Backlog: ${title}`,
-    '',
-    '**Current milestone: M1**   (the orchestrator moves this line forward)',
-    '',
-    '**Markers:** `[ ]` todo · `[~]` in progress · `[x]` done · `[blocked: why]` · `[cut]`',
-    '**Notes:** IDs are stable; new tasks get the next free number. Parallel tasks must own separate files.',
-    '',
-    '## Feedback (from `epoptes feedback`)',
-    '',
-    '## Review fixes',
-    '',
-  ].join('\n'));
-  writeText(path.join(p.state, 'handoff.md'), `# Handoff\nNew job: ${title}. Nothing of it exists yet; start with the first tasks of M1 in backlog.md.\nThe previous job (${prev.title}) is archived in .epoptes/${rel}/: read it only if this job builds on it.\n`);
+  writeText(path.join(p.state, 'handoff.md'), `# Handoff\nNew job: ${title}. Nothing of it exists yet; start with the first cards of M1 on the board (\`epoptes board --open\`).\nThe previous job (${prev.title}) is archived in .epoptes/${rel}/ and its cards are in epic ${prev.id}: read them only if this job builds on it.\n`);
   writeText(path.join(p.state, 'progress.md'), '# Progress\nOne row per round, newest at the bottom.\n\n| cycle | elapsed | tasks | result | note |\n|---|---|---|---|---|\n');
 
   // A new job is a new run: clear the clock and the end markers.
@@ -125,5 +114,7 @@ export function newJob(project: string, title: string, idArg?: string): NewJob {
   writeJson(p.goal, { ...raw, job: { id, title } });
   loadGoal(p); // still valid
   emit(p, { src: 'user', type: 'job', id, title, previous: prev.id, previous_title: prev.title, archived: rel });
-  return { id, title, previous: prev.id, archived, archiveDir: rel, openFeedback: [...readFeedback(p).values()].filter(isOpen) };
+  const carried = [...board.cards.values()].filter((c) => c.epic === prev.id && c.column === 'backlog').map((c) => c.id);
+  for (const c of carried) setCard(p, c, { epic: id }, 'user');
+  return { id, title, previous: prev.id, archived, archiveDir: rel, carried };
 }

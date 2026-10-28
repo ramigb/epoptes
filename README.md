@@ -9,7 +9,7 @@
 
 *Epoptes (Greek ἐπόπτης, "the overseer") was a title for Zeus and Helios, who watch over everything.*
 
-Epoptes runs **long, autonomous Claude Code, Codex or pi sessions** (an overnight build, a research sweep, a stack of documents, a data clean-up) and lets you watch and steer them. You describe the goal in a chat, and the agent interviews you and writes the harness. Epoptes then runs it as a series of fresh-context cycles until the goal is done or its time box ends, with a live dashboard, feedback while it runs, and a report at the end.
+Epoptes runs **long, autonomous Claude Code, Codex or pi sessions** (an overnight build, a research sweep, a stack of documents, a data clean-up) and lets you watch and steer them. You describe the goal in a chat, and the agent interviews you and writes the harness. Epoptes then runs it as a series of fresh-context cycles until the goal is done or its time box ends, with a live dashboard, a kanban board you steer it through, and a report at the end.
 
 It grew out of a 12-hour autonomous game build. Its rules for keeping long runs cheap and on track are built in:
 - a fresh context every cycle
@@ -117,17 +117,18 @@ pi has **no sandbox and no approval prompts**: its tools run with your permissio
 pi reports tokens and a cost estimate from its model catalog, so the dashboard and reports show dollar estimates (`≈`), live while a cycle runs. pi bills per token, so a pi goal's top bar shows the job's API spend instead of plan usage. `cycle.max_budget_usd` works: Epoptes stops the cycle when the estimate passes it, which is worth setting for pay-per-token providers. Rate-limit errors (429, "rate limit", overloaded) that pi's own retries don't clear use the runner's backoff. Like Codex, pi has no subagents, so the skill writes `loop.md` to work sequentially.
 
 ## How it works
-- **A goal is a directory.** Everything lives in `<project>/.epoptes/`: `goal.json` (objective, done checks, time box, models), `loop.md` (the orchestrator's per-cycle instructions), role files in `agents/`, and memory in `state/`. It also holds the logs of events, feedback and cycles. The file format is the contract: the CLI, runner, dashboard and skill only read and write these files ([docs/spec.md](docs/spec.md)).
+- **A goal is a directory.** Everything lives in `<project>/.epoptes/`: `goal.json` (objective, done checks, time box, models), `loop.md` (the orchestrator's per-cycle instructions), role files in `agents/`, and memory in `state/`. It also holds the board (`board.jsonl`) and the logs of events and cycles. The file format is the contract: the CLI, runner, dashboard and skill only read and write these files ([docs/spec.md](docs/spec.md)).
 - **A run is a detached process,** one per goal. It starts `claude -p`, `codex exec` or `pi --mode json` with `loop.md`, cycle after cycle:
-  - Each cycle orients from the state files, does a slice of work (through subagents when configured), verifies it, records it and exits.
+  - Each cycle orients from the state files and the board, does a slice of work (through subagents when configured), verifies it, records it and exits.
   - Between cycles, the runner checks the time box, your controls, rate limits and failures.
   - Closing the dashboard or the terminal never stops a run.
+- **Everything goes through the board.** One kanban board per harness, and each job is an epic on it. Your feedback lands in the **backlog**; the orchestrator triages each card into **TODO** (or cuts it with a reason), works it in **DOING**, verifies it in **REVIEW** and moves it to **DONE**. Cards carry their milestone, the role working on them and a priority. Comment on any card: the next cycle acts on it or just replies, and a comment on a done card reopens it.
 - **The clock counts active time.** It doesn't count pauses, stops or (by default) rate-limit waits. Near the end the goal switches to *wrap-up* (feature freeze), then *overtime*, then stops.
 - **The time box is a limit, not a target.** A goal finishes early once its checks pass, and each milestone moves on as soon as it's done rather than waiting for its target time. The harness doesn't invent work to fill the time:
-  - a task only enters the backlog if a done check, a milestone or your feedback needs it; ideas go in the handoff for you
-  - when the backlog has no real work left, the runner tells the next cycle to run the done checks and wrap up
+  - a card only goes on the board if a done check, a milestone or one of your cards needs it; ideas go in the handoff for you
+  - when the board has no real work left, the runner tells the next cycle to run the done checks and wrap up
   - the dashboard shows a projected finish from the milestone pace so far (for example, a 2-hour milestone done in 30 minutes puts a 10-hour plan on pace for about 2h30m)
-- **You stay in the loop without watching.** Anything on the goal's approval list waits for your Approve / Disapprove while the run carries on with other work. When nothing else can move, the run pauses as **waiting for you**, with the reason, until you answer. The orchestrator can also leave you *agent notes* (findings the next cycle must act on), which you can edit or dismiss.
+- **You stay in the loop without watching.** Anything on the goal's approval list waits for your Approve / Disapprove while the run carries on with other work. When nothing else can move, the run pauses as **waiting for you**, with the reason, until you answer. The orchestrator can also leave you *agent notes* (findings the next cycle must act on), which land in the backlog for you to edit or cut.
 - **Every harness makes the next one better.** Orchestrators record harness lessons in wrap-up. When a run ends, Epoptes gathers them, plus each goal's numbers and automatic signals, into a local **brain** (`~/.epoptes/brain/INDEX.md`). Signals are things like frequent timeouts, late milestones or repeated steering. This costs no tokens. The skill reads the brain before designing a new harness. Ask it to "distill the brain" to get a short curated `NOTES.md`.
 - **Observability costs no tokens.** The live ticker comes from the CLI's JSON stream: which tools ran and which files changed (plus agent activity for Claude Code). Orchestrators add a few semantic events through the CLI (milestones, blocks, done).
 
@@ -139,24 +140,26 @@ pi reports tokens and a cost estimate from its model catalog, so the dashboard a
 | pause safely | **Pause after cycle** | `epoptes pause <goal>` |
 | stop right now | **Stop now** | `epoptes stop <goal>` (the next start recovers the interrupted work) |
 | give it more time | **+30m / +1h / +2h** | `epoptes extend <goal> 2h` |
-| give feedback | the Feedback box | `epoptes feedback <goal> "the intro is too long"`, or a bullet in `.epoptes/FEEDBACK.md` |
-| change direction now | **⚡ Steer now** | `epoptes feedback <goal> "use SQLite instead" --steer` (interrupts the cycle; the next one replans the whole backlog around it) |
-| answer an approval | **Approve / Disapprove** | `epoptes feedback F-4 approve "test mode only"` (or `reject`) |
-| start a new feature in the same project | ask the skill: "a new epoptes job: …" | `epoptes job new "<title>"`, then update goal.json, loop.md and the backlog (the skill does this for you) |
-| tweak a finished goal | **Follow up on N feedback items** | `epoptes start <goal> --follow-up` (no time box; minor items fixed in place, big ones flagged for a new run) |
+| give feedback | **Add to backlog** on the board | `epoptes feedback <goal> "the intro is too long"`, or a bullet in `.epoptes/FEEDBACK.md` |
+| say something about one task | open the card and comment | `epoptes card C-12 comment "use the brand blue"` |
+| see the plan | the **Board** (drag cards between columns) | `epoptes board <goal>` |
+| change direction now | **⚡ Steer now** | `epoptes feedback <goal> "use SQLite instead" --steer` (interrupts the cycle; the next one replans the whole board around it). A comment can steer too: `--steer` |
+| answer an approval | **Approve / Disapprove** | `epoptes card C-4 approve "test mode only"` (or `reject`) |
+| start a new feature in the same project | ask the skill: "a new epoptes job: …" | `epoptes job new "<title>"`, then update goal.json, loop.md and seed the new epic (the skill does this for you) |
+| tweak a finished goal | **Follow up on N cards** | `epoptes start <goal> --follow-up` (no time box; minor items fixed in place, big ones flagged for a new run) |
 | open what it made | **Open the output ↗** | goal.json `output`, or `epoptes event output <path or URL>` |
 | see where time went | the "Where the time went" panel (running vs rate limits vs waiting for you vs paused, time per role, time per tool) | dashboard only |
 | see if it'll finish early | milestone ticks and the dashed "on pace to finish" marker on the clock bar | the `pace` line in `epoptes status` |
 | see what past runs taught | **Brain** | `epoptes brain` (writes `~/.epoptes/brain/INDEX.md`) |
 | see what it did | the Report button | `epoptes report <goal>` (Markdown + HTML) |
 
-Feedback items get an id (`F-3`) and go through `new → seen → in progress → done | blocked | won't do`. Each change records its cycle and a note, and the dashboard shows it live with an unread badge. Approval requests start as "waiting for you", and notes the orchestrator files for the next cycle are marked "agent note". Desktop notifications are optional: use the 🔔 button.
+Cards get an id (`C-12`) and move `backlog → todo → doing → review → done`, or get cut or blocked with a reason. Each move records its cycle; agents' replies show live with an unread badge and a toast. A card you added or commented on says "waiting for the agent" until the orchestrator has read it. An approval request blocks its card until you answer, and notes the orchestrator files for the next cycle are marked "agent note". Desktop notifications are optional: use the 🔔 button.
 
-The backlog bar is split into one segment per milestone. The clock bar marks each milestone's target (on time, late, overdue) and where it was actually reached.
+The board's progress bar is split into one segment per milestone. The clock bar marks each milestone's target (on time, late, overdue) and where it was actually reached.
 
-Once a goal is done, feedback goes through a **follow-up**: only your open feedback, with no time box, and nothing else. The agent fixes minor items in place (a colour, a size, wording). Anything that needs a restart or a new version is flagged "needs a new run" for you to decide on, and you can override how each item is treated. **Start new run…** begins a fresh run with a new time box. Epoptes asks first, because a new run spends tokens.
+Once a goal is done, feedback goes through a **follow-up**: only your open cards and unanswered comments, with no time box, and nothing else. The agent fixes minor items in place (a colour, a size, wording). Anything that needs a restart or a new version is flagged "needs a new run" for you to decide on, and you can override how each card is treated. **Start new run…** begins a fresh run with a new time box. Epoptes asks first, because a new run spends tokens.
 
-**One harness, many jobs.** When the project needs its next feature, don't build a second harness: ask the skill for a new job. It interviews you only about what changes, then runs `epoptes job new "<title>"`. That archives the finished job's backlog, handoff and progress into `.epoptes/state/archive/`, keeps the roles, permissions, lessons and decisions, and resets the clock. The goal page, `epoptes status` and reports show the current job, with a switch to all jobs (`epoptes report --job all`, `epoptes job` to list them).
+**One harness, many jobs.** When the project needs its next feature, don't build a second harness: ask the skill for a new job. It interviews you only about what changes, then runs `epoptes job new "<title>"`. That opens a new epic on the board, archives the finished job's handoff and progress into `.epoptes/state/archive/`, keeps the roles, permissions, lessons and decisions, and resets the clock. Untriaged backlog cards move to the new epic; the board's epic picker shows the old ones. The goal page, `epoptes status` and reports show the current job, with a switch to all jobs (`epoptes report --job all`, `epoptes job` to list them).
 
 The dashboard's tab icon shows the state at a glance: arcs turn while a cycle runs, a badge blinks when the run needs you, and it turns red on failure.
 
@@ -164,20 +167,23 @@ The dashboard's tab icon shows the state at a glance: arcs turn while a cycle ru
 ```
 epoptes add [dir]                      register a goal (validates .epoptes/goal.json)
 epoptes list                           all goals
-epoptes status [goal]                  one screen: state, clock, pace, cycle, backlog, feedback, output, last cycle, handoff
+epoptes status [goal]                  one screen: state, clock, pace, cycle, board, approvals, output, last cycle, handoff
 epoptes run [goal] --dry-run           check setup and guardrails, print the next cycle's command (never starts the clock)
 epoptes start [goal] [--new-run]       start or resume (--new-run after DONE / time box over)
-epoptes start [goal] --follow-up       after DONE: just the open feedback, no time box
+epoptes start [goal] --follow-up       after DONE: just your open cards and comments, no time box
 epoptes pause [goal] · stop [goal]     pause after this cycle · stop now
 epoptes extend [goal] <dur>            e.g. 2h, 30m
 epoptes reset-clock [goal]             the next start is a new run
-epoptes feedback [goal] "<text>"       add feedback      · epoptes feedback [goal] [--open]  list it
-epoptes feedback [goal] "<text>" --steer   interrupt the running cycle and replan around it
-epoptes feedback F-3 <status> [note]   new | seen | in_progress | done | blocked | wont_do
-epoptes feedback F-3 approve|reject [note]   answer an approval (resumes a run waiting for it)
-epoptes feedback F-3 edit "<text>"     correct an item (e.g. an agent note) · scope auto|tweak|new_run for follow-ups
+epoptes board [goal] [--open] [--all] the board: the current epic's cards by column (--all: every epic)
+epoptes feedback [goal] "<text>"       add a card to the backlog · --steer: interrupt the running cycle and replan around it
+epoptes card add "<title>"             add a card [--column c] [--milestone M1] [--assign role] [--priority high|med|low]
+epoptes card C-3                       one card and its comments
+epoptes card C-3 todo|doing|review|done|backlog ["note"]   move it · cut|block "<why>" · unblock
+epoptes card C-3 comment "<text>"      comment (--steer to interrupt and replan) · approve|reject [note] an approval
+epoptes card C-3 set --title t --milestone M2 --assign r --priority p --scope auto|tweak|new_run
+epoptes milestone [goal]               the milestones · milestone add M3 "<title>" --target 2:00
 epoptes event <type> "<text>"          milestone | blocked | note | artifact | output | round | wrapup | done (used by orchestrators)
-epoptes approval "<what>" [--ref T]    ask the human first (orchestrators) · wait-for-human "<what>": pause until they answer
+epoptes approval "<what>" [--ref C-n] ask the human first (orchestrators) · wait-for-human "<what>": pause until they answer
 epoptes lesson "<rule>" [--topic t]    a harness lesson for the brain (orchestrators, in wrap-up)
 epoptes brain [lessons [--kind k]]     gather every goal into ~/.epoptes/brain/INDEX.md · print the lessons
 epoptes job [goal]                     the harness's jobs · job new "<title>": start the next one (archive, keep memory, reset clock)
@@ -189,6 +195,9 @@ epoptes skill install [--agent codex|pi]   install the skill (Claude Code by def
 epoptes skill path                     print the shared skill directory
 ```
 `[goal]` is a registered id or a path. Leave it out inside a goal's folder.
+
+## Upgrading to the board
+The first time Epoptes reads a goal from before the board, it moves `feedback.jsonl` and every job's `backlog.md` onto the board (renamed `*.imported`; feedback keeps its `F-3` ids). The runner tells an old `loop.md` how the board replaces backlog.md and the feedback list, and `epoptes feedback F-3 done` still works. For the full flow (triage, REVIEW, replying to comments), refresh `loop.md` from the template: ask the skill, or Claude, to update it.
 
 ## Upgrading from 0.2
 Harnesses generated before 0.3 keep working. Some of the new behaviour comes from the runner, so they get it right away:

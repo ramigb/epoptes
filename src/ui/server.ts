@@ -5,7 +5,7 @@ import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as control from '../control.ts';
-import { addFeedback, editFeedback, noteFeedback, setFeedbackStatus, setScope, type FeedbackStatus, type Scope } from '../feedback.ts';
+import { addCard, commentCard, setCard, type Fields } from '../board.ts';
 import { readRegistry } from '../registry.ts';
 import type { Limits } from '../status.ts';
 import { buildReport, renderAllHtml, renderHtml } from '../report.ts';
@@ -224,32 +224,32 @@ export function serve({ port, lan, pollMs = 1000 }: ServeOptions) {
           refresh();
           return send(res, 200, { ok: true });
         }
-        if (sub === 'feedback' && body.steer === true) {
-          const r = control.steer(project, String(body.text ?? ''), 'dashboard');
+        if (sub === 'cards' && body.steer === true) {
+          const r = control.steer(project, String(body.title ?? ''), 'dashboard');
           refresh();
           return send(res, 200, r);
         }
-        if (sub === 'feedback') {
-          const id = addFeedback(w.p, String(body.text ?? ''), 'dashboard');
+        if (sub === 'cards') {
+          const id = addCard(w.p, String(body.title ?? ''), 'dashboard');
           // "Send & resume" from the waiting-for-you banner: the reply is the answer the run waited for.
           const r = body.resume === true ? await control.resumeIfAnswered(project, { force: true }) : null;
           refresh();
           return send(res, 200, { id, ...r });
         }
-        const fm = /^feedback\/(F-\d+)$/.exec(sub);
-        if (fm) {
-          if (body.decision === 'approved' || body.decision === 'rejected') {
-            const r = await control.decide(project, fm[1], body.decision, body.note ? String(body.note) : undefined);
-            refresh();
-            return send(res, 200, { ok: true, ...r });
+        const cm = /^cards\/([A-Z]+-\d+)$/.exec(sub);
+        if (cm) {
+          const id = cm[1];
+          let r = {};
+          if (body.decision === 'approved' || body.decision === 'rejected') r = await control.decide(project, id, body.decision, body.note ? String(body.note) : undefined);
+          else if (typeof body.comment === 'string' && body.steer === true) r = control.steer(project, body.comment, 'dashboard', id);
+          else if (typeof body.comment === 'string') commentCard(w.p, id, body.comment, 'user');
+          else {
+            // Only known fields; setCard checks their values.
+            const keys = ['title', 'column', 'milestone', 'assignee', 'priority', 'blocked', 'cut', 'scope'] as const;
+            setCard(w.p, id, Object.fromEntries(keys.filter((k) => k in body).map((k) => [k, body[k]])) as Fields, 'user');
           }
-          if (typeof body.text === 'string') editFeedback(w.p, fm[1], body.text, 'user');
-          else if (typeof body.scope === 'string') setScope(w.p, fm[1], body.scope as Scope);
-          else if (body.status) setFeedbackStatus(w.p, fm[1], body.status as FeedbackStatus, 'user', null, body.note || undefined);
-          else if (body.note) noteFeedback(w.p, fm[1], String(body.note), 'user', null);
-          else return send(res, 400, { error: 'status or note required' });
           refresh();
-          return send(res, 200, { ok: true });
+          return send(res, 200, { ok: true, ...r });
         }
         if (sub === 'seen') {
           markSeen(w.id);

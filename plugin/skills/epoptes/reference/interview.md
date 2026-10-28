@@ -49,7 +49,7 @@ The actions the harness must never take on its own. Suggest the common ones and 
 - adding dependencies with licences the user hasn't approved
 
 ## 8. Feedback cadence
-- Will the user check in? How often, and how: the dashboard, `epoptes feedback`, `.epoptes/FEEDBACK.md`, or a chat with Claude Code, Codex or pi.
+- Will the user check in? How often, and how: the dashboard's board (add cards, comment on them), `epoptes feedback`, `.epoptes/FEEDBACK.md`, or a chat with Claude Code, Codex or pi.
 - What should reach them right away (milestone, blocked, done)? This sets `notify` and when the orchestrator sends PushNotification.
 - Is there a checkpoint where the run should **pause for review** (e.g. after the first milestone)? If so, the orchestrator runs `epoptes pause` at that point.
 

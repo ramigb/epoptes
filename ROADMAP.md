@@ -3,6 +3,7 @@
 Short and current. New notes land in `NOTES.md` and get triaged here at the start of each session.
 
 ## Now
+- **Try the board on a real goal**: refresh pipo's and epoptes-video's loop.md from the template (triage, REVIEW, replies), then watch whether orchestrators answer comments and keep cards moving, or batch-move them at the end.
 - **Read [docs/overnight-2026-10-04.md](docs/overnight-2026-10-04.md)** and try the new features on a real goal: approvals, steering, follow-ups, milestones, the time chart, the output link, the brain.
 - **Update the existing harnesses' loop.md** (pipo, epoptes-video) to use `epoptes approval`, `wait-for-human`, `lesson`, `event output` and per-milestone early finish, or regenerate them with the skill.
 - **Try the skill interactively** (`epoptes skill install`, then in Claude Code: "use the epoptes skill to build a harness for …") and note what the interview gets wrong in NOTES.md.
@@ -22,6 +23,7 @@ Short and current. New notes land in `NOTES.md` and get triaged here at the star
 - Retention setting for `cycles/*/stream.jsonl`.
 
 ## Done
+- **The board** (2026-10-28): a kanban board per harness (`board.jsonl`), each job an epic. Feedback lands in a backlog column; the orchestrator triages it into TODO → DOING → REVIEW → DONE, with milestones, assignees and priorities on cards. Comments on cards (the agent acts or replies; a comment on a done card reopens it; a comment can steer). Approvals block their card. Follow-ups cover unanswered comments. `epoptes board`, `card`, `milestone`; `feedback` kept as an alias. Old goals migrate once (feedback.jsonl + backlog.md); old loop.md files get a runner note. Dashboard: a Board panel with drag and drop and a card thread.
 - **Overnight features** (2026-10-04): approvals with Approve / Disapprove and a `needs_input` ("waiting for you") state; agent notes; steering that interrupts and replans; follow-ups after DONE with no time box; milestone segments and per-milestone early finish; "where the time went"; animated favicon; output link on its own origin; the brain. 38 tests. Details: [docs/overnight-2026-10-04.md](docs/overnight-2026-10-04.md).
 - **M5 Polish** (2026-09-28): README (install, quick start, concepts, CLI, costs, safety), `bin/` launcher + `npm pack`-ready package, `--version`, friendly errors (port in use, missing `claude`, goal not found, last cycle failed), first-run and empty-state guides, state-change and milestone animations.
 - **M4 Reports** (2026-09-28): `epoptes report` (Markdown + script-free HTML, per goal and `--all`), dashboard Report links, `epoptes import-runsh`. Checked by importing a clone of dress2impress: every total matches its raw logs.
