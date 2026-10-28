@@ -249,24 +249,26 @@ function night() {
     }
   }
 
+  // The clock lives here, not in the slider: a step="1" range rounds each frame's fraction of a minute away.
+  let t = 0;
   let raf = 0;
   let last = 0;
   function stop() {
     cancelAnimationFrame(raf);
     play.setAttribute("aria-pressed", "false");
-    play.textContent = Number(range.value) >= 480 ? "↻ Replay the night" : "▶ Play the night";
+    play.textContent = t >= 480 ? "↻ Replay the night" : "▶ Play the night";
   }
   function frame(now) {
     // 8 hours in about 24 seconds.
-    const t = Math.min(480, Number(range.value) + ((now - last) / 1000) * 20);
+    t = Math.min(480, t + ((now - last) / 1000) * 20);
     last = now;
-    range.value = String(t);
+    range.value = String(Math.floor(t));
     render(t);
     if (t >= 480) stop();
     else raf = requestAnimationFrame(frame);
   }
   function start() {
-    if (Number(range.value) >= 480) range.value = "0";
+    if (t >= 480) t = 0;
     play.setAttribute("aria-pressed", "true");
     play.textContent = "❚❚ Pause";
     last = performance.now();
@@ -274,8 +276,9 @@ function night() {
   }
   play.addEventListener("click", () => (play.getAttribute("aria-pressed") === "true" ? stop() : start()));
   range.addEventListener("input", () => {
+    t = Number(range.value);
     stop();
-    render(Number(range.value));
+    render(t);
   });
   render(0);
 
