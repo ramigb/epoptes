@@ -1,0 +1,69 @@
+name: Deploy the Epoptes website to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "site/**"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Configure GitHub Pages
+        id: pages
+        uses: actions/configure-pages@v5
+
+      # Social previews need absolute URLs; the source keeps relative ones so it works from any host.
+      - name: Prepare static website
+        env:
+          PAGES_BASE_URL: ${{ steps.pages.outputs.base_url }}
+          SITE_ARTIFACT: ${{ runner.temp }}/epoptes-site
+        run: |
+          cp -a site "$SITE_ARTIFACT"
+          rm -f "$SITE_ARTIFACT/README.md"
+          python3 - <<'PY'
+          import html
+          import os
+          from pathlib import Path
+
+          base_url = os.environ["PAGES_BASE_URL"].rstrip("/") + "/"
+          page_url = html.escape(base_url, quote=True)
+          image_url = html.escape(base_url + "social-card.png", quote=True)
+          index = Path(os.environ["SITE_ARTIFACT"]) / "index.html"
+          source = index.read_text(encoding="utf-8")
+          source = source.replace('content="social-card.png"', f'content="{image_url}"')
+          source = source.replace("</head>", f'<link rel="canonical" href="{page_url}">\n'
+                                  f'<meta property="og:url" content="{page_url}">\n</head>')
+          index.write_text(source, encoding="utf-8")
+          PY
+
+      - name: Upload website artifact
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: ${{ runner.temp }}/epoptes-site
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

@@ -7,6 +7,8 @@
 
 # Epoptes
 
+**Website:** [ramigb.github.io/epoptes](https://ramigb.github.io/epoptes/): what it is, why, and a crash course.
+
 *Epoptes (Greek ἐπόπτης, "the overseer") was a title for Zeus and Helios, who watch over everything.*
 
 Epoptes runs **long, autonomous Claude Code, Codex, pi or Antigravity sessions** (an overnight build, a research sweep, a stack of documents, a data clean-up) and lets you watch and steer them. You describe the goal in a chat, and the agent interviews you and writes the harness. Epoptes then runs it as a series of fresh-context cycles until the goal is done or its time box ends, with a live dashboard, a kanban board you steer it through, and a report at the end.

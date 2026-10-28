@@ -1,0 +1,730 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f4f0e8" media="(prefers-color-scheme: light)">
+    <meta name="theme-color" content="#0e1014" media="(prefers-color-scheme: dark)">
+    <title>Epoptes: long agent runs, under watch</title>
+    <meta
+      name="description"
+      content="Epoptes runs long, autonomous Claude Code, Codex, pi or Antigravity sessions as fresh-context cycles in a time box, with a live dashboard, a kanban board you steer them through, and a report at the end."
+    >
+    <meta property="og:type" content="website">
+    <meta property="og:title" content="Epoptes: long agent runs, under watch">
+    <meta
+      property="og:description"
+      content="Describe the goal in a chat. Epoptes runs it overnight as fresh-context cycles you can watch, steer and trust in the morning."
+    >
+    <meta property="og:image" content="social-card.png">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:image:alt" content="Epoptes. Long agent runs, under watch.">
+    <meta name="twitter:card" content="summary_large_image">
+    <link rel="icon" href="favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="style.css">
+    <script src="app.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="top wrap">
+      <a class="brand" href="#main" aria-label="Epoptes home">
+        <svg class="mark" viewBox="0 0 410 410" width="30" height="30" aria-hidden="true"><use href="#mark" /></svg>epoptes
+      </a>
+      <nav aria-label="Main navigation">
+        <a href="#why">Why</a>
+        <a href="#compare">Compare</a>
+        <a href="#course">Crash course</a>
+        <a href="#features">Features</a>
+        <a href="#start">Install</a>
+        <a class="nav-gh" href="https://github.com/ramigb/epoptes">GitHub <span aria-hidden="true">↗</span></a>
+      </nav>
+    </header>
+
+    <svg width="0" height="0" class="sr-only" aria-hidden="true">
+      <symbol id="mark" viewBox="0 0 410 410">
+        <g class="orbit-k">
+          <path d="M200 22 A178 178 0 0 1 354 111" fill="none" stroke="currentColor" stroke-width="30" stroke-linecap="round" />
+          <path d="M377 162 A178 178 0 0 1 305 347" fill="none" stroke="currentColor" stroke-width="30" stroke-linecap="round" />
+          <path d="M247 373 A178 178 0 0 1 44 238" fill="none" stroke="currentColor" stroke-width="30" stroke-linecap="round" />
+        </g>
+        <g class="orbit-a">
+          <path d="M108 107 C165 55 261 57 318 119" fill="none" stroke="#e8a23a" stroke-width="22" stroke-linecap="round" />
+          <path d="M321 255 C292 327 199 352 126 312" fill="none" stroke="#e8a23a" stroke-width="22" stroke-linecap="round" />
+        </g>
+        <circle cx="205" cy="205" r="61" fill="currentColor" />
+        <circle cx="205" cy="205" r="25" fill="var(--paper)" />
+        <circle cx="205" cy="205" r="9" fill="#e8a23a" />
+      </symbol>
+    </svg>
+
+    <main id="main">
+      <section class="hero wrap" aria-labelledby="hero-title">
+        <div class="hero-text">
+          <p class="tagline">
+            <span class="blip" aria-hidden="true"></span>Claude Code <span class="sep">/</span> Codex
+            <span class="sep">/</span> pi <span class="sep">/</span> Antigravity
+          </p>
+          <h1 id="hero-title">Long agent runs.<br><span class="hl">Under watch.</span></h1>
+          <p class="lede">
+            Epoptes runs the long jobs you'd love to hand to an agent overnight: a feature build, a research sweep, a
+            stack of documents, a data clean-up. You describe the goal in a chat. Epoptes runs it as a series of
+            fresh-context cycles in a time box, with a live dashboard, a board you steer it through, and a report in
+            the morning.
+          </p>
+          <div class="cta">
+            <a class="btn primary" href="#course">Take the crash course <span aria-hidden="true">↓</span></a>
+            <a class="btn ghost" href="#start">Install</a>
+          </div>
+          <p class="greek">
+            <i>ἐπόπτης</i>, “the overseer”: a title for Zeus and Helios, who watch over everything.
+          </p>
+        </div>
+
+        <figure class="dash" id="dash" aria-labelledby="dash-caption">
+          <div class="dash-bar">
+            <span class="lights" aria-hidden="true"><i></i><i></i><i></i></span>
+            <span>127.0.0.1:4747 · field-guide</span>
+          </div>
+          <div class="band">
+            <span class="pulse" aria-hidden="true"></span>
+            <b>Running</b><span class="band-meta">cycle <b id="d-cycle">7</b> · <span id="d-ms">M2 · reference chapters</span></span>
+            <span class="band-clock" id="d-clock">2h41m of 8h</span>
+          </div>
+          <div class="clockbar" aria-hidden="true">
+            <div class="clock-fill" id="d-fill"></div>
+            <i class="tick done" style="left: 18%"></i><i class="tick" style="left: 45%"></i>
+            <i class="tick" style="left: 70%"></i><i class="tick" style="left: 88%"></i>
+            <i class="pace" style="left: 76%"></i>
+          </div>
+          <div class="mini-board" id="d-board" aria-hidden="true">
+            <div class="col"><h4>backlog</h4><ol><li data-who="you">C-9 shorter intros</li></ol></div>
+            <div class="col"><h4>todo</h4><ol><li>C-6 Webhooks</li><li>C-7 Rate limits</li></ol></div>
+            <div class="col"><h4>doing</h4><ol><li data-who="writer">C-5 Pagination</li></ol></div>
+            <div class="col"><h4>review</h4><ol><li data-who="factcheck">C-4 Errors</li></ol></div>
+            <div class="col"><h4>done</h4><ol><li>C-2 Auth</li><li>C-3 Quick start</li></ol></div>
+          </div>
+          <ol class="ticker" id="d-ticker" aria-hidden="true">
+            <li><time>2:38</time><b class="r-orch">orchestrator</b><span>Read state/handoff.md</span></li>
+            <li><time>2:39</time><b class="r-writer">writer</b><span>Write guide/05-pagination.md</span></li>
+            <li><time>2:40</time><b class="r-check">factcheck</b><span>Bash node scripts/check-links.mjs</span></li>
+            <li><time>2:41</time><b class="r-orch">orchestrator</b><span>epoptes card C-4 review</span></li>
+          </ol>
+          <figcaption id="dash-caption">
+            A goal page while a run works through the night. Simulated, but drawn from the real dashboard.
+          </figcaption>
+        </figure>
+      </section>
+
+      <section class="what wrap" id="what" aria-labelledby="what-title">
+        <div class="head">
+          <p class="kicker">01 · what it is</p>
+          <h2 id="what-title">A skill, a runner, <span class="hl">a dashboard.</span></h2>
+          <p>
+            Three small parts that share nothing but a folder of plain files, <code>.epoptes/</code>, in your project.
+            Any of them can be replaced, and you can read or fix every file by hand.
+          </p>
+        </div>
+        <ol class="parts">
+          <li>
+            <span class="part-n">1</span>
+            <h3>The skill <small>designs the harness</small></h3>
+            <p>
+              Ask your agent to “use the epoptes skill”. It interviews you about the outcome, a done definition it can
+              check, the time box, the team and what always needs your approval. Then it writes the harness and checks
+              it with a dry run.
+            </p>
+          </li>
+          <li>
+            <span class="part-n">2</span>
+            <h3>The runner <small>runs it in cycles</small></h3>
+            <p>
+              A detached process per goal. Each cycle starts your own <code>claude</code>, <code>codex</code>,
+              <code>pi</code> or <code>agy</code> with a fresh context. The cycle orients from small state files and
+              the board, does a slice of work, verifies it, records it and exits.
+            </p>
+          </li>
+          <li>
+            <span class="part-n">3</span>
+            <h3>The dashboard <small>lets you watch and steer</small></h3>
+            <p>
+              <code>epoptes ui</code> on 127.0.0.1. A live ticker, a kanban board for feedback, approvals to answer,
+              the clock, costs and plan usage, then a report. Closing it never stops a run.
+            </p>
+          </li>
+        </ol>
+
+        <figure class="flow" aria-labelledby="flow-caption">
+          <svg viewBox="0 0 1160 300" role="img" aria-labelledby="flow-title">
+            <title id="flow-title">You chat with the skill, which writes .epoptes. The runner loops cycles over it, and the dashboard reads it and writes your feedback back.</title>
+            <defs>
+              <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                <path d="M0 0 L10 5 L0 10z" fill="currentColor" />
+              </marker>
+            </defs>
+            <g class="f-node"><rect x="10" y="110" width="150" height="80" rx="16" /><text x="85" y="146">you</text><text class="sub" x="85" y="168">a chat</text></g>
+            <g class="f-node"><rect x="230" y="110" width="170" height="80" rx="16" /><text x="315" y="146">the skill</text><text class="sub" x="315" y="168">interview → files</text></g>
+            <g class="f-node core"><rect x="470" y="70" width="220" height="160" rx="22" /><text x="580" y="128">.epoptes/</text>
+              <text class="sub" x="580" y="154">goal.json · loop.md</text><text class="sub" x="580" y="174">agents/ · state/</text><text class="sub" x="580" y="194">board.jsonl · events</text></g>
+            <g class="f-node"><rect x="770" y="20" width="200" height="80" rx="16" /><text x="870" y="56">the runner</text><text class="sub" x="870" y="78">cycle after cycle</text></g>
+            <g class="f-node"><rect x="770" y="200" width="200" height="80" rx="16" /><text x="870" y="236">the dashboard</text><text class="sub" x="870" y="258">watch · steer · report</text></g>
+            <g class="f-node agent"><rect x="1030" y="20" width="120" height="80" rx="16" /><text x="1090" y="56">agent</text><text class="sub" x="1090" y="78">fresh context</text></g>
+            <g class="f-edges">
+              <path d="M160 150 H222" marker-end="url(#arrow)" />
+              <path d="M400 150 H462" marker-end="url(#arrow)" />
+              <path class="flowing" d="M690 110 C730 90 730 60 762 60" marker-end="url(#arrow)" />
+              <path class="flowing" d="M970 50 H1022" marker-end="url(#arrow)" />
+              <path class="flowing back" d="M1022 70 H978" marker-end="url(#arrow)" />
+              <path class="flowing" d="M762 240 C730 240 730 210 698 195" marker-end="url(#arrow)" />
+              <path d="M770 260 C500 330 120 300 85 198" marker-end="url(#arrow)" stroke-dasharray="4 6" />
+            </g>
+            <text class="edge-label" x="1150" y="128" style="text-anchor: end">claude · codex · pi · agy</text>
+            <text class="edge-label" x="300" y="262">cards, comments, approvals</text>
+          </svg>
+          <figcaption id="flow-caption">
+            The file format is the contract. The runner, the CLI, the dashboard and the skill only read and write these
+            files.
+          </figcaption>
+        </figure>
+      </section>
+
+      <section class="why wrap" id="why" aria-labelledby="why-title">
+        <div class="head">
+          <p class="kicker">02 · why</p>
+          <h2 id="why-title">Long sessions drift. <span class="hl">Short cycles don't.</span></h2>
+          <p>
+            Epoptes grew out of a 12-hour autonomous game build: 19 cycles, about $186 of API-equivalent usage, and a
+            notebook of what went wrong. Its rules for keeping long runs cheap and on track are built in, so you don't
+            have to relearn them.
+          </p>
+        </div>
+        <div class="why-grid">
+          <article>
+            <p class="pain">One context fills up, gets summarised, and forgets what failed.</p>
+            <h3><span class="num">1</span> A fresh context every cycle</h3>
+            <p>
+              Memory lives in small files the next cycle reads first: a 25-line handoff, a progress table, lessons and
+              decisions. Nothing drifts out of a summary, and every cycle starts sharp.
+            </p>
+          </article>
+          <article>
+            <p class="pain">Every step costs the price of the most expensive model.</p>
+            <h3><span class="num">2</span> Cheap models for mechanical work</h3>
+            <p>
+              A team of roles, each with its own model: a strong orchestrator and reviewer, mid-size workers, and a
+              small checker that only runs tests and reports facts.
+            </p>
+          </article>
+          <article>
+            <p class="pain">Notes grow until reading them is the job.</p>
+            <h3><span class="num">3</span> State files with size caps</h3>
+            <p>
+              Each state file has a line cap the dry run and the runner check. Orienting takes six tool calls or fewer,
+              with targeted reads instead of whole files.
+            </p>
+          </article>
+          <article>
+            <p class="pain">A single run can wander for hours with nothing to show.</p>
+            <h3><span class="num">4</span> A time and round cap per cycle</h3>
+            <p>
+              A cycle does at most three rounds of one to three tasks, under a soft time cap and a hard timeout. A
+              fresh cycle is cheaper than a bloated one.
+            </p>
+          </article>
+        </div>
+      </section>
+
+      <section class="night" id="compare" aria-labelledby="compare-title">
+        <div class="wrap">
+          <div class="head">
+            <p class="kicker">03 · the night shift</p>
+            <h2 id="compare-title">Ask one session, <span class="hl">or run a harness.</span></h2>
+            <p>
+              The same 8-hour job, two ways: one agent session told to “keep going all night”, and an Epoptes harness.
+              Drag the clock, or press play.
+            </p>
+          </div>
+
+          <div class="scrub" id="scrub">
+            <button class="btn chip play" type="button" id="sim-play" aria-pressed="false">▶ Play the night</button>
+            <label class="scrub-range">
+              <span class="sr-only">Hours into the night</span>
+              <input type="range" id="sim-t" min="0" max="480" step="1" value="0">
+            </label>
+            <output class="scrub-time" id="sim-time" for="sim-t">0h00</output>
+          </div>
+
+          <div class="lanes">
+            <article class="lane solo" aria-labelledby="solo-title">
+              <header>
+                <h3 id="solo-title">One long session</h3>
+                <p>“Build the field guide. Keep going all night.”</p>
+              </header>
+              <p class="lane-state" id="solo-state">working</p>
+              <div class="meter">
+                <span>context</span>
+                <div class="meter-bar"><i id="solo-ctx"></i></div>
+                <b id="solo-ctx-n">8%</b>
+              </div>
+              <div class="strip" id="solo-strip" aria-hidden="true"></div>
+              <div class="ms"><span>milestones</span><ol id="solo-ms"></ol></div>
+              <ol class="lane-log" id="solo-log"></ol>
+            </article>
+
+            <article class="lane epo" aria-labelledby="epo-title">
+              <header>
+                <h3 id="epo-title">Epoptes harness</h3>
+                <p>The same goal, 8-hour time box, done checks agreed up front.</p>
+              </header>
+              <p class="lane-state" id="epo-state">cycle 1</p>
+              <div class="meter">
+                <span>context</span>
+                <div class="meter-bar"><i id="epo-ctx"></i></div>
+                <b id="epo-ctx-n">8%</b>
+              </div>
+              <div class="strip" id="epo-strip" aria-hidden="true"></div>
+              <div class="ms"><span>milestones</span><ol id="epo-ms"></ol></div>
+              <ol class="lane-log" id="epo-log"></ol>
+            </article>
+          </div>
+          <p class="fine center">
+            An illustration of the failure modes Epoptes was built around, not a benchmark. Your agent may do better on
+            a good night.
+          </p>
+
+          <div class="table-wrap" tabindex="0" role="region" aria-labelledby="vs-caption">
+            <table class="vs">
+              <caption id="vs-caption">Side by side</caption>
+              <thead>
+                <tr><th scope="col"></th><th scope="col">Ask one agent session</th><th scope="col">Run it with Epoptes</th></tr>
+              </thead>
+              <tbody>
+                <tr><th scope="row">Context</th><td>One window that fills, gets compacted and loses detail</td><td>A fresh context every cycle; memory in small, capped files</td></tr>
+                <tr><th scope="row">“Done”</th><td>When the agent says it looks good</td><td>Checks agreed at the interview: commands, files, a reviewer's rubric</td></tr>
+                <tr><th scope="row">“Shall I continue?”</th><td>Waits for an answer you're asleep for</td><td>The loop says what's next. Approvals wait while other work carries on</td></tr>
+                <tr><th scope="row">Time</th><td>No clock: it stops early, or runs on</td><td>A time box of active time, then wrap-up; it finishes early once checks pass</td></tr>
+                <tr><th scope="row">Closing the laptop lid</th><td>Ends the session</td><td>The runner is detached; the next start recovers interrupted work</td></tr>
+                <tr><th scope="row">Rate limits</th><td>An error, or a loop of retries</td><td>Waits for the reset with the clock paused, then carries on</td></tr>
+                <tr><th scope="row">Models</th><td>One model for every step</td><td>A model per role: small for checks, strong for review</td></tr>
+                <tr><th scope="row">Steering</th><td>Type into the session and hope it notices</td><td>Cards and comments on a board; ⚡ Steer now replans around you</td></tr>
+                <tr><th scope="row">Seeing the cost</th><td>A total at the end, if you ask</td><td>Tokens, cache share and cost per cycle, outliers flagged, plan usage live</td></tr>
+                <tr><th scope="row">The morning after</th><td>A long transcript</td><td>A report, the board, events, commits or snapshots per cycle</td></tr>
+                <tr><th scope="row">The next job</th><td>Starts from zero</td><td>Starts from the brain: lessons from every harness you've run</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <section class="course wrap" id="course" aria-labelledby="course-title">
+        <div class="head">
+          <p class="kicker">04 · crash course</p>
+          <h2 id="course-title">From a sentence <span class="hl">to a morning report.</span></h2>
+          <p>Seven steps. The first two take a few minutes; the rest is the run looking after itself.</p>
+        </div>
+
+        <div class="steps" role="tablist" aria-label="Crash course steps" id="steps">
+          <button type="button" role="tab" id="tab-1" aria-controls="step-1" aria-selected="true"><b>1</b>Install</button>
+          <button type="button" role="tab" id="tab-2" aria-controls="step-2" aria-selected="false" tabindex="-1"><b>2</b>Describe</button>
+          <button type="button" role="tab" id="tab-3" aria-controls="step-3" aria-selected="false" tabindex="-1"><b>3</b>The harness</button>
+          <button type="button" role="tab" id="tab-4" aria-controls="step-4" aria-selected="false" tabindex="-1"><b>4</b>Dry run</button>
+          <button type="button" role="tab" id="tab-5" aria-controls="step-5" aria-selected="false" tabindex="-1"><b>5</b>Start</button>
+          <button type="button" role="tab" id="tab-6" aria-controls="step-6" aria-selected="false" tabindex="-1"><b>6</b>Steer</button>
+          <button type="button" role="tab" id="tab-7" aria-controls="step-7" aria-selected="false" tabindex="-1"><b>7</b>Finish</button>
+        </div>
+
+        <div class="step" role="tabpanel" id="step-1" aria-labelledby="tab-1">
+          <div class="step-text">
+            <h3>Install Epoptes and give your agent the skill</h3>
+            <p>
+              You need Node.js 22.18 or newer, Linux, macOS or WSL2, and at least one agent CLI installed and logged
+              in. Epoptes runs your own CLI and never handles logins or keys.
+            </p>
+            <p>
+              The skill is how your agent learns to design harnesses. Install it for each CLI you use: it links into
+              that CLI's skills folder.
+            </p>
+          </div>
+          <div class="term">
+            <div class="pane-bar"><span class="lights" aria-hidden="true"><i></i><i></i><i></i></span><span>terminal</span></div>
+            <pre tabindex="0"><code><span class="p">$</span> npm install -g @ramigbcom/epoptes
+<span class="p">$</span> epoptes skill install                        <span class="c"># Claude Code</span>
+<span class="p">$</span> epoptes skill install --agent codex          <span class="c"># Codex</span>
+<span class="p">$</span> epoptes skill install --agent pi             <span class="c"># pi</span>
+<span class="p">$</span> epoptes skill install --agent antigravity    <span class="c"># agy</span></code></pre>
+          </div>
+        </div>
+
+        <div class="step" role="tabpanel" id="step-2" aria-labelledby="tab-2">
+          <div class="step-text">
+            <h3>Describe the goal. The skill interviews you.</h3>
+            <p>
+              In the folder the work should happen in, ask for a harness. The agent looks around first, then asks only
+              what it can't find out, two to four questions at a time:
+            </p>
+            <ul class="ticks">
+              <li>the outcome, and a done definition it can check</li>
+              <li>non-goals and the time box</li>
+              <li>the team: roles, models and effort</li>
+              <li>checkpoints, and what always needs your approval</li>
+              <li>where the deliverable lives, so the dashboard can link to it</li>
+            </ul>
+            <p>It reads lessons from your past harnesses and shows a one-screen summary for you to sign off.</p>
+          </div>
+          <div class="term">
+            <div class="pane-bar"><span class="lights" aria-hidden="true"><i></i><i></i><i></i></span><span>claude</span></div>
+            <pre tabindex="0"><code><span class="you">&gt; use the epoptes skill to build a harness for writing a
+  20-page field guide to our internal APIs</span>
+
+<span class="ai">●</span> I read the README, the OpenAPI spec and docs/. A few questions:
+
+  1. Done: how would you check it in 2 minutes?
+     <span class="opt">❯ every endpoint documented + examples run (Recommended)</span>
+       an editor's rubric score ≥ 8 as well
+  2. Time box: <span class="opt">❯ 8h active, 45m wrap-up (Recommended)</span>
+  3. Team: <span class="opt">❯ writer (sonnet) · factcheck (haiku) · editor (opus)</span>
+  4. Always ask before: <span class="opt">❯ publishing anything outside this machine</span>
+
+<span class="ai">●</span> Lessons applied from the brain: 2 (fresh-results timestamps,
+  parallel tasks own separate files). Summary below; sign off?</code></pre>
+          </div>
+        </div>
+
+        <div class="step" role="tabpanel" id="step-3" aria-labelledby="tab-3">
+          <div class="step-text">
+            <h3>The harness is a folder of plain files</h3>
+            <p>
+              Everything lives in <code>.epoptes/</code> next to your work. Commit it, diff it, edit it by hand. Live
+              runner state and per-cycle transcripts are gitignored and never leave your machine.
+            </p>
+            <p>
+              Role files become native subagents on Claude Code, Codex and Antigravity, each on its own model. On pi
+              the loop works through them in sequence.
+            </p>
+          </div>
+          <div class="term">
+            <div class="pane-bar"><span class="lights" aria-hidden="true"><i></i><i></i><i></i></span><span>.epoptes/</span></div>
+            <pre tabindex="0"><code>.epoptes/
+  goal.json        <span class="c">objective, done checks, time box, models</span>
+  loop.md          <span class="c">the orchestrator's per-cycle instructions</span>
+  agents/
+    writer.md      <span class="c">model: sonnet · effort: medium</span>
+    factcheck.md   <span class="c">model: haiku  · effort: low</span>
+    editor.md      <span class="c">model: opus   · effort: high</span>
+  settings.json    <span class="c">allow/deny list: no git push, no .env</span>
+  state/           <span class="c">handoff.md (25 lines), progress, lessons</span>
+  board.jsonl      <span class="c">every card, comment and move</span>
+  events.jsonl     <span class="c">milestones, blocks, done</span>
+  cycles/  run/    <span class="c">per-cycle records · live state (ignored)</span>
+
+<span class="k">"done"</span>: [
+  { <span class="k">"id"</span>: <span class="s">"D1"</span>, <span class="k">"check"</span>: <span class="s">"every endpoint has a page"</span>,
+    <span class="k">"verify"</span>: { <span class="k">"type"</span>: <span class="s">"command"</span>, <span class="k">"run"</span>: <span class="s">"npm run check:coverage"</span> } },
+  { <span class="k">"id"</span>: <span class="s">"D2"</span>, <span class="k">"check"</span>: <span class="s">"editor scores every chapter ≥ 8"</span>,
+    <span class="k">"verify"</span>: { <span class="k">"type"</span>: <span class="s">"agent"</span> } }
+],
+<span class="k">"timebox"</span>: { <span class="k">"total_min"</span>: <span class="n">480</span>, <span class="k">"wrapup_min"</span>: <span class="n">45</span>, <span class="k">"grace_min"</span>: <span class="n">30</span> }</code></pre>
+          </div>
+        </div>
+
+        <div class="step" role="tabpanel" id="step-4" aria-labelledby="tab-4">
+          <div class="step-text">
+            <h3>A dry run checks the guardrails</h3>
+            <p>
+              <code>epoptes run --dry-run</code> never starts the clock. It validates the goal and prints the exact
+              command the next cycle will run. It also flags:
+            </p>
+            <ul class="ticks">
+              <li>template leftovers</li>
+              <li>missing deny rules and over-broad allows</li>
+              <li>anything that looks like a credential</li>
+              <li>roles with no description or a model the CLI can't use</li>
+              <li>a loop that never reads the board or reports done</li>
+            </ul>
+            <p>Then <code>epoptes add</code> registers the goal with the dashboard.</p>
+          </div>
+          <div class="term">
+            <div class="pane-bar"><span class="lights" aria-hidden="true"><i></i><i></i><i></i></span><span>terminal</span></div>
+            <pre tabindex="0"><code><span class="p">$</span> epoptes run --dry-run
+goal field-guide: A 20-page field guide to our internal APIs.
+adapter claude-code (2.1.300) · roles: writer, factcheck, editor
+time box 8h00m (wrap-up 45, grace 30) · cycle timeout 90 min · checkpoints git
+clock: not started (a dry run never starts it)
+next cycle runs in ~/work/api-guide:
+  claude -p "&lt;loop.md&gt;" --model sonnet --effort medium --permission-mode auto
+    --agents …/agents.json --settings …/settings.json …
+
+<span class="warn">warnings:</span>
+  state/lessons.md has 34 lines (cap 30)
+
+<span class="ok">ok with warnings</span>
+
+<span class="p">$</span> epoptes add
+registered field-guide (API field guide)</code></pre>
+          </div>
+        </div>
+
+        <div class="step" role="tabpanel" id="step-5" aria-labelledby="tab-5">
+          <div class="step-text">
+            <h3>Press Start, then go to bed</h3>
+            <p>
+              Open the dashboard and press <b>Start</b>, or start from the terminal. The runner is detached: closing the
+              dashboard or the terminal never stops it.
+            </p>
+            <p>
+              Between cycles it checks the clock, your controls, rate limits and failures. Near the end the goal
+              switches to wrap-up (feature freeze), then overtime, then stops. It finishes early once its checks pass.
+            </p>
+          </div>
+          <div class="term">
+            <div class="pane-bar"><span class="lights" aria-hidden="true"><i></i><i></i><i></i></span><span>terminal</span></div>
+            <pre tabindex="0"><code><span class="p">$</span> epoptes ui
+dashboard on http://127.0.0.1:4747
+
+<span class="p">$</span> epoptes start field-guide
+started: run r1, runner pid 48213
+
+<span class="p">$</span> epoptes status
+field-guide · API field guide   (~/work/api-guide)
+state <span class="ok">running</span> (pid 48213) · run r1 · cycle 7 · mode build
+clock 2h41m active of 8h00m · wrap-up in 4h34m · end in 5h19m · …
+pace M1 took 72% of its planned time · on pace to finish at ~6h50m of 8h00m
+board 6/10 done · 1 backlog · 2 todo · 1 doing · 1 review · 0 blocked · 0 cut
+last cycle c6: ok · 0h38m · 41 turns · ≈ $1.12 (estimate)</code></pre>
+          </div>
+        </div>
+
+        <div class="step" role="tabpanel" id="step-6" aria-labelledby="tab-6">
+          <div class="step-text">
+            <h3>Steer through the board, not the transcript</h3>
+            <p>
+              Your feedback lands in the backlog as a card. The orchestrator triages it into TODO or cuts it with a
+              reason, works it, verifies it in REVIEW and moves it to DONE. Comment on any card; the next cycle acts on
+              it or replies.
+            </p>
+            <p>
+              Anything on the approval list waits for your Approve or Disapprove while the run carries on with other
+              work. Need to change course right now? <b>⚡ Steer now</b> interrupts the cycle, and the next one
+              replans the board around you.
+            </p>
+          </div>
+          <div class="term">
+            <div class="pane-bar"><span class="lights" aria-hidden="true"><i></i><i></i><i></i></span><span>terminal</span></div>
+            <pre tabindex="0"><code><span class="p">$</span> epoptes feedback "the intros are too long"
+added C-9 to the backlog
+
+<span class="p">$</span> epoptes card C-4 comment "link the error codes table"
+<span class="p">$</span> epoptes card C-12 approve "internal wiki only"
+<span class="p">$</span> epoptes feedback "drop GraphQL, REST only" --steer
+added C-13 (steering): the running cycle is interrupted now
+and a fresh one replans around it
+
+<span class="p">$</span> epoptes extend 1h
+<span class="p">$</span> epoptes pause          <span class="c"># after this cycle</span></code></pre>
+          </div>
+        </div>
+
+        <div class="step" role="tabpanel" id="step-7" aria-labelledby="tab-7">
+          <div class="step-text">
+            <h3>Read the report, follow up, take the next job</h3>
+            <p>
+              The report covers what was done, where the time went, tokens and cost per cycle, milestones against the
+              plan, and the handoff. It comes as Markdown and as script-free HTML.
+            </p>
+            <p>
+              Small tweaks after DONE go through a <b>follow-up</b>: only your open cards, no time box. The project's
+              next feature is a new <b>job</b> on the same harness, which keeps its roles and lessons. Every run feeds
+              the <b>brain</b>, so the next harness starts smarter.
+            </p>
+          </div>
+          <div class="term">
+            <div class="pane-bar"><span class="lights" aria-hidden="true"><i></i><i></i><i></i></span><span>terminal</span></div>
+            <pre tabindex="0"><code><span class="p">$</span> epoptes report
+report written:
+  ~/work/api-guide/.epoptes/reports/field-guide-20261029-0712.md
+  ~/work/api-guide/.epoptes/reports/field-guide-20261029-0712.html
+
+<span class="p">$</span> epoptes start --follow-up       <span class="c"># fix my open cards</span>
+<span class="p">$</span> epoptes job new "SDK quick-starts"
+<span class="p">$</span> epoptes brain
+brain: 6 goals, 41 harness lessons, 9 signals
+  ~/.epoptes/brain/INDEX.md</code></pre>
+          </div>
+        </div>
+      </section>
+
+      <section class="features wrap" id="features" aria-labelledby="features-title">
+        <div class="head">
+          <p class="kicker">05 · features</p>
+          <h2 id="features-title">Everything a long run needs. <span class="hl">Nothing it doesn't.</span></h2>
+        </div>
+        <ul class="feat-grid">
+          <li>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="4" height="16" rx="1" /><rect x="10" y="4" width="4" height="10" rx="1" /><rect x="17" y="4" width="4" height="13" rx="1" /></svg>
+            <h3>The board</h3>
+            <p>One kanban board per harness, each job an epic. Cards carry a milestone, a role and a priority. Drag them, comment on them; a comment on a done card reopens it.</p>
+          </li>
+          <li>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2 4 14h7l-1 8 9-12h-7z" /></svg>
+            <h3>Steer now</h3>
+            <p>Interrupts the running cycle. The next one replans the whole board around what you said. Works from a card comment too.</p>
+          </li>
+          <li>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 4 6v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V6z" /><path d="m8.5 12 2.5 2.5 4.5-5" /></svg>
+            <h3>Approvals</h3>
+            <p>What's on the approval list waits for you while the run carries on. Only when nothing else can move does it pause as “waiting for you”, with the reason.</p>
+          </li>
+          <li>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="13" r="8" /><path d="M12 9v4l3 2M9 2h6" /></svg>
+            <h3>A fair clock</h3>
+            <p>Counts active time only: pauses and rate-limit waits don't count. Wrap-up, overtime, early finish, and a projected finish from the milestone pace.</p>
+          </li>
+          <li>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12.5 9 17 20 6" /></svg>
+            <h3>Checkable done</h3>
+            <p>Two to six done checks: a command that exits 0, a file that must exist, a reviewer scoring against a rubric you wrote together. Few manual ones.</p>
+          </li>
+          <li>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="6" r="3" /><circle cx="5" cy="18" r="3" /><circle cx="19" cy="18" r="3" /><path d="M10.5 8.5 6.5 15.5M13.5 8.5l4 7" /></svg>
+            <h3>A model per role</h3>
+            <p>Roles run as native subagents on Claude Code, Codex and Antigravity: cheap models for checks, strong ones for review. On pi, any OpenRouter model.</p>
+          </li>
+          <li>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2" /></svg>
+            <h3>Costs and limits</h3>
+            <p>Tokens by model, cache share and cost per cycle, with cycles over twice the median flagged. Plan usage live. Rate limits wait for the reset.</p>
+          </li>
+          <li>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="6" r="2.5" /><circle cx="6" cy="18" r="2.5" /><circle cx="18" cy="12" r="2.5" /><path d="M6 8.5v7M8.3 7.2l7.4 3.6" /></svg>
+            <h3>Checkpoints</h3>
+            <p>Code goals commit each verified task (never push). Anything else gets a shadow git snapshot after every cycle, outside your own repo.</p>
+          </li>
+          <li>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4a3 3 0 0 0-3 3 3 3 0 0 0-2 5 3 3 0 0 0 2 5 3 3 0 0 0 6 1V6a2 2 0 0 0-3-2zM15 4a3 3 0 0 1 3 3 3 3 0 0 1 2 5 3 3 0 0 1-2 5 3 3 0 0 1-6 1" /></svg>
+            <h3>The brain</h3>
+            <p>Lessons from every run, plus each goal's numbers and signals, gathered locally for zero tokens. The skill reads them before designing the next harness.</p>
+          </li>
+          <li>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h10M4 17h7" /><path d="m16 15 2 2 4-4" /></svg>
+            <h3>Jobs and follow-ups</h3>
+            <p>One harness, many jobs over time. After DONE, a follow-up fixes your open cards in place, and flags anything big for a new run.</p>
+          </li>
+          <li>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3h7l5 5v13H7z" /><path d="M14 3v5h5M10 13h6M10 17h6" /></svg>
+            <h3>Reports</h3>
+            <p>Markdown and script-free HTML that open from disk and print. “Where the time went” shows running, rate limits, waiting for you, per role and per tool.</p>
+          </li>
+          <li>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10" width="14" height="10" rx="2" /><path d="M8 10V7a4 4 0 0 1 8 0v3" /></svg>
+            <h3>Guardrails, local only</h3>
+            <p>Each CLI's own permissions or sandbox, no push, no secrets in goal files. The dashboard binds to 127.0.0.1, with CSRF and DNS-rebinding guards. No telemetry.</p>
+          </li>
+        </ul>
+      </section>
+
+      <section class="clis wrap" id="clis" aria-labelledby="clis-title">
+        <div class="head">
+          <p class="kicker">06 · bring your own agent</p>
+          <h2 id="clis-title">Four CLIs. <span class="hl">One harness format.</span></h2>
+          <p>
+            Epoptes runs the CLI you're already logged into, on your plan or your keys. A harness says which one in
+            <code>goal.json</code>; the dashboard, board and reports work the same for all four.
+          </p>
+        </div>
+        <div class="table-wrap" tabindex="0" role="region" aria-labelledby="clis-caption">
+          <table class="cli-table">
+            <caption id="clis-caption" class="sr-only">What each CLI supports</caption>
+            <thead>
+              <tr><th scope="col"></th><th scope="col">Claude Code</th><th scope="col">Codex</th><th scope="col">Antigravity</th><th scope="col">pi</th></tr>
+            </thead>
+            <tbody>
+              <tr><th scope="row">Each cycle runs</th><td><code>claude -p</code></td><td><code>codex exec --json</code></td><td><code>agy -p</code></td><td><code>pi --mode json</code></td></tr>
+              <tr><th scope="row">Roles</th><td>native subagents</td><td>native custom agents</td><td>native subagents</td><td>worked in sequence</td></tr>
+              <tr><th scope="row">Model per role</th><td>haiku · sonnet · opus</td><td>any Codex model + effort</td><td>flash · pro · inherit</td><td>one per cycle</td></tr>
+              <tr><th scope="row">Permissions</th><td>allow / deny list</td><td>native sandbox and rules</td><td>agy's own allow rules</td><td>Epoptes deny-list guard</td></tr>
+              <tr><th scope="row">Cost shown</th><td>≈ API-equivalent</td><td>tokens</td><td>tokens</td><td>≈ from pi's catalog</td></tr>
+              <tr><th scope="row">Plan usage</th><td>5h and 7d windows</td><td>5h and 7d windows</td><td>—</td><td>API spend</td></tr>
+              <tr><th scope="row">Budget cap per cycle</th><td>yes</td><td>—</td><td>—</td><td>yes</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="fit" aria-labelledby="fit-title">
+        <div class="wrap">
+          <h2 id="fit-title" class="sr-only">What Epoptes is and isn't</h2>
+          <div class="fit-grid">
+            <div>
+              <p class="kicker">epoptes is</p>
+              <ul>
+                <li>a local runner for your own logged-in agent CLI</li>
+                <li>for long jobs: an evening, a night, a weekend</li>
+                <li>plain files in your project you can read and fix</li>
+                <li>a personal tool that improves from daily use, MIT licensed</li>
+              </ul>
+            </div>
+            <div>
+              <p class="kicker">epoptes isn't</p>
+              <ul>
+                <li>a hosted service: no accounts, no telemetry</li>
+                <li>a way around usage limits: it waits for them</li>
+                <li>an agent itself: your CLI does the work</li>
+                <li>finished: early (0.5), and file formats may still change</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="start wrap" id="start" aria-labelledby="start-title">
+        <div class="head">
+          <p class="kicker">07 · start tonight</p>
+          <h2 id="start-title">Try it on a <span class="hl">15-minute goal.</span></h2>
+          <p>
+            The example writes a small glossary in about 15 minutes, for well under $1 of API-equivalent usage. Then
+            ask your agent for a harness of your own.
+          </p>
+        </div>
+        <div class="start-grid">
+          <div class="term">
+            <div class="pane-bar">
+              <span class="lights" aria-hidden="true"><i></i><i></i><i></i></span><span>terminal</span>
+              <button class="link-btn copy" type="button" data-copy="cmd-install" hidden>copy</button>
+            </div>
+            <pre tabindex="0"><code id="cmd-install">npm install -g @ramigbcom/epoptes
+epoptes skill install
+git clone https://github.com/ramigb/epoptes.git
+cp -r epoptes/examples/glossary /tmp/glossary
+epoptes add /tmp/glossary && epoptes start glossary
+epoptes ui</code></pre>
+          </div>
+          <div class="term">
+            <div class="pane-bar">
+              <span class="lights" aria-hidden="true"><i></i><i></i><i></i></span><span>your agent</span>
+              <button class="link-btn copy" type="button" data-copy="cmd-ask" hidden>copy</button>
+            </div>
+            <pre tabindex="0"><code id="cmd-ask">use the epoptes skill to build a harness for &lt;your goal&gt;</code></pre>
+            <p class="fine">
+              Works in Claude Code, Codex, pi and Antigravity once the skill is installed for it. Needs Node.js
+              22.18+ on Linux, macOS or WSL2.
+            </p>
+          </div>
+        </div>
+        <div class="links">
+          <a href="https://github.com/ramigb/epoptes#readme">README ↗</a
+          ><a href="https://github.com/ramigb/epoptes/blob/main/docs/spec.md">Spec ↗</a
+          ><a href="https://github.com/ramigb/epoptes/tree/main/examples">Examples ↗</a
+          ><a href="https://github.com/ramigb/epoptes/blob/main/ROADMAP.md">Roadmap ↗</a
+          ><a href="https://www.npmjs.com/package/@ramigbcom/epoptes">npm ↗</a>
+        </div>
+      </section>
+    </main>
+
+    <footer class="foot wrap">
+      <a class="brand" href="#main"><svg class="mark" viewBox="0 0 410 410" width="24" height="24" aria-hidden="true"><use href="#mark" /></svg>epoptes</a>
+      <p>Autonomous work, under watch. MIT licensed.</p>
+      <a href="https://github.com/ramigb/epoptes">GitHub ↗</a>
+    </footer>
+    <p id="copy-status" class="sr-only" role="status"></p>
+  </body>
+</html>
