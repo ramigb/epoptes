@@ -383,6 +383,19 @@
           "text": {
             "type": "string"
           },
+          "cue": {
+            "type": "string"
+          },
+          "evidence": {
+            "type": "string"
+          },
+          "confidence": {
+            "enum": [
+              "high",
+              "medium",
+              "low"
+            ]
+          },
           "topic": {
             "enum": [
               "roles",

@@ -95,7 +95,13 @@ Add to every brief: "The human may comment on this card: `epoptes card <id>` sho
 {{WRAPUP_ITEMS}}
 <!-- template: goal-specific final steps, e.g. "3. README for the user: how to run it, where things are." "4. Final review; append scores." -->
 - If the main deliverable isn't where goal.json `output` says (or it's served at a URL), run `epoptes event output <path or URL> "<one line>"` so the dashboard links to it.
-- Record 1–3 **harness lessons** for future harnesses with `epoptes lesson "<rule>" --topic roles|briefs|cycles|checks|tools|state|cost|steering`: what about this harness itself (roles, models, briefs, round size, checks, tools) helped or hurt. Not about the product (that's `state/lessons.md`). Write each as a rule someone designing the next harness can apply, without secrets or client names.
+- Record 0–3 **harness lessons** for future harnesses: what about this harness itself (roles, models, briefs, round size, checks, tools) helped or hurt. Not about the product (that's `state/lessons.md`). No secrets or client names.
+  `epoptes lesson "<rule>" --cue "<situation>" --evidence "<what showed it>" --confidence high|medium|low --topic roles|briefs|cycles|checks|tools|state|cost|steering`
+  - **rule:** an action on a harness that the next designer can apply and check, naming the part it changes (a role, the brief, round size, a check). Not "be thorough".
+  - **cue:** the kind of goal or situation it applies to, so it fires on a different goal. Not this goal's facts.
+  - **evidence:** the cycles, cards, checks or numbers that showed it (`c4 and c7 timed out on the full build; c8 with split rounds finished in 12 min`).
+  - **confidence:** `low` when one cycle is all the evidence, or when several things changed at once and you can't tell which one helped. Most lessons are low; say so.
+  - No contrast in this run that supports a lesson? Record none. A guessed lesson misleads every later harness.
 - Rewrite `state/handoff.md` as the end state plus the top 10 next tasks.
 - Checkpoint, then `epoptes event done "<one-line summary>"`.
 

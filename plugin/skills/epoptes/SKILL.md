@@ -99,7 +99,7 @@ When the user asks you to "distill the brain" (or INDEX.md has grown past ~30 le
   - secrets never in goal files (point to the user's secret manager, e.g. the 1Password CLI or MCP)
 - **Anything in the goal's approval list is never done autonomously.** The orchestrator runs `epoptes approval "…" --ref <card>`, which blocks that card, and moves on. The human answers with Approve / Disapprove in the dashboard (or `epoptes card <id> approve|reject`). When nothing else can move, the orchestrator runs `epoptes wait-for-human "…"` and the run waits, clock stopped, until the human answers.
 - **Semantic events go through the CLI:** `epoptes event milestone|blocked|done …` (plus PushNotification when it's available).
-- **Every harness feeds the brain:** in wrap-up the orchestrator records 1–3 harness lessons with `epoptes lesson "<rule>" --topic <topic>`.
+- **Every harness feeds the brain:** in wrap-up the orchestrator records 0–3 harness lessons with `epoptes lesson "<rule>" --cue "<situation>" --evidence "<what showed it>" --confidence <level> --topic <topic>`, and none when the run showed nothing it could cite.
 
 ## CLI reference
 Inside a cycle, the runner sets `EPOPTES_GOAL_DIR`, `EPOPTES_RUN`, `EPOPTES_CYCLE` and `EPOPTES_MODE`, so the goal argument can be left out. `[goal]` is a registered id or a path.
@@ -136,7 +136,7 @@ Inside a cycle, the runner sets `EPOPTES_GOAL_DIR`, `EPOPTES_RUN`, `EPOPTES_CYCL
 | `epoptes wait-for-human "<what>"` | (orchestrator) end the run after this cycle as "waiting for you"; the clock stops |
 | `epoptes event milestone\|blocked\|note\|artifact\|round\|wrapup\|done "<text>"` | record a semantic event; `wrapup` and `done` also set the run markers |
 | `epoptes event output <path\|url> ["text"]` | where the main deliverable is; the dashboard shows "Open the output" (overrides goal.json `output`) |
-| `epoptes lesson "<rule>" [--topic t]` | (orchestrator, in wrap-up) a lesson about the harness itself for the brain; topics: roles, briefs, cycles, checks, tools, state, cost, steering, other |
+| `epoptes lesson "<rule>" --cue "<situation>" --evidence "<what showed it>" [--confidence high\|medium\|low] [--topic t]` | (orchestrator, in wrap-up) a lesson about the harness itself for the brain; cue and evidence are required, confidence defaults to low; topics: roles, briefs, cycles, checks, tools, state, cost, steering, other |
 | `epoptes brain` / `epoptes brain lessons [--kind k]` | gather every goal into `~/.epoptes/brain/INDEX.md` / print the harness lessons |
 | `epoptes report [goal] [--all] [--stdout] [--job <id>\|all]` | Markdown + HTML report from recorded data into `.epoptes/reports/` (`--all`: every goal; `--stdout`: print the Markdown) |
 | `epoptes import-runsh <project>` | import an older run.sh harness (dress2impress style) so it shows in reports and the dashboard |

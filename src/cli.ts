@@ -61,7 +61,8 @@ The board (one per harness; each job is an epic; columns ${COLUMNS.join(' → ')
 Inside cycles (orchestrators)
   approval "<what>" [--ref <card>]  ask the human before doing something on the approval list
   wait-for-human "<what>"         end the run after this cycle as "waiting for you" (nothing else can move)
-  lesson "<rule>" [--topic t]     a harness lesson for the brain (topics: roles, briefs, cycles, checks, tools, state, cost, steering, other)
+  lesson "<rule>" --cue "<situation>" --evidence "<what showed it>" [--confidence high|medium|low] [--topic t]
+                                  a harness lesson for the brain (topics: roles, briefs, cycles, checks, tools, state, cost, steering, other)
 
 Brain
   brain                           gather every goal's digest and lessons into ~/.epoptes/brain/INDEX.md
@@ -251,6 +252,9 @@ async function main(argv: string[]) {
       agent: { type: 'string' },
       ref: { type: 'string' },
       topic: { type: 'string' },
+      cue: { type: 'string' },
+      evidence: { type: 'string' },
+      confidence: { type: 'string' },
       kind: { type: 'string' },
       id: { type: 'string' },
       job: { type: 'string' },
@@ -499,14 +503,23 @@ async function main(argv: string[]) {
     }
     case 'lesson': {
       const text = rest.join(' ').trim();
-      const { LESSON_TOPICS } = await import('./brain.ts');
+      const { LESSON_TOPICS, LESSON_CONFIDENCE } = await import('./brain.ts');
       const topic = values.topic ?? 'other';
-      if (!text) throw new Error('usage: epoptes lesson "<a rule for future harnesses>" [--topic <topic>]');
+      const cue = values.cue?.trim();
+      const evidence = values.evidence?.trim();
+      const confidence = values.confidence ?? 'low';
+      if (!text || !cue || !evidence) {
+        throw new Error(
+          'usage: epoptes lesson "<a rule for future harnesses>" --cue "<the kind of situation it applies to>" --evidence "<the cycle, card or check that showed it>" [--confidence high|medium|low] [--topic <topic>]\n' +
+            'No evidence from this run? Record no lesson: none is better than a guess.',
+        );
+      }
       if (!(LESSON_TOPICS as readonly string[]).includes(topic)) throw new Error(`topic must be one of ${LESSON_TOPICS.join(', ')}`);
+      if (!(LESSON_CONFIDENCE as readonly string[]).includes(confidence)) throw new Error(`confidence must be one of ${LESSON_CONFIDENCE.join(', ')}`);
       const p = goalPaths(resolveGoal(values.goal));
       const s = reconcile(p);
-      emit(p, { src: inCycle() ? 'orchestrator' : 'user', type: 'lesson', run: process.env.EPOPTES_RUN ?? s.run, cycle: envCycle() ?? (s.cycle || null), text, topic });
-      console.log(`lesson recorded (${topic}); it reaches ~/.epoptes/brain when the run ends`);
+      emit(p, { src: inCycle() ? 'orchestrator' : 'user', type: 'lesson', run: process.env.EPOPTES_RUN ?? s.run, cycle: envCycle() ?? (s.cycle || null), text, topic, cue, evidence, confidence });
+      console.log(`lesson recorded (${topic}, ${confidence} confidence); it reaches ~/.epoptes/brain when the run ends`);
       return;
     }
     case 'brain': {
@@ -517,7 +530,10 @@ async function main(argv: string[]) {
         if (!idx.length) return console.log(`no harness lessons yet${values.kind ? ` for ${values.kind} goals` : ''}`);
         for (const t of idx) {
           console.log(`== ${t.topic}`);
-          for (const l of t.lessons) console.log(`- ${l.text}  (${l.goals.join(', ')})`);
+          for (const l of t.lessons) {
+            console.log(`- ${l.cue ? `when ${l.cue}: ` : ''}${l.text}  (${l.goals.join(', ')})`);
+            for (const e of l.evidence) console.log(`    evidence (${e.goal}, ${e.confidence ?? 'no'} confidence): ${e.text}`);
+          }
         }
         return;
       }

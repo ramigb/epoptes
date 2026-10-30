@@ -206,7 +206,8 @@ epoptes card C-3 set --title t --milestone M2 --assign r --priority p --scope au
 epoptes milestone [goal]               the milestones · milestone add M3 "<title>" --target 2:00
 epoptes event <type> "<text>"          milestone | blocked | note | artifact | output | round | wrapup | done (used by orchestrators)
 epoptes approval "<what>" [--ref C-n] ask the human first (orchestrators) · wait-for-human "<what>": pause until they answer
-epoptes lesson "<rule>" [--topic t]    a harness lesson for the brain (orchestrators, in wrap-up)
+epoptes lesson "<rule>" --cue … --evidence … [--confidence c] [--topic t]
+                                       a harness lesson for the brain, with the situation it applies to and what showed it (orchestrators, in wrap-up)
 epoptes brain [lessons [--kind k]]     gather every goal into ~/.epoptes/brain/INDEX.md · print the lessons
 epoptes job [goal]                     the harness's jobs · job new "<title>": start the next one (archive, keep memory, reset clock)
 epoptes clock                          one line with the time left and the current milestone's target (used by orchestrators)

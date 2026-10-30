@@ -1796,7 +1796,7 @@ function Brain() {
         <section class="panel"><h2>Harness lessons <span class="right muted">${b.lessons.reduce((a, t) => a + t.lessons.length, 0)} from ${b.goals.length} goals</span></h2>
           ${b.lessons.length === 0
             ? html`<p class="empty">No lessons yet. Orchestrators record them in wrap-up (<span class="mono">epoptes lesson "…" --topic roles</span>); they arrive here when a run ends.</p>`
-            : b.lessons.map((t) => html`<div key=${t.topic} class="lesson-topic"><h3>${t.topic}</h3><ul class="lessons">${t.lessons.map((l, i) => html`<li key=${i}>${l.text}<span class="faint"> · ${l.goals.join(', ')}${l.goals.length > 1 ? ` (${l.goals.length} goals)` : ''}</span></li>`)}</ul></div>`)}
+            : b.lessons.map((t) => html`<div key=${t.topic} class="lesson-topic"><h3>${t.topic}</h3><ul class="lessons">${t.lessons.map((l, i) => html`<li key=${i}>${l.cue && html`<strong>When</strong> ${l.cue}: `}${l.text}<span class="faint"> · ${l.goals.join(', ')}${l.goals.length > 1 ? ` (${l.goals.length} goals)` : ''}</span>${l.evidence.length ? l.evidence.map((e, j) => html`<div key=${j} class="faint">evidence (${e.goal}, ${e.confidence ?? 'no'} confidence): ${e.text}</div>`) : html`<div class="faint">no evidence recorded</div>`}</li>`)}</ul></div>`)}
         </section>
         <section class="panel"><h2>Signals by goal</h2>
           ${b.goals.filter((g) => g.signals.length).length === 0

@@ -482,15 +482,21 @@ test('brain: lessons and digests reach ~/.epoptes/brain when a run ends, and `ep
   assert.deepEqual([digest.stats.cycles, digest.stats.done, digest.roles], [1, true, [{ name: 'scribe', model: 'haiku' }]]);
   assert.ok(fs.existsSync(path.join(home, 'brain', 'INDEX.md')), 'the runner rebuilt the index');
 
-  assert.match(g.run(['lesson', 'one scribe was enough for a one-file goal', '--topic', 'roles'], inCycle), /lesson recorded \(roles\)/);
-  assert.throws(() => g.run(['lesson', 'x', '--topic', 'vibes'], inCycle), /topic must be one of/);
+  const lesson = ['--cue', 'a single-file deliverable', '--evidence', 'c1 finished with one scribe'];
+  assert.match(g.run(['lesson', 'one scribe was enough for a one-file goal', '--topic', 'roles', ...lesson], inCycle), /lesson recorded \(roles, low confidence\)/);
+  assert.match(g.run(['lesson', 'split the build into two rounds', '--topic', 'cycles', ...lesson, '--confidence', 'medium'], inCycle), /medium confidence/);
+  assert.throws(() => g.run(['lesson', 'x', '--topic', 'roles'], inCycle), /--cue .*--evidence[\s\S]*Record no lesson/);
+  assert.throws(() => g.run(['lesson', 'x', '--topic', 'vibes', ...lesson], inCycle), /topic must be one of/);
+  assert.throws(() => g.run(['lesson', 'x', '--confidence', 'sure', ...lesson], inCycle), /confidence must be one of/);
+  // a lesson from before cue/evidence existed still indexes
+  fs.appendFileSync(path.join(g.root, 'events.jsonl'), JSON.stringify({ ts: new Date().toISOString(), src: 'orchestrator', type: 'lesson', run: 'r1', cycle: 1, text: 'old style lesson', topic: 'roles' }) + '\n');
   fs.writeFileSync(path.join(g.root, 'state', 'lessons.md'), '- Check the file exists before reporting done.\n');
-  assert.match(g.run(['brain']), /brain: 1 goal, 1 harness lesson/);
+  assert.match(g.run(['brain']), /brain: 1 goal, 3 harness lessons/);
   const index = fs.readFileSync(path.join(home, 'brain', 'INDEX.md'), 'utf8');
-  assert.match(index, /### roles\n\n- one scribe was enough for a one-file goal {2}_\(e2e-/);
+  assert.match(index, /### roles\n\n- \*\*When\*\* a single-file deliverable: one scribe was enough for a one-file goal {2}_\(e2e-[^\n]*\n {2}- evidence \(e2e-[^,]+, low confidence\): c1 finished with one scribe\n- old style lesson {2}_\([^\n]*\n {2}- no evidence recorded/);
   assert.match(index, /work lessons \(state\/lessons\.md\): “Check the file exists before reporting done\.”/);
   assert.match(index, /\| other \| 1 \| 1 \| 1 \|/);
-  assert.match(g.run(['brain', 'lessons', '--kind', 'other']), /== roles\n- one scribe was enough/);
+  assert.match(g.run(['brain', 'lessons', '--kind', 'other']), /== roles\n- when a single-file deliverable: one scribe was enough[^\n]*\n {4}evidence \([^)]*low confidence\): c1 finished/);
   assert.match(g.run(['brain', 'lessons', '--kind', 'code']), /no harness lessons yet for code goals/);
   for (const e of g.events()) assert.deepEqual(validate('event', e), [], JSON.stringify(e));
 });
