@@ -13,8 +13,9 @@ export interface Clock {
   timebox_s: number;
   wrapup_s: number;
   grace_s: number;
-  /** `followup`: a run after DONE that only handles open feedback, with no time box */
-  kind?: 'run' | 'followup';
+  /** `followup`: a run after DONE that only handles open feedback, with no time box.
+   *  `open`: an open-ended run (goal.json `timebox.total_min: null`): no time box, it ends at DONE, a pause or a stop. */
+  kind?: 'run' | 'followup' | 'open';
 }
 
 export type Mode = 'build' | 'wrapup' | 'overtime' | 'stop' | 'followup';
@@ -35,6 +36,7 @@ export function newFollowUpClock(run: string, at = nowIso()): Clock {
 }
 
 export function newClock(run: string, t: Goal['timebox'], at = nowIso()): Clock {
+  if (t.total_min == null) return { version: 1, run, started_at: at, paused_s: 0, paused_at: null, timebox_s: 0, wrapup_s: 0, grace_s: 0, kind: 'open' };
   return {
     version: 1,
     run,
@@ -56,6 +58,8 @@ export function clockState(c: Clock, { wrapupMarker = false, now = nowS() } = {}
   const active = activeS(c, now);
   // No time box: the follow-up ends when the orchestrator says DONE (or at the runner's cycle cap).
   if (c.kind === 'followup') return { mode: 'followup', active, toWrapup: Infinity, toEnd: Infinity, toHard: Infinity };
+  // Open-ended: build until the orchestrator sets WRAPUP, then wrap up until it says DONE. Time never forces a mode.
+  if (c.kind === 'open') return { mode: wrapupMarker ? 'wrapup' : 'build', active, toWrapup: Infinity, toEnd: Infinity, toHard: Infinity };
   const end = c.timebox_s;
   const wrap = end - c.wrapup_s;
   const hard = end + c.grace_s;
@@ -83,7 +87,7 @@ export const readClockState = (p: GoalPaths) => {
   return c ? clockState(c, { wrapupMarker: exists(p.wrapup) }) : null;
 };
 
-/** Whether the current run is over (DONE marker, or past the hard stop), so the next start begins a new one. */
+/** Whether the current run is over (DONE marker, or past the hard stop; an open-ended run has none), so the next start begins a new one. */
 export function runFinished(p: GoalPaths): boolean {
   const c = readClock(p);
   return Boolean(c && (exists(p.done) || clockState(c).mode === 'stop'));

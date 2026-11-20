@@ -52,10 +52,11 @@
     "kind": {
       "enum": [
         "run",
-        "followup"
+        "followup",
+        "open"
       ],
       "default": "run",
-      "description": "followup: a run after DONE that only handles open feedback; it has no time box (timebox_s 0)"
+      "description": "followup: a run after DONE that only handles open feedback; open: an open-ended run (goal timebox.total_min null). Neither has a time box (timebox_s 0)"
     }
   }
 }

@@ -22,6 +22,8 @@ Ask "how would you check this in 2 minutes?" for each fuzzy criterion. If a rubr
 What should it explicitly **not** do or touch? Examples: other folders, production systems, paid services, redesigning X, languages or tools it must not use.
 
 ## 4. Time box and wrap-up
+- **Which to recommend:** for goals with objective done checks (builds: tests, check scripts, milestone checks), recommend **open-ended** first. The checks are the finish line, and a clock only makes the model rush: skipped checks, early "done", problems pushed into the handoff. For research, content, or goals judged subjectively (QA, critique, polish), recommend a **time box** first: nothing else tells that work when "good enough" is reached.
+- **Open-ended:** `"timebox": { "total_min": null }` means no time box. The run builds until the orchestrator sets WRAPUP and then DONE, until it waits for the human, or until it is paused or stopped. Use it when the user wants progress, not a deadline. Then milestones need no target times, `epoptes extend` does nothing, and loop.md should drop every time-based rule (keep the per-cycle soft cap).
 - Total active time: rate-limit waits and pauses don't count.
 - Wrap-up length: the feature freeze at the end, usually 10–15 % of the total with at least 10 min.
 - Grace: extra time to finish in-flight wrap-up work, usually 5–10 %.

@@ -149,6 +149,7 @@ export function extend(project: string, seconds: number) {
   const c = readClock(p);
   if (!c) throw new Error('no clock yet: start the goal first (the time box comes from goal.json)');
   if (seconds <= 0) throw new Error('extend by a positive duration');
+  if (c.kind === 'open' || c.kind === 'followup') throw new Error(`this run has no time box (${c.kind === 'open' ? 'open-ended' : 'follow-up'}), so there is nothing to extend`);
   writeClock(p, { ...c, timebox_s: c.timebox_s + seconds });
   emit(p, { src: 'user', type: 'control', run: c.run, action: 'extend', seconds });
 }

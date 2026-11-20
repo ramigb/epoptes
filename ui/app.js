@@ -272,12 +272,13 @@ function liveActive(g, now) {
 function ClockBar({ g, big, extra }) {
   const now = useNow();
   const c = g.clock;
-  if (!c) return html`<div class="clockbar ${big ? 'big' : ''}"><div class="track"></div><div class="labels"><span>clock not started</span><span>${g.goal ? dur(g.goal.timebox.total_min * 60) + ' time box' : ''}</span></div></div>`;
+  if (!c) return html`<div class="clockbar ${big ? 'big' : ''}"><div class="track"></div><div class="labels"><span>clock not started</span><span>${g.goal ? (g.goal.timebox.total_min == null ? 'open-ended · no time box' : dur(g.goal.timebox.total_min * 60) + ' time box') : ''}</span></div></div>`;
   const active = liveActive(g, now);
-  if (c.followup) {
+  if (c.followup || c.open) {
+    const what = c.open ? 'open-ended' : 'follow-up';
     return html`<div class="clockbar followup ${big ? 'big' : ''}">
-      <div class="track" aria-label="Follow-up: no time box"><div class="fill ${c.paused ? 'paused' : 'followup'}"></div></div>
-      <div class="labels"><span class="num">${dur(active)} active${c.paused ? ' · clock paused' : ''}</span><span>follow-up · no time box</span></div>
+      <div class="track" aria-label=${`${what}: no time box`}><div class="fill ${c.paused ? 'paused' : 'followup'}"></div></div>
+      <div class="labels"><span class="num">${dur(active)} active${c.paused ? ' · clock paused' : ''}</span><span>${what} · no time box</span></div>
     </div>`;
   }
   const total = c.timebox_s + c.grace_s;
@@ -1142,7 +1143,7 @@ function DoneBand({ d }) {
   const last = d.events.findLast((e) => e.type === 'done');
   const [headline, rest] = splitDone(last?.text);
   const c = d.clock;
-  const spare = c && !c.followup && c.to_end > 0 ? c.timebox_s - c.active : null;
+  const spare = c && !c.followup && !c.open && c.to_end > 0 ? c.timebox_s - c.active : null;
   const out = d.output && html`<${OutputLink} o=${d.output} big=${d.followup_items === 0} />`;
   return html`<${Band} kind="done" icon="✓" title=${`Done${last ? ` · finished ${ago(last.ts)}${last.cycle ? ` in cycle ${last.cycle}` : ''}` : ''}`}
     actions=${html`${d.followup_items > 0 && html`<${FollowUpButton} d=${d} busy=${busy} act=${act} />`}${out}
@@ -1173,7 +1174,7 @@ function PausedBand({ d }) {
 
 function FirstBand({ d }) {
   const [busy, act] = useAct(d);
-  return html`<${Band} kind="idle" title="Before the first cycle" sub=${`time box ${dur(d.goal.timebox.total_min * 60)} of active time`}
+  return html`<${Band} kind="idle" title="Before the first cycle" sub=${d.goal.timebox.total_min == null ? 'open-ended: runs until done, paused or stopped' : `time box ${dur(d.goal.timebox.total_min * 60)} of active time`}
     actions=${html`<button class="btn primary" disabled=${busy} onClick=${() => act('start')}>▶ Start</button>`}>
     <ol class="band-steps">
       <li>Check the setup (it never starts the clock): <span class="mono">epoptes run ${d.id} --dry-run</span></li>
@@ -1512,7 +1513,7 @@ function TimeTab({ d }) {
 function MilestonePlan({ d }) {
   const now = useNow();
   const ms = (d.milestones ?? []).filter((m) => m.target_s != null);
-  if (!ms.length || !d.clock || d.clock.followup) return null;
+  if (!ms.length || !d.clock || d.clock.followup || d.clock.open) return null;
   const active = liveActive(d, now);
   const box = d.clock.timebox_s;
   const max = Math.max(box, ...ms.map((m) => m.target_s), ...ms.map((m) => m.reached?.active_s ?? 0));
@@ -1635,7 +1636,7 @@ function SetupTab({ d }) {
         <dl class="kv">
           <dt>path</dt><dd class="mono">${d.path}</dd>
           <dt>model</dt><dd>${[g.adapter.type, g.adapter.model, g.adapter.effort && `${g.adapter.effort} effort`, g.adapter.permission_mode].filter(Boolean).join(' · ')}</dd>
-          <dt>time box</dt><dd>${dur(g.timebox.total_min * 60)} · wrap-up ${dur(g.timebox.wrapup_min * 60)} · grace ${dur(g.timebox.grace_min * 60)}</dd>
+          <dt>time box</dt><dd>${g.timebox.total_min == null ? 'none (open-ended)' : `${dur(g.timebox.total_min * 60)} · wrap-up ${dur(g.timebox.wrapup_min * 60)} · grace ${dur(g.timebox.grace_min * 60)}`}</dd>
           <dt>cycle</dt><dd>times out at ${g.cycle.timeout_min}m · ${g.cycle.max_budget_usd ? `budget $${g.cycle.max_budget_usd}` : 'no budget cap'}</dd>
           ${ms.length > 0 && html`<dt>milestones</dt><dd>${ms.map((m) => `${m.id} ${dur(m.target_s)}`).join(' · ')}</dd>`}
           <dt>checkpoints</dt><dd>${g.checkpoints}</dd>

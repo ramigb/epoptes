@@ -134,8 +134,12 @@
       "additionalProperties": false,
       "properties": {
         "total_min": {
-          "type": "integer",
-          "minimum": 5
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 5,
+          "description": "Active minutes for the run. null = open-ended: no time box; the run builds until the orchestrator finishes (WRAPUP then DONE), pauses or is stopped."
         },
         "wrapup_min": {
           "type": "integer",

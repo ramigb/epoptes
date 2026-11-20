@@ -55,6 +55,19 @@ test('own-cycle readers do not crash a runner hidden by a sandbox PID namespace'
   }
 });
 
+test('open-ended clock (timebox.total_min null): time never forces a mode; WRAPUP still does', () => {
+  const t0 = 1_800_000_000;
+  const c = newClock('r1', { total_min: null, wrapup_min: 10, grace_min: 5, pause_on_rate_limit: true }, iso(t0));
+  assert.equal(c.kind, 'open');
+  const later = clockState(c, { now: t0 + 1000 * 3600 });
+  assert.equal(later.mode, 'build');
+  assert.equal(later.toHard, Infinity);
+  assert.equal(clockState(c, { now: t0 + 60, wrapupMarker: true }).mode, 'wrapup');
+  assert.deepEqual(validate('clock', c), []);
+  const goal = { version: 1, id: 'open', name: 'Open', kind: 'code', objective: 'o', done: [{ id: 'D1', check: 'c', verify: { type: 'manual' } }], timebox: { total_min: null }, adapter: { type: 'claude-code' } };
+  assert.deepEqual(validate('goal', goal), []);
+});
+
 test('clock modes follow active time, and pauses do not count', () => {
   const t0 = 1_800_000_000;
   const c = newClock('r1', { total_min: 60, wrapup_min: 10, grace_min: 5, pause_on_rate_limit: true }, iso(t0));

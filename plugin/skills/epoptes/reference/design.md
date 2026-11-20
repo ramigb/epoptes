@@ -56,5 +56,10 @@ Set `state_caps` in `goal.json` to match; the runner warns when a file goes over
 - Only give reviewers ≤ 8 images per review: each image costs about 1.5k tokens.
 - Exit when the round or time cap is hit; a fresh cycle is cheaper than a bloated one.
 
+## Open-ended goals
+With `timebox.total_min: null`, there is no countdown. Order the board by progress: milestones without `(target h:mm)`, and a loop.md that finishes when the work is done, not when time runs out. Long open-ended builds still need small cycles (the per-cycle soft cap and timeout) and a pause-for-review point after the first risky milestone.
+
+Without a deadline nothing forces scope cuts, so the done checks and the critic have to do it. Put two drift signals in loop.md: a cycle that runs past ~90 min, and a milestone that takes more than 5 cycles. On either one, cut or split cards (and note why) before building more. Evidence: ramiwebdaw-phase0 ran 16 open-ended cycles (M0–M4) with 0 timeouts and critic scores of 7–9 that rose over time, while earlier time-boxed code goals overran their boxes 1.6–2.2×.
+
 ## Early finish
 In build mode, when every task except `low` fixes is `[x]`, `[cut]` or `[blocked…]` and every done check passes: `epoptes event wrapup "<why>"` (this sets the WRAPUP marker), then run the wrap-up checklist and finish with `epoptes event done "<summary>"`.

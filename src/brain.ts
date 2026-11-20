@@ -25,7 +25,8 @@ export interface Digest {
   adapter: string;
   model: string;
   roles: { name: string; model: string | null }[];
-  timebox_min: number;
+  /** null: open-ended */
+  timebox_min: number | null;
   cycle_timeout_min: number;
   stats: {
     runs: number;
@@ -283,7 +284,7 @@ export function renderIndex(digests: Digest[]): string {
     L.push(`### ${d.name} (\`${d.id}\`) · ${d.kind}`, '');
     L.push(`${d.objective}`, '');
     L.push(`- ${d.adapter} · ${d.model} · roles: ${roles}`);
-    L.push(`- ${s.runs} run${s.runs === 1 ? '' : 's'}${s.followups ? ` (${s.followups} follow-up)` : ''} · ${s.cycles} cycles (${Object.entries(s.exits).map(([k, v]) => `${v} ${k}`).join(', ') || 'none'}) · ${hm(s.active_s)} active of a ${hm(d.timebox_min * 60)} time box · ${money(s.cost_usd)} · ${s.done ? 'DONE' : 'not done'}`);
+    L.push(`- ${s.runs} run${s.runs === 1 ? '' : 's'}${s.followups ? ` (${s.followups} follow-up)` : ''} · ${s.cycles} cycles (${Object.entries(s.exits).map(([k, v]) => `${v} ${k}`).join(', ') || 'none'}) · ${hm(s.active_s)} active${d.timebox_min == null ? ', open-ended' : ` of a ${hm(d.timebox_min * 60)} time box`} · ${money(s.cost_usd)} · ${s.done ? 'DONE' : 'not done'}`);
     const timed = s.milestones.on_time + s.milestones.late;
     if (s.milestones.planned) L.push(`- milestones: ${s.milestones.reached} of ${s.milestones.planned} reached${timed ? ` (${s.milestones.on_time} on time, ${s.milestones.late} late)` : ''}`);
     for (const x of d.signals) L.push(`- signal: ${x}`);

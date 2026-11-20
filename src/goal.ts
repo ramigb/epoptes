@@ -15,7 +15,8 @@ export interface Goal {
   output?: string;
   /** the current job, set by `epoptes job new` (one harness, several jobs over time) */
   job?: { id: string; title: string };
-  timebox: { total_min: number; wrapup_min: number; grace_min: number; pause_on_rate_limit: boolean };
+  /** total_min null = open-ended: no time box, the run goes until DONE, a pause or a stop */
+  timebox: { total_min: number | null; wrapup_min: number; grace_min: number; pause_on_rate_limit: boolean };
   checkpoints: 'git' | 'shadow' | 'none';
   adapter: { type: 'claude-code' | 'codex' | 'pi' | 'antigravity'; prompt: string; model: string; effort: string; permission_mode: string; args: string[] };
   cycle: { timeout_min: number; pause_between_s: number; max_budget_usd: number | null };

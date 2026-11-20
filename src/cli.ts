@@ -157,6 +157,7 @@ function statusText(project: string): string {
   const cs = readClockState(p);
   const c = readClock(p);
   if (cs && c && c.kind === 'followup') out.push(`clock ${hm(cs.active)} active · follow-up, no time box${c.paused_at ? ' · paused' : ''}`);
+  else if (cs && c && c.kind === 'open') out.push(`clock ${hm(cs.active)} active · open-ended, no time box${c.paused_at ? ' · paused' : ''}`);
   else if (cs && c) {
     out.push(`clock ${hm(cs.active)} active of ${hm(c.timebox_s)} · wrap-up in ${hm(cs.toWrapup)} · end in ${hm(cs.toEnd)} · hard stop in ${hm(cs.toHard)}${c.paused_at ? ' · paused' : ''}`);
   } else out.push('clock not started');
@@ -169,7 +170,7 @@ function statusText(project: string): string {
   const board = readBoard(p);
   const cards = currentCards(p, board);
   const ms = boardMilestones(board, currentEpic(p));
-  const proj = cs && c && c.kind !== 'followup' && !exists(p.done) ? projectFinish(milestonesWithReach(ms, readEvents(p), s.run), cs.active) : null;
+  const proj = cs && c && (c.kind ?? 'run') === 'run' && !exists(p.done) ? projectFinish(milestonesWithReach(ms, readEvents(p), s.run), cs.active) : null;
   if (proj && c) out.push(`pace ${proj.basis} ${proj.pace > 1 ? 'is running at' : 'took'} ${Math.round(proj.pace * 100)}% of its planned time · on pace to finish at ~${hm(proj.end_s)} of ${hm(c.timebox_s)}${proj.end_s > c.timebox_s ? ' (over the time box)' : ''}`);
   if (cards.length) {
     const b = boardCounts(cards, ms);
@@ -212,7 +213,7 @@ async function dryRun(project: string) {
   const agents = Object.keys(agentsFromDir(p.agents));
   console.log(`goal ${goal.id}: ${goal.objective}`);
   console.log(`adapter ${adapter.id}${check.version ? ` (${check.version})` : ''} · roles: ${agents.join(', ') || '(none)'}`);
-  console.log(`time box ${goal.timebox.total_min} min (wrap-up ${goal.timebox.wrapup_min}, grace ${goal.timebox.grace_min}) · cycle timeout ${goal.cycle.timeout_min} min · checkpoints ${goal.checkpoints}`);
+  console.log(`${goal.timebox.total_min == null ? 'open-ended (no time box)' : `time box ${goal.timebox.total_min} min (wrap-up ${goal.timebox.wrapup_min}, grace ${goal.timebox.grace_min})`} · cycle timeout ${goal.cycle.timeout_min} min · checkpoints ${goal.checkpoints}`);
   const cs = readClockState(p);
   console.log(cs ? `clock: mode ${cs.mode}, ${hm(cs.active)} active (unchanged)` : 'clock: not started (a dry run never starts it)');
   console.log(`next cycle runs in ${tilde(p.project)}:\n  ${cmd.bin} ${cmd.args.map((a) => (/[\s<>*]/.test(a) ? JSON.stringify(a) : a)).join(' ')}`);

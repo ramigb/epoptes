@@ -97,6 +97,17 @@ test('runs cycles until the orchestrator marks DONE', async () => {
   assert.deepEqual(g.events().filter((e) => e.type === 'control').map((e) => e.action), ['start', 'start']);
 });
 
+test('open-ended goal: no time box, runs to DONE, status and dry run say so, extend refuses', async () => {
+  const g = setup({ timebox: { total_min: null } });
+  assert.match(g.run(['run', g.project, '--dry-run']), /open-ended \(no time box\)/);
+  g.run(['start', g.project], { FAKE_DONE_AT: '2' });
+  await until(() => g.read('run/status.json').state === 'done');
+  const clock = g.read('run/clock.json');
+  assert.equal(clock.kind, 'open');
+  assert.match(g.run(['status', g.project]), /open-ended, no time box/);
+  assert.throws(() => g.run(['extend', g.project, '1h'], {}), /no time box/);
+});
+
 test('stop interrupts the cycle; start resumes the same run', async () => {
   const g = setup();
   g.run(['start', g.project], { FAKE_CLAUDE: 'slow' });
