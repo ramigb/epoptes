@@ -98,7 +98,8 @@ When the user asks you to "distill the brain" (or INDEX.md has grown past ~30 le
   - no `git push`, no history rewrites, no destructive cleans
   - secrets never in goal files (point to the user's secret manager, e.g. the 1Password CLI or MCP)
 - **Anything in the goal's approval list is never done autonomously.** The orchestrator runs `epoptes approval "…" --ref <card>`, which blocks that card, and moves on. The human answers with Approve / Disapprove in the dashboard (or `epoptes card <id> approve|reject`). When nothing else can move, the orchestrator runs `epoptes wait-for-human "…"` and the run waits, clock stopped, until the human answers.
-- **Semantic events go through the CLI:** `epoptes event milestone|blocked|done …` (plus PushNotification when it's available).
+- **Two communication modes:** agent-to-agent communication (briefs, worker reports, `state/` memory) should optimize purely for token efficiency and precision; human-facing communication (card replies, `epoptes event status|milestone|blocked|done`, approvals, milestone labels & descriptions) should be plain, concise and digestible. If a human comment on a card is unclear or irrelevant, reply with a short clarifying question instead of guessing.
+- **Semantic events go through the CLI:** `epoptes event status|milestone|blocked|done …` (plus PushNotification when it's available).
 - **Every harness feeds the brain:** in wrap-up the orchestrator records 0–3 harness lessons with `epoptes lesson "<rule>" --cue "<situation>" --evidence "<what showed it>" --confidence <level> --topic <topic>`, and none when the run showed nothing it could cite.
 
 ## CLI reference
@@ -114,7 +115,7 @@ Inside a cycle, the runner sets `EPOPTES_GOAL_DIR`, `EPOPTES_RUN`, `EPOPTES_CYCL
 | `epoptes start [goal]` | resume, or start a detached run; `--new-run` after DONE or when the time box is over |
 | `epoptes start [goal] --follow-up` | after DONE: handle just the human's open cards and unanswered comments, with no time box. Minor items are fixed in place; ones that need a restart or new version are flagged for a new run |
 | `epoptes card <id> set --scope auto\|tweak\|new_run` | the human's override for a follow-up (default: the agent triages) |
-| `epoptes pause [goal]` | pause after the current cycle (the clock pauses too) |
+| `epoptes pause [goal] [--after-cycle]` | pause safely after the current task/round (`--after-cycle`: finish the full cycle) |
 | `epoptes stop [goal]` | stop now; the next cycle recovers interrupted work |
 | `epoptes extend [goal] <dur>` | lengthen the time box, e.g. `2h`, `30m` |
 | `epoptes reset-clock [goal]` | clear the clock; the next start is a new run |
@@ -131,10 +132,10 @@ Inside a cycle, the runner sets `EPOPTES_GOAL_DIR`, `EPOPTES_RUN`, `EPOPTES_CYCL
 | `epoptes card <id> comment "<text>" [--steer] [--as role]` | comment; the human's comment on a done card reopens it, and the next cycle acts on it or replies |
 | `epoptes card <id> set [--title t] [--milestone M] [--assign r] [--priority p\|none] [--epic e]` | change a card |
 | `epoptes card <id> approve\|reject ["note"]` | the human's answer to an approval request; resumes a run that was waiting for it |
-| `epoptes milestone [goal]` / `epoptes milestone add M<n> "<title>" [--target h:mm]` | the current epic's milestones / add or rename one |
+| `epoptes milestone [goal]` / `epoptes milestone add M<n> "<label>" [--desc "<description>"] [--target h:mm]` | the current epic's milestones / add or rename one |
 | `epoptes approval "<what>" [--ref <card>]` | (orchestrator) ask the human before doing something on the approval list; blocks the card until answered |
 | `epoptes wait-for-human "<what>"` | (orchestrator) end the run after this cycle as "waiting for you"; the clock stops |
-| `epoptes event milestone\|blocked\|note\|artifact\|round\|wrapup\|done "<text>"` | record a semantic event; `wrapup` and `done` also set the run markers |
+| `epoptes event status\|milestone\|blocked\|note\|artifact\|round\|wrapup\|done "<text>"` | record a semantic event (`status`: plain-English update for the human; `wrapup` and `done` set run markers) |
 | `epoptes event output <path\|url> ["text"]` | where the main deliverable is; the dashboard shows "Open the output" (overrides goal.json `output`) |
 | `epoptes lesson "<rule>" --cue "<situation>" --evidence "<what showed it>" [--confidence high\|medium\|low] [--topic t]` | (orchestrator, in wrap-up) a lesson about the harness itself for the brain; cue and evidence are required, confidence defaults to low; topics: roles, briefs, cycles, checks, tools, state, cost, steering, other |
 | `epoptes brain` / `epoptes brain lessons [--kind k]` | gather every goal into `~/.epoptes/brain/INDEX.md` / print the harness lessons |

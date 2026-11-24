@@ -16,8 +16,9 @@ import { idleStatus, isAlive, lastCycle, readStatus, writeStatus, type Status } 
 
 const HEARTBEAT_MS = 15_000;
 const KILL_AFTER_MS = 120_000;
-const MIN_TIMEOUT_MIN = 20;
+const MIN_TIMEOUT_MIN = 5;
 const MAX_TIMEOUT_MIN = 180;
+const HOOK_TIMEOUT_MS = 60_000;
 /** A follow-up has no time box; this many cycles without DONE pauses it so it can't run away. */
 export const FOLLOWUP_MAX_CYCLES = 3;
 
@@ -123,6 +124,7 @@ export function followUpPreamble(cards: Card[]): string {
     '> - **Minor** (adjust what exists: a colour, a size, wording, a small bug, a small addition) → do it, verify it, checkpoint, then `epoptes card <id> done "<what changed>"`.',
     '> - **Major** (restart the job, a new version of the output, a change of direction, or more than about one cycle of work) → do not start it. Run `epoptes card <id> block "needs a new run: <why, and a rough size>"`.',
     '> - **Just a question or a remark** → answer it: `epoptes card <id> comment "<reply>"`.',
+    '> - **Unclear, off-topic or lacks detail** → do not guess; ask a brief clarifying question with `epoptes card <id> comment "<question>"` and move on.',
     "> Don't pick up other cards, review fixes, agent notes or polish that no item asks for. Skip the wrap-up checklist. When every item is done, blocked or answered, update the handoff, then `epoptes event done \"follow-up: <one line>\"` and exit.",
     '',
     '',
@@ -135,7 +137,7 @@ export const BOARD_PREAMBLE = [
   '> - `epoptes board --open` replaces reading backlog.md and `epoptes feedback --open`; `epoptes card <id>` shows one card with its comments.',
   '> - Columns: backlog (untriaged: the human\'s feedback, agent notes) → todo → doing → review (being verified) → done. Triage each backlog card: `epoptes card <id> todo`, or `cut "<why>"`.',
   '> - Move cards with `epoptes card <id> doing|review|done ["note"]`, `block "<why>"`, `cut "<why>"`; add one with `epoptes card add "<task>" --column todo --milestone M<n>`. Do this wherever loop.md says to tick, add or block a backlog task or set a feedback status. Never create or edit state/backlog.md.',
-  '> - When the human comments on a card, act on it or just reply: `epoptes card <id> comment "<reply>"`.',
+  '> - When the human comments on a card, act on it or just reply: `epoptes card <id> comment "<reply>"` (if a comment is unclear or irrelevant, ask a brief clarifying question instead of guessing).',
   '',
   '',
 ].join('\n');
@@ -180,7 +182,7 @@ export async function runGoal(project: string, { followUp = false } = {}) {
   rm(p.control);
   const shimDir = writeShim(p);
 
-  let status: Status = { ...prev, state: 'waiting', pid: process.pid, run, heartbeat_at: nowIso(), pause_requested: false, fails_in_row: 0, waiting_until: null, wait_reason: null, needs: null };
+  let status: Status = { ...prev, state: 'waiting', pid: process.pid, run, heartbeat_at: nowIso(), pause_requested: false, pause_mode: null, fails_in_row: 0, waiting_until: null, wait_reason: null, needs: null };
   const setStatus = (patch: Partial<Status>) => {
     status = { ...status, ...patch };
     writeStatus(p, status);
@@ -188,6 +190,34 @@ export async function runGoal(project: string, { followUp = false } = {}) {
   setStatus({});
   emit(p, { src: 'runner', type: 'run.start', run, timebox_s: clock.timebox_s, resumed, job: goal.job?.id ?? null, ...(isFollowUp ? { followup: true } : {}) });
   log(`run ${run} ${resumed ? 'resumed' : 'started'} (pid ${process.pid})`);
+
+  const runHook = (name: 'onStart' | 'onEnd' | 'onPause' | 'onStop', extraEnv: Record<string, string> = {}) => {
+    const cmd = goal.hooks?.[name]?.trim();
+    if (!cmd) return;
+    try {
+      execFileSync('sh', ['-c', cmd], {
+        cwd: p.project,
+        stdio: 'pipe',
+        timeout: HOOK_TIMEOUT_MS,
+        env: {
+          ...process.env,
+          PATH: `${shimDir}${path.delimiter}${process.env.PATH ?? ''}`,
+          EPOPTES_HOOK: name,
+          EPOPTES_GOAL_ID: goal.id,
+          EPOPTES_GOAL_DIR: p.root,
+          EPOPTES_RUN: run,
+          EPOPTES_CYCLE: String(status.cycle || 0),
+          EPOPTES_MODE: status.mode ?? '',
+          ...extraEnv,
+        },
+      });
+      log(`hook ${name} ok`);
+    } catch (e) {
+      const msg = (e as Error).message.split('\n')[0];
+      emit(p, { src: 'runner', type: 'warn', run, cycle: status.cycle || null, text: `hook ${name} failed: ${msg}` });
+      log(`hook ${name} failed: ${msg}`);
+    }
+  };
 
   // ---- signals, heartbeat, cancellable sleep ----
   let stopRequested = false;
@@ -200,7 +230,7 @@ export async function runGoal(project: string, { followUp = false } = {}) {
       wake = () => (clearTimeout(t), (wake = null), resolve());
     });
 
-  const readControl = () => readJson<{ pause_after_cycle?: boolean; for_human?: { reason: string } }>(p.control);
+  const readControl = () => readJson<{ pause_after_cycle?: boolean; pause_mode?: 'task' | 'cycle'; for_human?: { reason: string } }>(p.control);
   const pauseRequested = () => readControl()?.pause_after_cycle === true;
   // A pause from `epoptes wait-for-human` ends the run as needs_input, with its reason.
   const pauseReason = (): EndReason => (readControl()?.for_human ? 'needs_you' : 'paused');
@@ -224,8 +254,10 @@ export async function runGoal(project: string, { followUp = false } = {}) {
 
   const heartbeat = setInterval(() => {
     const patch: Partial<Status> = { heartbeat_at: nowIso() };
-    if (pauseRequested() && !status.pause_requested) {
+    const ctrl = readControl();
+    if (ctrl?.pause_after_cycle === true && !status.pause_requested) {
       patch.pause_requested = true;
+      patch.pause_mode = ctrl.pause_mode ?? 'cycle';
       if (status.state === 'running') patch.state = 'pausing';
       else wake?.(); // idle between cycles: pause right away
     }
@@ -238,8 +270,10 @@ export async function runGoal(project: string, { followUp = false } = {}) {
     writeClock(p, pauseClock(c));
     const needs = reason === 'needs_you' ? { reason: readControl()?.for_human?.reason ?? 'the orchestrator needs you', since: nowIso() } : null;
     if (reason === 'paused' || reason === 'needs_you') rm(p.control);
-    setStatus({ state: END_STATE[reason], pid: null, pause_requested: false, waiting_until: null, wait_reason: null, cycle_started_at: null, live_usage: null, needs });
+    setStatus({ state: END_STATE[reason], pid: null, pause_requested: false, pause_mode: null, waiting_until: null, wait_reason: null, cycle_started_at: null, live_usage: null, needs });
     emit(p, { src: 'runner', type: 'run.end', run, cycle: status.cycle || null, reason });
+    if (reason === 'paused' || reason === 'needs_you') runHook('onPause', { EPOPTES_END_REASON: reason });
+    else if (reason === 'stopped') runHook('onStop', { EPOPTES_END_REASON: reason });
     rm(p.lock);
     // After run.end, so the digest sees how the run ended. Feed the brain (~/.epoptes/brain): token-free, and never allowed to break the run's ending.
     try {
@@ -356,6 +390,7 @@ export async function runGoal(project: string, { followUp = false } = {}) {
       setStatus({ state: status.pause_requested ? 'pausing' : 'running', cycle: n, cycle_started_at: nowIso(), live_usage: null });
       emit(p, { src: 'runner', type: 'cycle.start', run, cycle: n, mode: st.mode, model: goal.adapter.model, effort: goal.adapter.effort, timeout_s: timeoutS, ...(steers.length ? { steer: steers.map((f) => f.id) } : {}), ...(clear ? { backlog_clear: true } : {}) });
       log(`cycle ${n} start: mode=${st.mode} ${goal.adapter.model}/${goal.adapter.effort} timeout=${timeoutS}s`);
+      runHook('onStart', { EPOPTES_CYCLE: String(n), EPOPTES_MODE: st.mode });
 
       const activityFile = path.join(cycleDir, 'activity.jsonl');
       const cycle = adapter.start(spec, {
@@ -395,6 +430,7 @@ export async function runGoal(project: string, { followUp = false } = {}) {
       writeJson(path.join(cycleDir, 'result.json'), { version: 1, cycle: n, run, ...result, exit });
       emit(p, { src: 'runner', type: 'cycle.end', run, cycle: n, exit, duration_s: result.duration_s, cost_usd: result.cost_usd, turns: result.turns, ...(steered ? { steered: true } : {}) });
       log(`cycle ${n} end: ${exit} ${result.duration_s}s turns=${result.turns ?? '?'} ${result.cost_usd == null ? 'cost=unknown' : `cost≈$${result.cost_usd.toFixed(2)}`}${result.error ? ` error=${result.error}` : ''}`);
+      runHook('onEnd', { EPOPTES_CYCLE: String(n), EPOPTES_MODE: st.mode, EPOPTES_CYCLE_EXIT: exit, EPOPTES_CYCLE_DURATION_S: String(result.duration_s) });
 
       if (goal.checkpoints === 'shadow') {
         try {

@@ -39,6 +39,7 @@ export interface Status {
   waiting_until: string | null;
   wait_reason: 'rate_limit' | 'cooldown' | 'between_cycles' | null;
   pause_requested: boolean;
+  pause_mode?: 'task' | 'cycle' | null;
   fails_in_row: number;
   limits: Limits | null;
   live_usage?: LiveUsage | null;

@@ -10,8 +10,9 @@ import { readScores } from '../report.ts';
 import { loadGoal, type Goal } from '../goal.ts';
 import { inJob, jobsOf, type Job } from '../jobs.ts';
 import { epoptesHome } from '../paths.ts';
+import { replyingCards } from '../quick-reply.ts';
 import { LIVE_STATES, type LiveUsage, type Status } from '../status.ts';
-import { totalCost, milestonesWithReach, outputOf, projectFinish } from '../summary.ts';
+import { generalStatus, totalCost, milestonesWithReach, outputOf, projectFinish } from '../summary.ts';
 import type { GoalWatch } from './watch.ts';
 
 type Result = CycleResult & { version: 1; cycle: number; run: string };
@@ -160,6 +161,7 @@ export function summary(w: GoalWatch) {
     mode: s?.mode ?? null,
     // The runner only notices control.json on its heartbeat; show the request right away.
     pause_requested: Boolean(s?.pause_requested || (s && LIVE_STATES.includes(s.state) && readJson<{ pause_after_cycle?: boolean }>(p.control)?.pause_after_cycle)),
+    pause_mode: s?.pause_mode ?? (s && LIVE_STATES.includes(s.state) ? (readJson<{ pause_after_cycle?: boolean; pause_mode?: 'task' | 'cycle' }>(p.control)?.pause_mode ?? null) : null),
     waiting_until: s?.waiting_until ?? null,
     wait_reason: s?.wait_reason ?? null,
     cycle_started_at: s?.cycle_started_at ?? null,
@@ -177,6 +179,8 @@ export function summary(w: GoalWatch) {
     board: cards.length ? boardCounts(cards, ms) : null,
     job: { id: job.id, title: job.title, n: jobs.length, named: Boolean(goal.job) || jobs.length > 1 },
     milestones: ms,
+    paused_milestones: ms.filter((m) => m.paused_for_user).map((m) => ({ id: m.id, title: m.title, waiting_on_user: m.waiting_on_user, blocked: m.blocked })),
+    general_status: generalStatus(s, cards, ms, w.events.items.filter((e) => inJob(e.ts, job))),
     projection: cs && (c?.kind ?? 'run') === 'run' && !runFinished(p) ? projectFinish(ms, cs.active) : null,
     output: output(w, goal),
     cycles: results.length,
@@ -217,11 +221,12 @@ export function detail(w: GoalWatch, { all = false } = {}) {
     cycles: results.length,
     cost_usd: costSoFar(results, liveUsage(w.status)),
     cost_basis: results.some((r) => r.cost_basis === 'estimate') || !results.length ? 'estimate' : 'billed',
-    goal: { objective: goal.objective, done: goal.done, non_goals: goal.non_goals, approval_required: goal.approval_required, timebox: goal.timebox, checkpoints: goal.checkpoints, adapter: goal.adapter, cycle: goal.cycle },
+    goal: { objective: goal.objective, done: goal.done, non_goals: goal.non_goals, approval_required: goal.approval_required, timebox: goal.timebox, checkpoints: goal.checkpoints, adapter: goal.adapter, cycle: goal.cycle, hooks: goal.hooks ?? {} },
     seen: readSeen(w.id),
     handoff: read('handoff.md'),
     // Every epic's cards: the board switches between them.
     board_cards: [...fold(w.board.items).cards.values()],
+    replying_cards: replyingCards(w.id),
     epics: jobsOf(w.events.items, goal).map((j) => ({ id: j.id, title: j.title, current: j.current, archive: j.archive })),
     // the reviewer's latest scores, for agent-checked done criteria
     scores: readScores(p).rows.at(-1) ?? null,

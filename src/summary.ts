@@ -2,11 +2,12 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { CycleResult } from './adapters/types.ts';
-import type { Milestone } from './board.ts';
+import type { Card, Milestone } from './board.ts';
 import { readEvents, type EpoptesEvent } from './events.ts';
 import { readJson } from './fsx.ts';
 import type { Goal } from './goal.ts';
 import type { GoalPaths } from './paths.ts';
+import type { Status } from './status.ts';
 
 export type ReachedMilestone = Milestone & { reached: { at: string; run: string | null; active_s: number | null } | null };
 
@@ -98,3 +99,111 @@ export const money = (usd: number | null | undefined, basis: 'billed' | 'estimat
 /** An unknown cost makes the total unknown, rather than looking like free usage. */
 export const totalCost = (items: { cost_usd: number | null }[]): number | null =>
   items.some((x) => x.cost_usd == null) ? null : items.reduce((sum, x) => sum + x.cost_usd!, 0);
+
+/**
+ * Strips internal implementation jargon (parenthetical notes, file:line refs, area prefixes, review ids) from a
+ * raw card title so a user unfamiliar with the codebase gets a compact, readable summary.
+ */
+export function humanizeTask(raw: string, maxLen = 90): string {
+  let s = (raw || '').replace(/\s+/g, ' ').trim();
+  if (!s) return '';
+  // Remove leading review/task prefixes like `R-3 [high] ` or `core+headless: `
+  s = s.replace(/^R-\d+\s*(?:\[(?:high|med|low)\]\s*)?/i, '');
+  s = s.replace(/^[a-z0-9_+.-]{2,24}:\s+/i, '');
+  // Drop parenthetical technical notes and file:line references
+  s = s.replace(/\s*\([^)]{6,}\)/g, '');
+  s = s.replace(/\b[\w./-]+\.(?:rs|ts|tsx|js|jsx|py|go|cpp|c|h|md|json|toml|yaml|yml)(?::\d+(?:-\d+)?)?\b/gi, '');
+  // Take only the first clause if semicolon-separated
+  if (s.includes(';')) s = s.split(';')[0];
+  s = s.replace(/\s*[,;:\-–—]+\s*$/, '').replace(/\s+/g, ' ').trim();
+  if (!s) s = raw.replace(/\s+/g, ' ').trim();
+  s = s[0].toUpperCase() + s.slice(1);
+  return s.length > maxLen ? `${s.slice(0, maxLen - 1).trimEnd()}…` : s;
+}
+
+export interface GeneralStatus {
+  /** Compact, plain-English overview combining what just happened and what is happening now */
+  summary: string;
+  last_cycle: string | null;
+  current: string | null;
+  source: 'orchestrator' | 'synthesized';
+}
+
+/**
+ * Plain-English status for the human, combining the last cycle and the current cycle.
+ * Uses the orchestrator's explicit `status` event when present, otherwise synthesizes a concise,
+ * jargon-free summary from milestones, cards and events (zero extra tokens).
+ */
+export function generalStatus(
+  status: Status | null | undefined,
+  cards: Card[],
+  milestones: Milestone[],
+  events: EpoptesEvent[],
+): GeneralStatus | null {
+  const cycle = status?.cycle ?? 0;
+  const state = status?.state ?? 'idle';
+  if (cycle === 0 && !cards.length && state === 'idle') return null;
+
+  const statusEv = events.findLast((e) => e.type === 'status' && typeof e.text === 'string' && e.text.trim());
+  if (statusEv && (statusEv.cycle === cycle || (cycle > 0 && statusEv.cycle === cycle - 1 && state !== 'running'))) {
+    const text = String(statusEv.text).trim();
+    return { summary: text, last_cycle: null, current: text, source: 'orchestrator' };
+  }
+
+  // Last cycle summary
+  const prevCycle = state === 'running' || state === 'pausing' ? cycle - 1 : cycle;
+  let lastPart: string | null = null;
+  if (prevCycle > 0) {
+    const prevEnd = events.findLast((e) => e.type === 'cycle.end' && e.cycle === prevCycle);
+    const prevMs = events.findLast((e) => e.type === 'milestone' && e.cycle === prevCycle);
+    const prevDone = cards.filter((c) => c.column === 'done' && !c.cut && c.cycle === prevCycle);
+    if (prevMs && typeof prevMs.text === 'string') {
+      lastPart = `Last cycle reached ${humanizeTask(prevMs.text, 85)}.`;
+    } else if (prevDone.length === 1) {
+      lastPart = `Last cycle finished: ${humanizeTask(prevDone[0].title, 80)}.`;
+    } else if (prevDone.length > 1) {
+      lastPart = `Last cycle completed ${prevDone.length} tasks, including ${humanizeTask(prevDone[0].title, 65)}.`;
+    } else if (prevEnd && prevEnd.exit !== 'ok' && prevEnd.exit !== 'interrupted') {
+      lastPart = `Last cycle ended with ${String(prevEnd.exit).replace('_', ' ')}.`;
+    } else if (prevEnd) {
+      lastPart = `Last cycle wrapped up cleanly.`;
+    }
+  }
+
+  // Current cycle / state summary
+  const curMs = milestones.find((m) => m.current);
+  const msLabel = curMs ? (curMs.title ? `${curMs.title} (${curMs.id})` : curMs.id) : null;
+  const doing = cards.filter((c) => c.column === 'doing');
+  const review = cards.filter((c) => c.column === 'review');
+  const pausedMs = milestones.filter((m) => m.paused_for_user);
+
+  let currentPart: string | null = null;
+  if (state === 'done') {
+    const doneEv = events.findLast((e) => e.type === 'done' && typeof e.text === 'string');
+    currentPart = doneEv ? humanizeTask(String(doneEv.text), 110) : 'All checks passed and the goal is finished.';
+  } else if (state === 'needs_input') {
+    currentPart = `Paused and waiting for you: ${status?.needs?.reason ?? 'input needed'}.`;
+  } else if (state === 'running' || state === 'pausing') {
+    if (doing.length === 1) {
+      currentPart = `Now working on ${humanizeTask(doing[0].title, 85)}${msLabel ? ` for ${msLabel}` : ''}.`;
+    } else if (doing.length > 1) {
+      currentPart = `Now working on ${doing.length} tasks${msLabel ? ` for ${msLabel}` : ''}, led by ${humanizeTask(doing[0].title, 65)}.`;
+    } else if (review.length > 0) {
+      currentPart = `Currently verifying ${review.length === 1 ? humanizeTask(review[0].title, 75) : `${review.length} completed tasks`}.`;
+    } else {
+      currentPart = `Currently planning and preparing the next step${msLabel ? ` for ${msLabel}` : ''}.`;
+    }
+  } else if (state === 'waiting') {
+    currentPart = `Starting the next cycle shortly${msLabel ? ` on ${msLabel}` : ''}.`;
+  } else if (state === 'rate_limited') {
+    currentPart = 'Waiting for the usage limit to reset before continuing.';
+  } else if (state === 'paused' || state === 'stopped') {
+    currentPart = `Paused${msLabel ? ` during ${msLabel}` : ''}; ready to resume whenever you are.`;
+  } else if (pausedMs.length > 0) {
+    currentPart = `${pausedMs.map((m) => m.title || m.id).join(', ')} waiting on your input.`;
+  }
+
+  const combined = [lastPart, currentPart].filter(Boolean).join(' ');
+  if (!combined) return null;
+  return { summary: combined, last_cycle: lastPart, current: currentPart, source: 'synthesized' };
+}

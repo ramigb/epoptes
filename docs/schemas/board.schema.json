@@ -57,7 +57,13 @@
       "if": { "properties": { "op": { "const": "comment" } } },
       "then": {
         "required": ["text", "by"],
-        "properties": { "text": { "$ref": "#/$defs/text" }, "by": { "$ref": "#/$defs/by" }, "cycle": { "$ref": "#/$defs/cycle" }, "steer": { "type": "boolean" } }
+        "properties": {
+          "text": { "$ref": "#/$defs/text" },
+          "by": { "$ref": "#/$defs/by" },
+          "cycle": { "$ref": "#/$defs/cycle" },
+          "steer": { "type": "boolean" },
+          "quick_reply": { "type": "boolean", "description": "immediate read-only reply to a human comment; does not clear waiting for the next cycle" }
+        }
       }
     },
     {
@@ -78,7 +84,12 @@
       "if": { "properties": { "op": { "const": "milestone" } } },
       "then": {
         "required": ["epic", "title", "target_s"],
-        "properties": { "epic": { "type": "string", "minLength": 1 }, "title": { "type": "string" }, "target_s": { "type": ["integer", "null"], "minimum": 0 } }
+        "properties": {
+          "epic": { "type": "string", "minLength": 1 },
+          "title": { "type": "string" },
+          "description": { "type": ["string", "null"] },
+          "target_s": { "type": ["integer", "null"], "minimum": 0 }
+        }
       }
     }
   ]

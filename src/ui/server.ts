@@ -6,6 +6,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as control from '../control.ts';
 import { addCard, commentCard, setCard, type Fields } from '../board.ts';
+import { updateGoalSettings } from '../goal.ts';
+import { triggerQuickReply } from '../quick-reply.ts';
 import { readRegistry } from '../registry.ts';
 import type { Limits } from '../status.ts';
 import { buildReport, renderAllHtml, renderHtml } from '../report.ts';
@@ -207,7 +209,7 @@ export function serve({ port, lan, pollMs = 1000 }: ServeOptions) {
               await control.start(project, { newRun: body.new_run === true, followUp: body.follow_up === true });
               break;
             case 'pause':
-              control.pause(project);
+              control.pause(project, { mode: body.mode === 'cycle' ? 'cycle' : 'task' });
               break;
             case 'stop':
               control.stop(project);
@@ -242,14 +244,39 @@ export function serve({ port, lan, pollMs = 1000 }: ServeOptions) {
           let r = {};
           if (body.decision === 'approved' || body.decision === 'rejected') r = await control.decide(project, id, body.decision, body.note ? String(body.note) : undefined);
           else if (typeof body.comment === 'string' && body.steer === true) r = control.steer(project, body.comment, 'dashboard', id);
-          else if (typeof body.comment === 'string') commentCard(w.p, id, body.comment, 'user');
-          else {
+          else if (typeof body.comment === 'string') {
+            commentCard(w.p, id, body.comment, 'user');
+            if (body.quick_reply !== false) {
+              const replying = triggerQuickReply(w.p, w.id, id, () => refresh());
+              if (replying) r = { replying: true };
+            }
+          } else {
             // Only known fields; setCard checks their values.
             const keys = ['title', 'column', 'milestone', 'assignee', 'priority', 'blocked', 'cut', 'scope'] as const;
             setCard(w.p, id, Object.fromEntries(keys.filter((k) => k in body).map((k) => [k, body[k]])) as Fields, 'user');
           }
           refresh();
           return send(res, 200, { ok: true, ...r });
+        }
+        if (sub === 'settings') {
+          const patch: { cycle?: Record<string, unknown>; hooks?: Record<string, string | null> } = {};
+          if (body.cycle && typeof body.cycle === 'object') {
+            const c: Record<string, unknown> = {};
+            if ('timeout_min' in body.cycle) c.timeout_min = Number(body.cycle.timeout_min);
+            if ('pause_between_s' in body.cycle) c.pause_between_s = Number(body.cycle.pause_between_s);
+            if ('max_budget_usd' in body.cycle) c.max_budget_usd = body.cycle.max_budget_usd === '' || body.cycle.max_budget_usd == null ? null : Number(body.cycle.max_budget_usd);
+            patch.cycle = c;
+          }
+          if (body.hooks && typeof body.hooks === 'object') {
+            const h: Record<string, string | null> = {};
+            for (const k of ['onStart', 'onEnd', 'onPause', 'onStop']) {
+              if (k in body.hooks) h[k] = body.hooks[k] == null ? null : String(body.hooks[k]);
+            }
+            patch.hooks = h;
+          }
+          const updated = updateGoalSettings(w.p, patch as any);
+          refresh();
+          return send(res, 200, { ok: true, cycle: updated.cycle, hooks: updated.hooks ?? {} });
         }
         if (sub === 'seen') {
           markSeen(w.id);

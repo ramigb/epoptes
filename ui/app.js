@@ -85,7 +85,7 @@ const shortModel = (m) => m.replace(/^claude-/, '').replace(/-\d{8}$/, '');
 const pct = (x) => `${Math.round(x * 100)}%`;
 const STATE_LABEL = {
   idle: 'idle', running: 'running', waiting: 'between cycles', rate_limited: 'rate-limited', cooldown: 'cooling down',
-  pausing: 'pausing after cycle', paused: 'paused', needs_input: 'waiting for you', stopped: 'stopped', crashed: 'crashed', failed: 'failed', done: 'done', timeboxed: 'time box over',
+  pausing: 'pausing', paused: 'paused', needs_input: 'waiting for you', stopped: 'stopped', crashed: 'crashed', failed: 'failed', done: 'done', timeboxed: 'time box over',
 };
 const LIVE = ['running', 'waiting', 'rate_limited', 'cooldown', 'pausing'];
 
@@ -385,11 +385,16 @@ function Topbar({ id }) {
 
 // ---------------------------------------------------------------- waiting for you
 
-/** One line on a goal card when the human is needed: the run waits, or approvals are pending. */
+/** One line on a goal card when the human is needed: the run waits, approvals are pending, or a milestone is paused. */
 function NeedsYouLine({ g }) {
   const n = g.pending_approvals?.length ?? 0;
-  if (!g.needs && !n) return null;
-  const what = g.needs ? `Waiting for you: ${g.needs.reason}` : `${n} approval${n > 1 ? 's' : ''} waiting for you`;
+  const pm = g.paused_milestones ?? [];
+  if (!g.needs && !n && !pm.length) return null;
+  const what = g.needs
+    ? `Waiting for you: ${g.needs.reason}`
+    : n
+      ? `${n} approval${n > 1 ? 's' : ''} waiting for you`
+      : `Milestone${pm.length > 1 ? 's' : ''} paused for you: ${pm.map((m) => m.title || m.id).join(', ')}`;
   return html`<div class="needs-line" title=${what}><span class="flagmark" aria-hidden="true">⚑</span><span>${what}</span>${g.needs && n > 0 ? html`<span class="faint">· ${n} approval${n > 1 ? 's' : ''}</span>` : ''}</div>`;
 }
 
@@ -438,7 +443,7 @@ function GoalCard({ g }) {
       ${unread > 0 && html`<span class="badge" title=${`${g.unread.events} new events, ${g.unread.feedback} agent notes and replies`}>${unread}</span>`}
       <${StatePill} state=${g.state} />
     </div>
-    <div class="objective">${g.objective}</div>
+    <div class="objective">${g.general_status?.summary ?? g.objective}</div>
     <${NeedsYouLine} g=${g} />
     <${ClockBar} g=${g} />
     <div class="facts">
@@ -510,12 +515,28 @@ function useTip() {
 }
 
 function HBars({ rows, on, unit }) {
+  const [open, setOpen] = useState({});
   const max = Math.max(1, ...rows.map((r) => r.seconds));
-  return html`<ul class="hbars">${rows.map((r) => html`<li key=${r.name} ...${on(`${r.name}: ${dur(r.seconds)}${r.extra ? ` · ${r.extra}` : ''}`)}>
-    <span class="name" title=${r.name}>${r.name}</span>
-    <span class="bar-track"><span class="bar" style=${{ width: `${Math.max(0.5, (r.seconds / max) * 100)}%` }}></span></span>
-    <span class="val num">${dur(r.seconds)}${unit && r.extra ? html`<small> ${r.extra}</small>` : ''}</span>
-  </li>`)}</ul>`;
+  const toggle = (name) => setOpen((prev) => ({ ...prev, [name]: !prev[name] }));
+  return html`<ul class="hbars">${rows.map((r) => {
+    const hasSub = r.breakdown?.length > 0;
+    const expanded = Boolean(open[r.name]);
+    const subMax = hasSub ? Math.max(1, ...r.breakdown.map((b) => b.seconds)) : 1;
+    return html`<li key=${r.name} class=${hasSub ? 'has-sub' : ''}>
+      <div class="hbar-row" ...${on(`${r.name}: ${dur(r.seconds)}${r.extra ? ` · ${r.extra}` : ''}`)} onClick=${hasSub ? () => toggle(r.name) : undefined} style=${hasSub ? { cursor: 'pointer' } : undefined}>
+        <span class="name" title=${r.name}>${hasSub ? html`<span class="caret">${expanded ? '▾' : '▸'}</span> ` : ''}${r.name}</span>
+        <span class="bar-track"><span class="bar" style=${{ width: `${Math.max(0.5, (r.seconds / max) * 100)}%` }}></span></span>
+        <span class="val num">${dur(r.seconds)}${unit && r.extra ? html`<small> ${r.extra}</small>` : ''}</span>
+      </div>
+      ${hasSub && expanded && html`<ul class="hbars sub-bars">${r.breakdown.map((b) => html`<li key=${b.group}>
+        <div class="hbar-row" ...${on(`${r.name} › ${b.group}: ${dur(b.seconds)} · ${b.calls} call${b.calls === 1 ? '' : 's'}`)}>
+          <span class="name mono" title=${b.group}>${b.group}</span>
+          <span class="bar-track"><span class="bar sub" style=${{ width: `${Math.max(1, (b.seconds / subMax) * 100)}%` }}></span></span>
+          <span class="val num">${dur(b.seconds)}<small> ${b.calls} call${b.calls === 1 ? '' : 's'}</small></span>
+        </div>
+      </li>`)}</ul>`}
+    </li>`;
+  })}</ul>`;
 }
 
 function TimeUse({ d }) {
@@ -535,7 +556,7 @@ function TimeUse({ d }) {
   const top = t.tools.slice(0, 8);
   const rest = t.tools.slice(8);
   const tools = [...top, ...(rest.length ? [{ tool: `${rest.length} other tools`, seconds: rest.reduce((a, x) => a + x.seconds, 0), calls: rest.reduce((a, x) => a + x.calls, 0) }] : [])]
-    .map((x) => ({ name: x.tool, seconds: x.seconds, extra: `${x.calls} call${x.calls === 1 ? '' : 's'}` }));
+    .map((x) => ({ name: x.tool, seconds: x.seconds, extra: `${x.calls} call${x.calls === 1 ? '' : 's'}`, breakdown: x.breakdown }));
   return html`<section class="panel timeuse">
     <h2>Where the time went <span class="right muted">${t.cycles} cycle${t.cycles === 1 ? '' : 's'} · ${d.job.n > 1 && d.job_scope !== 'all' ? 'this job' : 'all runs'}</span></h2>
     <p class="tu-head"><b class="num">${dur(total)}</b> on record · <b class="num">${dur(running)}</b> running cycles (${share(running)})</p>
@@ -556,8 +577,11 @@ function TimeUse({ d }) {
       <table><thead><tr><th>role</th><th class="r">agent time</th><th class="r">runs</th></tr></thead><tbody>
         ${t.roles.map((r) => html`<tr key=${r.role}><td>${r.role}</td><td class="r num">${dur(r.seconds)}</td><td class="r num">${r.spans}</td></tr>`)}
       </tbody></table>
-      <table><thead><tr><th>tool</th><th class="r">time</th><th class="r">calls</th></tr></thead><tbody>
-        ${t.tools.map((x) => html`<tr key=${x.tool}><td class="mono">${x.tool}</td><td class="r num">${dur(x.seconds)}</td><td class="r num">${x.calls}</td></tr>`)}
+      <table><thead><tr><th>tool / command group</th><th class="r">time</th><th class="r">calls</th></tr></thead><tbody>
+        ${t.tools.flatMap((x) => [
+          html`<tr key=${x.tool}><td class="mono"><b>${x.tool}</b></td><td class="r num">${dur(x.seconds)}</td><td class="r num">${x.calls}</td></tr>`,
+          ...(x.breakdown ?? []).map((b) => html`<tr key=${`${x.tool}:${b.group}`} class="sub-row"><td class="mono sub-cell">↳ ${b.group}</td><td class="r num">${dur(b.seconds)}</td><td class="r num">${b.calls}</td></tr>`),
+        ])}
       </tbody></table>
     </details>
     ${tipEl}
@@ -631,8 +655,13 @@ function CardDetail({ d, c, onClose }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(c.title);
   const [busy, setBusy] = useState(false);
-  const ref = useRef(null);
-  useEffect(() => ref.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }), []);
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key === 'Escape') onClose();
+    };
+    addEventListener('keydown', onKey);
+    return () => removeEventListener('keydown', onKey);
+  }, [onClose]);
   const running = d.state === 'running' || d.state === 'pausing';
   const closed = c.column === 'done';
   const send = (e) => {
@@ -645,7 +674,7 @@ function CardDetail({ d, c, onClose }) {
         if (!r) return;
         setText('');
         setSteer(false);
-        const body = steer ? (r.interrupted ? `Cycle ${d.cycle} is interrupted; a fresh cycle replans around it now.` : 'The next cycle replans around it first.') : closed ? 'The card is back in Todo for the next cycle.' : d.run_finished ? 'This goal is finished: press "Follow up" to have it handled (no time box).' : 'The next cycle reads it.';
+        const body = steer ? (r.interrupted ? `Cycle ${d.cycle} is interrupted; a fresh cycle replans around it now.` : 'The next cycle replans around it first.') : r.replying ? 'Answering now… any requested work starts next cycle.' : closed ? 'The card is back in Todo for the next cycle.' : d.run_finished ? 'This goal is finished: press "Follow up" to have it handled (no time box).' : 'The next cycle reads it.';
         toast({ kind: 'info', title: `${c.id}: comment sent`, body, ms: 5000 });
       })
       .finally(() => setBusy(false));
@@ -654,8 +683,10 @@ function CardDetail({ d, c, onClose }) {
     const why = prompt(`Cut ${c.id}? Say why (the orchestrator reads it).`, '');
     if (why?.trim()) postCard(d, c.id, { column: 'done', cut: why.trim() });
   };
-  return html`<div class="panel kdetail" ref=${ref} aria-label=${`Card ${c.id}`}>
-    <div class="kd-head"><span class="id">${c.id}</span>${c.milestone && html`<span class="chip">${c.milestone}</span>`}${c.priority && html`<span class=${`prio ${c.priority}`}>${c.priority}</span>`}${c.assignee && html`<${Agent} name=${c.assignee} />`}
+  const msDef = c.milestone ? (d.milestones ?? []).find((m) => m.id === c.milestone) : null;
+  return html`<div class="modal-backdrop" onClick=${(e) => e.target === e.currentTarget && onClose()}>
+    <div class="panel kdetail modal-dialog" role="dialog" aria-modal="true" aria-label=${`Card ${c.id}`}>
+    <div class="kd-head"><span class="id">${c.id}</span>${c.milestone && html`<span class="chip" title=${msDef?.description || ''}>${msDef?.title ? `${msDef.title} (${c.milestone})` : c.milestone}</span>`}${c.priority && html`<span class=${`prio ${c.priority}`}>${c.priority}</span>`}${c.assignee && html`<${Agent} name=${c.assignee} />`}
       <span class="faint">from ${SRC_LABEL[c.src] ?? c.src} · ${ago(c.created_at)}${c.cycle ? ` · last touched in c${c.cycle}` : ''}</span>
       <button class="btn small ghost close" onClick=${onClose} aria-label="Close the card">✕</button></div>
     ${editing
@@ -685,18 +716,18 @@ function CardDetail({ d, c, onClose }) {
         <option value="auto">agent decides</option><option value="tweak">quick tweak</option><option value="new_run">needs a new run</option>
       </select>`}
     </div>
-    ${c.comments.length > 0 &&
+    ${(c.comments.length > 0 || d.replying_cards?.includes(c.id)) &&
     html`<ul class="comments">${c.comments.map((m, i) => html`<li key=${i} class=${m.by === 'user' ? 'mine' : ''}>
-      <div class="by">${m.by === 'user' ? html`<b>you</b>` : html`<${Agent} name=${m.by} />`}${m.steer ? html` <span class="kind steer">⚡ steer</span>` : ''} <span class="faint">${m.cycle ? `c${m.cycle} · ` : ''}${ago(m.ts)}</span></div>
+      <div class="by">${m.by === 'user' ? html`<b>you</b>` : html`<${Agent} name=${m.by} />`}${m.quick_reply ? html` <span class="kind">instant reply</span>` : ''}${m.steer ? html` <span class="kind steer">⚡ steer</span>` : ''} <span class="faint">${m.cycle ? `c${m.cycle} · ` : ''}${ago(m.ts)}</span></div>
       <div class="text">${m.text}</div>
-    </li>`)}</ul>`}
+    </li>`)}${d.replying_cards?.includes(c.id) && html`<li class="replying"><div class="by"><${Agent} name="epoptes" working=${true} /> <span class="faint">answering your comment…</span></div></li>`}</ul>`}
     <form class="fb-form" onSubmit=${send}>
       <textarea rows="2" value=${text} disabled=${busy} aria-label=${`Comment on ${c.id}`} onInput=${(e) => setText(e.currentTarget.value)} onKeyDown=${(e) => (e.ctrlKey || e.metaKey) && e.key === 'Enter' && send(e)}
         placeholder=${closed ? 'Comment to reopen it: the next cycle looks at it again' : 'A comment for the agent on this card: it acts on it, or just replies'}></textarea>
       <div class="row"><label class="faint steer-box"><input type="checkbox" checked=${steer} onChange=${(e) => setSteer(e.currentTarget.checked)} /> ⚡ Steer: ${running ? 'interrupt the running cycle and replan around it' : 'the next cycle replans around it first'}</label>
         <button class="btn primary small" disabled=${busy || !text.trim()}>Comment</button></div>
     </form>
-  </div>`;
+  </div></div>`;
 }
 
 /** New cards land in the backlog; the next cycle triages them (or replans around them first, when steering). */
@@ -765,6 +796,8 @@ function Board({ d }) {
   const selected = all.find((c) => c.id === s.cardSel);
   const open = [...new Set(all.filter((c) => c.column !== 'done' && c.milestone).map((c) => c.milestone))].sort();
   const now = ep === cur ? d.milestones?.find((m) => m.current)?.id : null;
+  const msById = new Map((ep === cur ? d.milestones ?? [] : []).map((m) => [m.id, m]));
+  const pausedMs = ep === cur ? (d.milestones ?? []).filter((m) => m.paused_for_user) : [];
   const live = d.state === 'running' || d.state === 'pausing';
   const tile = (c) => html`<${CardTile} key=${c.id} c=${c} selected=${s.cardSel === c.id} onSelect=${setSel} seen=${seen} live=${live} />`;
   const drop = (e, col) => {
@@ -774,16 +807,24 @@ function Board({ d }) {
     if (c && c.column !== col) postCard(d, c.id, { column: col });
   };
   return html`${ep === cur && html`<${AddCard} d=${d} bar=${true} />`}
+    ${pausedMs.length > 0 && html`<div class="ms-wait-banner" role="status">
+      <span class="flagmark" aria-hidden="true">⚑</span>
+      <span><b>Milestone paused · waiting on you:</b> ${pausedMs.map((m) => html`<button key=${m.id} type="button" class="linkbtn" onClick=${() => setMs(ms === m.id ? null : m.id)}>${m.title ? `${m.title} (${m.id})` : m.id}${m.waiting_on_user ? ` · ${m.waiting_on_user} approval${m.waiting_on_user > 1 ? 's' : ''}` : ` · ${m.blocked} blocked`}</button>`)}</span>
+    </div>`}
     <div class="board-filters">
       ${d.epics.length > 1 && html`<select class="epic" value=${ep} onChange=${(e) => (setEpic(e.currentTarget.value), setMs(null), setSel(null))} aria-label="Epic (job)">
         ${d.epics.map((e) => html`<option key=${e.id} value=${e.id}>${e.title}${e.current ? ' (current job)' : ''}</option>`)}
       </select>`}
       <span class="pills" role="group" aria-label="Milestone">
         <button class=${!ms ? 'on' : ''} onClick=${() => setMs(null)}>All milestones</button>
-        ${open.map((m) => html`<button key=${m} class=${ms === m ? 'on' : ''} onClick=${() => setMs(ms === m ? null : m)}>${m}${m === now ? ' · now' : ''}</button>`)}
+        ${open.map((m) => {
+          const def = msById.get(m);
+          const label = def?.title ? `${def.title} (${m})` : m;
+          return html`<button key=${m} class=${`${ms === m ? 'on' : ''} ${def?.paused_for_user ? 'ms-paused-pill' : ''}`} onClick=${() => setMs(ms === m ? null : m)} title=${def?.description || label}>${def?.paused_for_user ? '⚑ ' : ''}${label}${m === now ? ' · now' : ''}</button>`;
+        })}
       </span>
       <label class="check"><input type="checkbox" checked=${mine} onChange=${(e) => setMine(e.currentTarget.checked)} /> Only my cards</label>
-      <span class="faint right hide-sm">Drag cards between columns · open one to comment</span>
+      <span class="faint right hide-sm">Drag cards between columns · click a card to comment</span>
     </div>
     <div class="board">
       ${COLS.map(([k, label]) => {
@@ -803,7 +844,7 @@ function Board({ d }) {
 
 // ---------------------------------------------------------------- goal detail: shared bits
 
-const TABS = [['', 'Overview'], ['board', 'Board'], ['cycles', 'Cycles'], ['time', 'Time'], ['activity', 'Activity'], ['setup', 'Setup']];
+const TABS = [['', 'Overview'], ['milestones', 'Milestones'], ['board', 'Board'], ['cycles', 'Cycles'], ['time', 'Time'], ['activity', 'Activity'], ['setup', 'Setup']];
 const tabHref = (id, tab) => `#/g/${id}${tab ? `/${tab}` : ''}`;
 const FAILED = ['error', 'timeout'];
 const shortAgo = (iso) => ago(iso).replace(' ago', '');
@@ -936,12 +977,13 @@ function GoalHead({ d, tab }) {
 function Tabs({ d, tab }) {
   const cards = epicCards(d).length;
   const failed = d.live ? 0 : failedStreak(d.cycles_detail).length;
+  const pausedMs = (d.milestones ?? []).filter((m) => m.paused_for_user).length;
   const seen = store.seenAtOpen[d.id]?.events_at;
   const fresh = seen && d.events.some((e) => e.ts > seen && e.src !== 'user' && ['milestone', 'blocked', 'needs_you', 'done', 'warn', 'run.end'].includes(e.type));
-  const count = { board: cards || null, cycles: d.cycles || null };
+  const count = { milestones: (d.milestones ?? []).length || null, board: cards || null, cycles: d.cycles || null };
   return html`<nav class="tabs" aria-label="Goal sections">
     ${TABS.map(([k, label]) => html`<a key=${k} href=${tabHref(d.id, k)} class=${tab === k ? 'on' : ''} aria-current=${tab === k ? 'page' : undefined}>
-      ${label}${k === 'cycles' && failed ? html`<span class="count bad">${failed} failed</span>` : count[k] ? html`<span class="count">${count[k]}</span>` : ''}${k === 'activity' && fresh ? html`<span class="new-dot" title="new since you last looked"></span>` : ''}
+      ${label}${k === 'cycles' && failed ? html`<span class="count bad">${failed} failed</span>` : k === 'milestones' && pausedMs ? html`<span class="count warn">⚑ ${pausedMs} waiting</span>` : count[k] ? html`<span class="count">${count[k]}</span>` : ''}${k === 'activity' && fresh ? html`<span class="new-dot" title="new since you last looked"></span>` : ''}
     </a>`)}
     <span class="spacer"></span>
     <${JobToggle} d=${d} />
@@ -989,8 +1031,14 @@ function Band({ kind, icon, title, sub, actions, children }) {
 function StatusBand({ d }) {
   const kind = bandKind(d);
   const pending = d.board_cards.filter(pendingApproval);
+  const pausedMs = (d.milestones ?? []).filter((m) => m.paused_for_user);
   const B = { needs: NeedsBand, limited: LimitedBand, running: RunningBand, done: DoneBand, trouble: TroubleBand, timeboxed: TimeboxedBand, first: FirstBand, paused: PausedBand }[kind];
   return html`<${B} d=${d} />
+    ${pausedMs.length > 0 && html`<div class="ms-wait-banner" role="status">
+      <span class="flagmark" aria-hidden="true">⚑</span>
+      <span><b>${pausedMs.length === 1 ? 'A milestone is paused and waiting on you' : `${pausedMs.length} milestones are paused and waiting on you`}:</b> ${pausedMs.map((m) => `${m.title ? `${m.title} (${m.id})` : m.id}`).join(', ')}. ${d.live ? 'Later milestones are still running.' : ''}</span>
+      <a class="btn small right" href=${tabHref(d.id, 'milestones')}>View milestones →</a>
+    </div>`}
     ${kind !== 'needs' && pending.length > 0 && html`<${Approvals} d=${d} pending=${pending} strip=${true} />`}`;
 }
 
@@ -1019,25 +1067,30 @@ function RunningBand({ d }) {
   const running = d.state === 'running' || d.state === 'pausing';
   const elapsed = d.cycle_started_at ? (now - Date.parse(d.cycle_started_at)) / 1000 : null;
   const cost = d.live_usage?.cost_usd;
-  const title = d.state === 'waiting' ? `Between cycles · cycle ${d.cycle + 1} is next` : d.pause_requested ? `Pausing after cycle ${d.cycle}` : `Running cycle ${d.cycle}`;
+  const title = d.state === 'waiting'
+    ? `Between cycles · cycle ${d.cycle + 1} is next`
+    : d.pause_requested
+      ? (d.pause_mode === 'cycle' ? `Pausing after cycle ${d.cycle}` : `Pausing after current task (cycle ${d.cycle})`)
+      : `Running cycle ${d.cycle}`;
   const sub = running && elapsed != null ? `${dur(elapsed)} in · times out at ${d.goal.cycle.timeout_min}m${cost != null ? ` · ≈ $${cost.toFixed(2)} so far` : ''}` : d.clock?.followup ? 'follow-up · no time box' : '';
   const ms = (d.milestones ?? []).find((m) => m.current);
   const msN = ms && ms.todo + ms.doing + ms.done + ms.blocked + ms.cut;
+  const gs = d.general_status;
   return html`<${Band} kind="running" icon=${html`<span class="live-dot"></span>`} title=${title} sub=${sub}
-    actions=${html`<button class="btn" disabled=${busy || d.pause_requested} onClick=${() => act('pause')} title="Finish the current cycle, then pause (the clock pauses too)">‖ ${d.pause_requested ? 'Pausing after cycle' : 'Pause after cycle'}</button>
+    actions=${html`<button class="btn" disabled=${busy || d.pause_requested} onClick=${() => act('pause', { mode: 'task' })} title="Signal the orchestrator to finish its current task/round, checkpoint, and pause cleanly">‖ ${d.pause_requested ? (d.pause_mode === 'cycle' ? 'Pausing after cycle' : 'Pausing after task') : 'Pause after task'}</button>
+      ${!d.pause_requested && html`<button class="btn ghost" disabled=${busy} onClick=${() => act('pause', { mode: 'cycle' })} title="Let the entire cycle finish before pausing">After cycle</button>`}
       <button class="btn danger" disabled=${busy} onClick=${() => act('stop', {}, STOP_TEXT)}>■ Stop now</button>`}>
     <div class="band-cols">
       <div>
-        <h3 class="micro">Working on</h3>
-        ${doing.length === 0
-          ? html`<p class="faint">Nothing in DOING right now: the orchestrator is planning, briefing or checking.</p>`
-          : doing.map((c, i) => html`<div key=${c.id} class="working">
-              <a href=${tabHref(d.id, 'board')} onClick=${openCard(d, c.id)} class=${i === 0 ? 'band-headline' : 'working-title'}>${c.title}</a>
-              <div class="kc-head"><span class="id">${c.id}</span>${c.milestone && html`<span class="chip">${c.milestone}</span>`}${c.priority && html`<span class=${`prio ${c.priority}`}>${c.priority}</span>`}</div>
-            </div>`)}
+        <h3 class="micro">Status</h3>
+        ${gs && html`<p class="band-headline status-summary">${gs.summary}</p>`}
+        ${doing.length > 0 && html`<div class="working-chips">
+          ${doing.map((c) => html`<a key=${c.id} href=${tabHref(d.id, 'board')} onClick=${openCard(d, c.id)} class="working-pill" title=${c.title}><span class="id">${c.id}</span>${c.milestone && html`<span class="chip">${c.milestone}</span>`}</a>`)}
+        </div>`}
+        ${!gs && doing.length === 0 && html`<p class="faint">Nothing in DOING right now: the orchestrator is planning, briefing or checking.</p>`}
         ${running && html`<h3 class="micro">Agents</h3>
           <div class="agents"><${Agent} name="orchestrator" working=${true} />${[...open.entries()].map(([a, x]) => html`<span key=${a} title=${x.summary}><${Agent} name=${a} working=${true} /></span>`)}</div>`}
-        ${ms && html`<p class="faint">${ms.id} · ${ms.done} of ${msN} cards done${ms.target_s != null ? ` · target ${dur(ms.target_s)}` : ''}</p>`}
+        ${ms && html`<p class="faint">${ms.title ? `${ms.title} (${ms.id})` : ms.id} · ${ms.done} of ${msN} cards done${ms.target_s != null ? ` · target ${dur(ms.target_s)}` : ''}</p>`}
       </div>
       <div>
         <h3 class="micro">Latest steps ${d.activity_cycle ? html`<a class="right" href=${tabHref(d.id, 'cycles')} onClick=${openCycle(d, d.activity_cycle)}>All ${d.activity.length} steps →</a>` : ''}</h3>
@@ -1064,6 +1117,12 @@ function NeedsBand({ d }) {
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
   const pending = d.board_cards.filter(pendingApproval);
+  // Surface the orchestrator's most recent answer to a human card (even if marked done, e.g. a Q&A card from "Send & resume")
+  // so answers never vanish into the Done column while the run is still waiting on the human.
+  const recentAnswer = [...epicCards(d)]
+    .filter((c) => c.src !== 'orchestrator' && c.comments.some((m) => m.by !== 'user'))
+    .sort((a, b) => b.updated_at.localeCompare(a.updated_at))[0];
+  const latestReply = recentAnswer?.comments.findLast((m) => m.by !== 'user' && !m.quick_reply) ?? recentAnswer?.comments.findLast((m) => m.by !== 'user');
   const reply = (e, withText = true) => {
     e?.preventDefault();
     setBusy(true);
@@ -1082,6 +1141,10 @@ function NeedsBand({ d }) {
   };
   const sub = d.needs ? `paused after cycle ${d.cycle} · ${ago(d.needs.since)} · the clock is stopped until you answer` : 'the run is stopped; answering the last approval resumes it';
   return html`<${Band} kind="needs" icon="⚑" title=${d.needs ? 'Waiting for you' : 'Approval needed'} sub=${sub}>
+    ${recentAnswer && latestReply && html`<div class="note-card" style=${{ marginTop: '12px' }}>
+      <div class="ap-head"><span class="id">${recentAnswer.id}</span><span class="kind">latest answer</span><span class="faint">${recentAnswer.title}</span><a class="btn small ghost right" href=${tabHref(d.id, 'board')} onClick=${openCard(d, recentAnswer.id)}>Open thread →</a></div>
+      <div class="text" style=${{ whiteSpace: 'pre-wrap' }}>${latestReply.text}</div>
+    </div>`}
     <div class=${d.needs && pending.length ? 'band-cols' : ''}>
       ${d.needs && html`<form onSubmit=${reply}>
         <h3 class="micro">The orchestrator asks</h3>
@@ -1169,6 +1232,7 @@ function PausedBand({ d }) {
   const title = { paused: 'Paused', stopped: 'Stopped' }[d.state] ?? 'Not running';
   return html`<${Band} kind="idle" icon="‖" title=${title} sub=${d.cycle ? `after cycle ${d.cycle} · the clock is paused` : ''}
     actions=${html`<button class="btn primary" disabled=${busy} onClick=${() => act('start')}>▶ ${d.clock ? 'Resume' : 'Start'}</button>`}>
+    ${d.general_status && html`<p class="band-text">${d.general_status.summary}</p>`}
   </${Band}>`;
 }
 
@@ -1266,13 +1330,81 @@ function MilestoneBar({ ms }) {
   return html`<div class="ms-bar" role="list" aria-label="Progress by milestone">
     ${ms.map((m) => {
       const n = m.todo + m.doing + m.done + m.blocked + m.cut;
-      const finished = m.todo + m.doing === 0;
-      const tip = `${m.id} ${m.title}${m.target_s != null ? ` (target ${dur(m.target_s)})` : ''}\n${m.done} done · ${m.doing} in progress · ${m.blocked} blocked · ${m.cut} cut · ${m.todo} to do${m.reached ? `\nreached ${ago(m.reached.at)}` : ''}`;
-      return html`<div key=${m.id} role="listitem" class="ms-seg ${m.current ? 'current' : ''}" style=${{ flexGrow: n }} title=${tip}>
+      const waitingUser = Boolean(m.paused_for_user);
+      const finished = !waitingUser && m.blocked === 0 && m.todo + m.doing === 0;
+      const label = m.title || m.id;
+      const tip = `${m.id} ${m.title}${m.description ? `\n${m.description}` : ''}${m.target_s != null ? `\ntarget ${dur(m.target_s)}` : ''}\n${m.done} done · ${m.doing} in progress · ${m.blocked} blocked · ${m.cut} cut · ${m.todo} to do${m.reached ? `\nreached ${ago(m.reached.at)}` : ''}`;
+      return html`<div key=${m.id} role="listitem" class="ms-seg ${m.current ? 'current' : ''} ${waitingUser ? 'waiting-user' : ''}" style=${{ flexGrow: n }} title=${tip}>
         <div class="progress"><span class="done" style=${{ flexGrow: m.done }}></span><span class="doing" style=${{ flexGrow: m.doing }}></span><span class="blocked" style=${{ flexGrow: m.blocked }}></span><span class="cut" style=${{ flexGrow: m.cut }}></span><span style=${{ flexGrow: m.todo }}></span></div>
-        <div class="ms-name"><b>${m.id}</b> ${finished ? `done${m.cut ? ` · ${m.cut} cut` : ''}` : `${m.done}/${n}${m.current ? ' · now' : ''}${m.blocked ? ` · ${m.blocked} blocked` : ''}`}</div>
+        <div class="ms-name"><b>${label}</b> ${m.title && html`<span class="faint">${m.id}</span> `}${waitingUser ? html`<span class="ms-wait-tag">⚑ waiting on you</span>` : finished ? `done${m.cut ? ` · ${m.cut} cut` : ''}` : `${m.done}/${n}${m.current ? ' · now' : ''}${m.blocked ? ` · ${m.blocked} blocked` : ''}`}</div>
       </div>`;
     })}
+  </div>`;
+}
+
+// ---------------------------------------------------------------- milestones tab
+
+function MilestonesTab({ d }) {
+  const s = useStore();
+  const cards = epicCards(d);
+  const ms = d.milestones ?? [];
+  const selected = cards.find((c) => c.id === s.cardSel);
+  const setSel = (id) => set({ cardSel: id });
+  if (!ms.length) {
+    return html`<section class="panel"><p class="empty">No milestones defined for this job yet. Use <span class="mono">epoptes milestone add M1 "Label" --desc "What this delivers" --target 1:00</span> to add one.</p></section>`;
+  }
+  return html`<div class="stack">
+    ${ms.map((m) => {
+      const mCards = cards.filter((c) => c.milestone === m.id);
+      const total = m.todo + m.doing + m.done + m.blocked + m.cut;
+      const waitingUser = Boolean(m.paused_for_user);
+      const finished = !waitingUser && m.blocked === 0 && m.todo + m.doing === 0 && (total > 0 || m.reached);
+      const statusLabel = waitingUser ? 'waiting on you' : finished ? 'done' : m.current ? 'in progress' : 'upcoming';
+      const statusCls = waitingUser ? 'needs_input' : finished ? 'done' : m.current ? 'running' : 'idle';
+      const blockedCards = mCards.filter((c) => c.column !== 'done' && (c.blocked || pendingApproval(c)));
+      const openCards = mCards.filter((c) => c.column !== 'done' && !c.blocked && !pendingApproval(c));
+      const doneCards = mCards.filter((c) => c.column === 'done');
+      return html`<section key=${m.id} class=${`panel ms-card ${waitingUser ? 'waiting-user' : m.current ? 'current' : ''}`}>
+        <div class="ms-card-head">
+          <div class="ms-card-title">
+            <span class="ms-id-pill">${m.id}</span>
+            <h2>${m.title || `Milestone ${m.id}`}</h2>
+            <span class=${`state ${statusCls}`}><span class="dot"></span>${statusLabel}</span>
+          </div>
+          <div class="ms-card-meta faint">
+            <span class="num">${m.done}/${total} done</span>
+            ${m.target_s != null && html`<span>· target ${dur(m.target_s)}</span>`}
+            ${m.reached && html`<span>· reached ${m.reached.active_s != null ? `at ${dur(m.reached.active_s)}` : ago(m.reached.at)}</span>`}
+          </div>
+        </div>
+        ${m.description && html`<p class="prose ms-desc">${m.description}</p>`}
+        ${total > 0 && html`<div class="progress ms-card-bar"><span class="done" style=${{ flexGrow: m.done }}></span><span class="doing" style=${{ flexGrow: m.doing }}></span><span class="blocked" style=${{ flexGrow: m.blocked }}></span><span class="cut" style=${{ flexGrow: m.cut }}></span><span style=${{ flexGrow: m.todo }}></span></div>`}
+        ${blockedCards.length > 0 && html`<div class="ms-blocked-box">
+          <h3 class="micro"><span class="flagmark" aria-hidden="true">⚑</span> Needs your attention (${blockedCards.length})</h3>
+          <ul class="rows">${blockedCards.map((c) => html`<li key=${c.id}>
+            <span class="tag blocked">${pendingApproval(c) ? 'approval' : 'blocked'}</span>
+            <span class="id">${c.id}</span>
+            <a class="row-title" href=${tabHref(d.id, 'milestones')} onClick=${(e) => (e.preventDefault(), setSel(c.id))}>${c.title}<span class="faint"> · ${pendingApproval(c) ? c.approval.text : c.blocked}</span></a>
+          </li>`)}</ul>
+        </div>`}
+        ${openCards.length > 0 && html`<details open=${m.current || waitingUser} class="ms-cards-list">
+          <summary>Open tasks (${openCards.length})</summary>
+          <ul class="rows">${openCards.map((c) => html`<li key=${c.id}>
+            <span class=${`tag ${c.column}`}>${c.column}</span>
+            <span class="id">${c.id}</span>
+            <a class="row-title" href=${tabHref(d.id, 'milestones')} onClick=${(e) => (e.preventDefault(), setSel(c.id))}>${c.title}</a>
+          </li>`)}</ul>
+        </details>`}
+        ${doneCards.length > 0 && html`<details class="ms-cards-list">
+          <summary>Completed (${doneCards.length})</summary>
+          <ul class="rows closed">${doneCards.map((c) => html`<li key=${c.id}>
+            <span class="id">${c.id}</span>
+            <a class="row-title" href=${tabHref(d.id, 'milestones')} onClick=${(e) => (e.preventDefault(), setSel(c.id))}>${c.title}${c.cut ? html` <span class="faint">· cut: ${c.cut}</span>` : ''}</a>
+          </li>`)}</ul>
+        </details>`}
+      </section>`;
+    })}
+    ${selected && html`<${CardDetail} key=${selected.id} d=${d} c=${selected} onClose=${() => setSel(null)} />`}
   </div>`;
 }
 
@@ -1616,6 +1748,73 @@ function Checkpoints({ d }) {
 
 // ---------------------------------------------------------------- setup tab
 
+function CycleSettingsForm({ d }) {
+  const g = d.goal;
+  const noBudget = g.adapter.type === 'codex' || g.adapter.type === 'antigravity';
+  const [timeoutMin, setTimeoutMin] = useState(String(g.cycle.timeout_min));
+  const [pauseBetween, setPauseBetween] = useState(String(g.cycle.pause_between_s));
+  const [maxBudget, setMaxBudget] = useState(g.cycle.max_budget_usd == null ? '' : String(g.cycle.max_budget_usd));
+  const [onStart, setOnStart] = useState(g.hooks?.onStart ?? '');
+  const [onEnd, setOnEnd] = useState(g.hooks?.onEnd ?? '');
+  const [onPause, setOnPause] = useState(g.hooks?.onPause ?? '');
+  const [onStop, setOnStop] = useState(g.hooks?.onStop ?? '');
+  const [busy, setBusy] = useState(false);
+
+  const save = (e) => {
+    e.preventDefault();
+    setBusy(true);
+    const cycle = {
+      timeout_min: Number(timeoutMin),
+      pause_between_s: Number(pauseBetween),
+      ...(noBudget ? {} : { max_budget_usd: maxBudget.trim() === '' ? null : Number(maxBudget) }),
+    };
+    const hooks = { onStart, onEnd, onPause, onStop };
+    api
+      .post(`/api/goals/${d.id}/settings`, { cycle, hooks })
+      .then(() => {
+        toast({ kind: 'good', title: 'Cycle settings saved', body: 'Applies from the next cycle.', ms: 4000 });
+        loadDetail();
+      })
+      .catch((err) => toast({ kind: 'bad', title: 'Could not save settings', body: err.message }))
+      .finally(() => setBusy(false));
+  };
+
+  return html`<section class="panel">
+    <h2>Cycle customization & hooks</h2>
+    <p class="faint note" style=${{ marginTop: 0 }}>Changes are saved to <span class="mono">.epoptes/goal.json</span> and take effect on the next cycle.</p>
+    <form class="settings-form" onSubmit=${save}>
+      <div class="settings-grid">
+        <label>Cycle timeout (min, 5–180)
+          <input type="number" min="5" max="180" step="1" value=${timeoutMin} onInput=${(e) => setTimeoutMin(e.currentTarget.value)} required />
+        </label>
+        <label>Pause between cycles (sec)
+          <input type="number" min="0" step="1" value=${pauseBetween} onInput=${(e) => setPauseBetween(e.currentTarget.value)} required />
+        </label>
+        <label>Max budget per cycle (USD)
+          <input type="number" min="0.01" step="0.05" value=${maxBudget} disabled=${noBudget} placeholder=${noBudget ? 'Not supported by this adapter' : 'No cap'} onInput=${(e) => setMaxBudget(e.currentTarget.value)} />
+        </label>
+      </div>
+      <h3 class="micro">Lifecycle hooks <span class="faint">shell commands run in the project directory</span></h3>
+      <div class="hooks-grid">
+        <label><span class="mono">onStart</span> <span class="faint">before each cycle</span>
+          <input type="text" class="mono" value=${onStart} placeholder="e.g. ./scripts/before-cycle.sh" onInput=${(e) => setOnStart(e.currentTarget.value)} />
+        </label>
+        <label><span class="mono">onEnd</span> <span class="faint">after each cycle</span>
+          <input type="text" class="mono" value=${onEnd} placeholder="e.g. ./scripts/after-cycle.sh" onInput=${(e) => setOnEnd(e.currentTarget.value)} />
+        </label>
+        <label><span class="mono">onPause</span> <span class="faint">when paused or waiting for you</span>
+          <input type="text" class="mono" value=${onPause} placeholder="e.g. notify-send 'Epoptes paused'" onInput=${(e) => setOnPause(e.currentTarget.value)} />
+        </label>
+        <label><span class="mono">onStop</span> <span class="faint">when stopped</span>
+          <input type="text" class="mono" value=${onStop} placeholder="e.g. ./scripts/cleanup.sh" onInput=${(e) => setOnStop(e.currentTarget.value)} />
+        </label>
+      </div>
+      <div class="row"><span class="faint">Env vars: <span class="mono">EPOPTES_HOOK</span>, <span class="mono">EPOPTES_CYCLE</span>, <span class="mono">EPOPTES_MODE</span>, <span class="mono">EPOPTES_GOAL_ID</span></span>
+        <button class="btn primary small" disabled=${busy}>Save settings</button></div>
+    </form>
+  </section>`;
+}
+
 function SetupTab({ d }) {
   const g = d.goal;
   const [busy, act] = useAct(d);
@@ -1626,6 +1825,7 @@ function SetupTab({ d }) {
         ${g.non_goals?.length > 0 && html`<h3 class="micro">Not in scope</h3><ul class="prose">${g.non_goals.map((x, i) => html`<li key=${i}>${x}</li>`)}</ul>`}</section>
       <section class="panel"><h2>Done when <span class="sub">${g.done.length === 1 ? 'the check passes' : `all ${g.done.length} pass`}</span></h2>
         <ul class="defs">${g.done.map((x) => html`<li key=${x.id}><b class="id">${x.id}</b><div>${x.check}<div class="faint">${VERIFY[x.verify.type]?.(x.verify) ?? x.verify.type}</div></div></li>`)}</ul></section>
+      <${CycleSettingsForm} d=${d} />
       <section class="panel"><h2>Jobs in this harness ${d.job.n > 1 && html`<a class="right" href=${`/goals/${d.id}/report.html?job=all`} target="_blank" rel="noopener">Report: all jobs ↗</a>`}</h2>
         <ul class="defs">${[...d.epics].reverse().map((e, i) => html`<li key=${e.id}><span class="faint num">${d.epics.length - i}</span><div><b>${e.title}</b></div>
           <span class="faint right">${e.current ? html`<span class="done-ink">current${d.state === 'done' ? ' · done' : ''}</span>` : e.archive ? `archived in .epoptes/${e.archive}` : 'archived'}</span></li>`)}</ul>
@@ -1670,7 +1870,7 @@ function GoalDetail({ id, tab }) {
         ${!d.missing && html`<p class="muted">Fix the file, then check it with <span class="mono">epoptes run ${d.id} --dry-run</span>. This page updates by itself.</p>`}
       </div>`;
   }
-  const Tab = { board: Board, cycles: CyclesTab, time: TimeTab, activity: ActivityTab, setup: SetupTab }[tab] ?? Overview;
+  const Tab = { milestones: MilestonesTab, board: Board, cycles: CyclesTab, time: TimeTab, activity: ActivityTab, setup: SetupTab }[tab] ?? Overview;
   return html`<${GoalHead} d=${d} tab=${Tab === Overview ? '' : tab} />
     <div class="tab-body"><${Tab} d=${d} /></div>`;
 }

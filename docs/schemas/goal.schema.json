@@ -310,7 +310,7 @@
       "properties": {
         "timeout_min": {
           "type": "integer",
-          "minimum": 20,
+          "minimum": 5,
           "maximum": 180,
           "default": 90
         },
@@ -326,6 +326,38 @@
           ],
           "exclusiveMinimum": 0,
           "default": null
+        }
+      },
+      "default": {}
+    },
+    "hooks": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Optional shell commands run in the project directory on cycle/run lifecycle events (onStart, onEnd per cycle; onPause, onStop when paused/stopped).",
+      "properties": {
+        "onStart": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "onEnd": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "onPause": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "onStop": {
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "default": {}

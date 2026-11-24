@@ -157,7 +157,7 @@ test('pause after this cycle, extend, the board and events from the CLI', async 
   assert.equal(typeof ms.active_s, 'number', 'milestones record active time for the clock bar');
   // Seeding: a backlog.md in the seed format goes onto the board; milestones can also be added by hand.
   fs.writeFileSync(path.join(g.root, 'state', 'backlog.md'), '## M1 · A (target 0:40)\n- [x] M1-1 a\n## M2 · B (target 1:20)\n- [ ] M2-1 b\n');
-  assert.match(g.run(['clock', g.project]), / MILESTONE=M2 M_TARGET=1h20m$/m);
+  assert.match(g.run(['clock', g.project]), / MILESTONE=M2 M_TARGET=1h20m PAUSE_REQUESTED=task$/m);
   g.run(['milestone', 'add', 'm3', 'Polish', '--target', '2:00', '--goal', g.project]);
   assert.match(g.run(['milestone', g.project]), /^\* M2 +1h20m {2}0\/1 done {2}B\n {2}M3 +2h00m {2}0\/0 done {2}Polish$/m);
   assert.match(g.run(['status', g.project]), /board 2\/3 done · 0 backlog · 1 todo · 0 doing · 0 review · 0 blocked · 0 cut · milestone M2/);

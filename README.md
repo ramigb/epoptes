@@ -262,6 +262,13 @@ npm run build       # dist/ for the npm package (the checkout runs src/ directly
 - `plugin/`: the shared Claude Code/Codex/pi/Antigravity skill and templates.
 - `docs/`: the spec, JSON Schemas and decisions.
 
+## Documentation
+- [Architecture overview](docs/architecture.md) — how the runner, file contract, adapters, and dashboard fit together
+- [Glossary](docs/glossary.md) — plain-English definitions of Epoptes terms
+- [Examples of usage](docs/examples.md) — practical recipes for common workflows, hooks, and jobs
+- [Things to look out for](docs/gotchas.md) — pitfalls, permissions, WSL2, costs, and safety tips
+- [Contributing](CONTRIBUTING.md) — how to contribute (both technical and non-technical)
+
 Usage notes go in [NOTES.md](NOTES.md), and are triaged into [ROADMAP.md](ROADMAP.md).
 
 ## License

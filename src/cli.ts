@@ -35,7 +35,7 @@ Goals
 Runs
   start [goal] [--new-run]        resume, or start (spawns a detached runner); --new-run after DONE / time box over
         [--follow-up]             after DONE: handle just the open feedback, no time box (minor fixes in place)
-  pause [goal]                    pause after the current cycle (the clock pauses too)
+  pause [goal] [--after-cycle]    pause safely after the current task/round (--after-cycle: wait for full cycle)
   stop [goal]                     stop now; the next cycle recovers interrupted work
   extend [goal] <dur>             lengthen the time box, e.g. 2h, 30m, 1h30m
   reset-clock [goal]              clear the clock; the next start is a new run
@@ -54,8 +54,8 @@ The board (one per harness; each job is an epic; columns ${COLUMNS.join(' → ')
                                   [--scope auto|tweak|new_run] (scope: how a follow-up after DONE treats it)
   card <id> approve|reject [note] answer an approval request
   milestone [goal]                the current epic's milestones
-  milestone add <M-id> "<title>" [--target h:mm]   add or rename one (target: active time from the run's start)
-  event <type> "<text>"           milestone | blocked | note | artifact | round | wrapup | done
+  milestone add <M-id> "<label>" [--desc "<description>"] [--target h:mm]   add or rename one
+  event <type> "<text>"           milestone | blocked | note | status | artifact | round | wrapup | done
   event output <path|url> [text]  where the main deliverable is (the dashboard links to it)
 
 Inside cycles (orchestrators)
@@ -84,9 +84,18 @@ Reports
 
 [goal] is a registered id or a path. Without it: $EPOPTES_GOAL_DIR, then the nearest .epoptes/ above the cwd.`;
 
-const EVENT_TYPES = ['milestone', 'blocked', 'note', 'artifact', 'output', 'round', 'wrapup', 'done'];
+const EVENT_TYPES = ['milestone', 'blocked', 'note', 'status', 'artifact', 'output', 'round', 'wrapup', 'done'];
 
 const inCycle = () => Boolean(process.env.EPOPTES_CYCLE);
+
+function taskPauseNotice(p: ReturnType<typeof goalPaths>): string | null {
+  if (!inCycle()) return null;
+  const ctrl = readJson<{ pause_after_cycle?: boolean; pause_mode?: 'task' | 'cycle'; for_human?: unknown }>(p.control);
+  if (ctrl?.pause_after_cycle && !ctrl.for_human && (ctrl.pause_mode ?? 'cycle') === 'task') {
+    return '[epoptes] PAUSE REQUESTED (after current task): finish/verify in-flight work, checkpoint, update handoff, and exit — do not start new tasks or rounds.';
+  }
+  return null;
+}
 
 /** One line per card in `epoptes board`, with what the orchestrator needs to know up front. */
 function cardLine(c: Card): string {
@@ -238,6 +247,7 @@ async function main(argv: string[]) {
       'dry-run': { type: 'boolean' },
       'new-run': { type: 'boolean' },
       'follow-up': { type: 'boolean' },
+      'after-cycle': { type: 'boolean' },
       steer: { type: 'boolean' },
       open: { type: 'boolean' },
       md: { type: 'boolean' },
@@ -268,6 +278,7 @@ async function main(argv: string[]) {
       scope: { type: 'string' },
       as: { type: 'string' },
       target: { type: 'string' },
+      desc: { type: 'string' },
     },
   });
   const [cmd, ...rest] = positionals;
@@ -319,7 +330,9 @@ async function main(argv: string[]) {
       // The current milestone's target lets the orchestrator see whether it's ahead of or behind plan.
       const m = boardMilestones(readBoard(p), currentEpic(p)).find((x) => x.current);
       const ms = m ? ` MILESTONE=${m.id}${m.target_s != null ? ` M_TARGET=${hm(m.target_s)}` : ''}` : '';
-      console.log(`CYCLE=${envCycle() ?? s.cycle} RUN=${c.run} MODE=${cs.mode} ACTIVE=${hm(cs.active)} TO_WRAPUP=${left(cs.toWrapup)} TO_END=${left(cs.toEnd)} TO_HARD_STOP=${left(cs.toHard)}${elapsed}${ms}`);
+      const ctrl = readJson<{ pause_after_cycle?: boolean; pause_mode?: 'task' | 'cycle' }>(p.control);
+      const pauseFlag = ctrl?.pause_after_cycle ? ` PAUSE_REQUESTED=${ctrl.pause_mode ?? 'cycle'}` : '';
+      console.log(`CYCLE=${envCycle() ?? s.cycle} RUN=${c.run} MODE=${cs.mode} ACTIVE=${hm(cs.active)} TO_WRAPUP=${left(cs.toWrapup)} TO_END=${left(cs.toEnd)} TO_HARD_STOP=${left(cs.toHard)}${elapsed}${ms}${pauseFlag}`);
       return;
     }
     case 'skill': {
@@ -351,10 +364,14 @@ async function main(argv: string[]) {
       console.log(`started${followUp ? ' a follow-up' : ''}: run ${s.run}, runner pid ${s.pid}`);
       return;
     }
-    case 'pause':
-      control.pause(resolveGoal(goalArg()));
-      console.log('pause requested: the current cycle finishes, then the run pauses');
+    case 'pause': {
+      const mode = values['after-cycle'] ? 'cycle' : 'task';
+      control.pause(resolveGoal(goalArg()), { mode });
+      console.log(mode === 'task'
+        ? 'pause requested: the running cycle will wrap up after its current task/round, then pause'
+        : 'pause requested: the current cycle finishes, then the run pauses');
       return;
+    }
     case 'stop':
       control.stop(resolveGoal(goalArg()));
       console.log('stopping: the cycle is interrupted now; the next start recovers its work');
@@ -420,18 +437,23 @@ async function main(argv: string[]) {
         return console.log(`${id} ${what === 'approve' ? 'approved' : 'rejected'}${r.resumed ? '; the run resumes' : r.problem ? `; not resumed: ${r.problem}` : ''}`);
       } else throw new Error(`unknown card action "${what}" (use ${COLUMNS.join(', ')}, cut, block, unblock, comment, set, approve, reject)`);
       console.log(`${id}: ${what}${text && what !== 'comment' ? ` (${text})` : ''}`);
+      const notice = taskPauseNotice(p);
+      if (notice) console.log(notice);
       return;
     }
     case 'milestone': {
       if (rest[0] === 'add') {
         const p = goalPaths(resolveGoal(values.goal));
-        addMilestone(p, rest[1] ?? '', rest.slice(2).join(' '), values.target);
+        addMilestone(p, rest[1] ?? '', rest.slice(2).join(' '), values.target, values.desc);
         return console.log(`milestone ${rest[1].toUpperCase()} recorded`);
       }
       const p = goalPaths(resolveGoal(goalArg()));
       const ms = boardMilestones(readBoard(p), currentEpic(p));
-      if (!ms.length) return console.log('no milestones yet: `epoptes milestone add M1 "<what is checkable at the end>" --target 1:00`');
-      for (const m of ms) console.log(`${m.current ? '*' : ' '} ${m.id.padEnd(5)} ${m.target_s != null ? hm(m.target_s) : '  –  '}  ${m.done}/${m.todo + m.doing + m.done + m.blocked} done${m.blocked ? ` · ${m.blocked} blocked` : ''}  ${m.title}`);
+      if (!ms.length) return console.log('no milestones yet: `epoptes milestone add M1 "<label>" --desc "<what this delivers>" --target 1:00`');
+      for (const m of ms) {
+        const waitTag = m.paused_for_user ? ' · WAITING ON YOU' : m.blocked ? ` · ${m.blocked} blocked` : '';
+        console.log(`${m.current ? '*' : ' '} ${m.id.padEnd(5)} ${m.target_s != null ? hm(m.target_s) : '  –  '}  ${m.done}/${m.todo + m.doing + m.done + m.blocked} done${waitTag}  ${m.title}${m.description ? ` — ${m.description}` : ''}`);
+      }
       return;
     }
     case 'feedback': {
@@ -574,6 +596,8 @@ async function main(argv: string[]) {
       if (type === 'done') touch(p.done);
       if (type === 'wrapup') touch(p.wrapup);
       console.log(`recorded ${type}`);
+      const notice = taskPauseNotice(p);
+      if (notice) console.log(notice);
       return;
     }
     case 'import-runsh': {

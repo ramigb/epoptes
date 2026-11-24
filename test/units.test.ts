@@ -319,7 +319,7 @@ test('open work ignores low/med cards; projection follows milestone pace', async
   setCard(p, id, { column: 'review', priority: 'high' }, 'orchestrator');
   assert.deepEqual(openWork(currentCards(p)), { open: 1, blocked: 1, minor: 2, untriaged: 0, waiting: 0 });
 
-  const m = (id: string, target_s: number | null, active_s: number | null) => ({ id, title: id, target_s, todo: 0, doing: 0, done: 0, blocked: 0, cut: 0, current: false, reached: active_s == null ? null : { at: '', run: 'r1', active_s } });
+  const m = (id: string, target_s: number | null, active_s: number | null) => ({ id, title: id, description: '', target_s, todo: 0, doing: 0, done: 0, blocked: 0, waiting_on_user: 0, paused_for_user: false, cut: 0, current: false, reached: active_s == null ? null : { at: '', run: 'r1', active_s } });
   // M1 planned for 2h, done in 30 min: the run is on a quarter of the plan, so a 10h plan lands at ~2h30m.
   assert.deepEqual(projectFinish([m('M1', 7200, 1800), m('M2', 18000, null), m('M3', 36000, null)], 1900), { end_s: 9000, pace: 0.25, basis: 'M1' });
   assert.equal(projectFinish([m('M1', 7200, null), m('M2', 36000, null)], 100), null, 'no reached milestone with a time yet');
@@ -327,4 +327,75 @@ test('open work ignores low/med cards; projection follows milestone pace', async
   // M2 is current and already past its target: that slower pace wins.
   const late = [m('M1', 2400, 2100), { ...m('M2', 4800, null), current: true }, m('M3', 6600, null)];
   assert.deepEqual(projectFinish(late, 5640), { end_s: 7755, pace: 1.175, basis: 'M2' });
+});
+
+test('time use drills down Bash and background commands grouped by similarity', async () => {
+  const { commandGroup, cycleUse } = await import('../src/timeuse.ts');
+  assert.equal(commandGroup('cd /app && npm test -- --watch'), 'npm test');
+  assert.equal(commandGroup('NODE_ENV=test cargo test --workspace'), 'cargo test');
+  assert.equal(commandGroup('epoptes card C-12 done "ok"'), 'epoptes card');
+  assert.equal(commandGroup('git add -A && git commit -m "c1"'), 'git add');
+
+  const t = (s: number) => new Date(Date.UTC(2026, 9, 4, 10, 0, s)).toISOString();
+  const a = (s: number, agent: string, kind: string, tool: string | undefined, summary: string) =>
+    ({ ts: t(s), agent, kind, ...(tool ? { tool } : {}), summary }) as any;
+  const use = cycleUse([
+    a(0, 'orchestrator', 'tool', 'Bash', 'npm test -- foo'),
+    a(20, 'orchestrator', 'tool', 'Bash', 'npm test -- bar'),
+    a(50, 'orchestrator', 'tool', 'Bash', 'epoptes board --open'),
+    a(60, 'agent#b1', 'agent.start', undefined, 'cargo build --release'),
+    a(90, 'agent#b1', 'agent.end', undefined, 'ok'),
+  ], Date.parse(t(0)), Date.parse(t(100)));
+  assert.deepEqual(Object.fromEntries(use.breakdowns.get('Bash')!), {
+    'npm test': { seconds: 50, calls: 2 },
+    'epoptes board': { seconds: 50, calls: 1 },
+  });
+  assert.deepEqual(Object.fromEntries(use.breakdowns.get('background commands')!), {
+    'cargo build': { seconds: 30, calls: 1 },
+  });
+});
+
+test('milestones track descriptions and paused_for_user when later milestones run', async () => {
+  const { addMilestone, askApproval } = await import('../src/board.ts');
+  const p = tmpGoal();
+  addMilestone(p, 'M1', 'Audio playback', '1:00', 'Loads and plays decoded audio cleanly');
+  addMilestone(p, 'M2', 'Export pipeline', '2:00', 'Exports projects to WAV and MP3');
+  const c1 = addCard(p, 'request third-party codec license', 'orchestrator', { column: 'todo', milestone: 'M1' });
+  askApproval(p, 'Buy codec license?', c1, 'orchestrator', 1);
+  addCard(p, 'implement WAV exporter', 'orchestrator', { column: 'doing', milestone: 'M2' });
+  const ms = boardMilestones(readBoard(p), 'job-1');
+  assert.equal(ms[0].id, 'M1');
+  assert.equal(ms[0].title, 'Audio playback');
+  assert.equal(ms[0].description, 'Loads and plays decoded audio cleanly');
+  assert.equal(ms[0].waiting_on_user, 1);
+  assert.equal(ms[0].paused_for_user, true);
+  assert.equal(ms[0].current, false);
+  assert.equal(ms[1].id, 'M2');
+  assert.equal(ms[1].current, true);
+  assert.equal(ms[1].paused_for_user, false);
+});
+
+test('humanizeTask and generalStatus produce compact plain-English summaries', async () => {
+  const { generalStatus, humanizeTask } = await import('../src/summary.ts');
+  const raw = 'core+headless: bound the decoded-audio cache (retire voice-held buffers via the preview retire ring so new/open_project can evict, or cap decoded length with an LLM-readable error); probe MP3 frame count without a full decode (critic M5, dispatch.rs:158, media.rs)';
+  assert.equal(humanizeTask(raw), 'Bound the decoded-audio cache');
+
+  const p = tmpGoal();
+  const c1 = addCard(p, 'ui: add waveform zoom controls', 'orchestrator', { column: 'done', milestone: 'M1', cycle: 1 });
+  const c2 = addCard(p, raw, 'orchestrator', { column: 'doing', milestone: 'M2', cycle: 2 });
+  assert.ok(c1 && c2);
+  const board = readBoard(p);
+  const cards = currentCards(p, board);
+  const ms = boardMilestones(board, 'job-1');
+  const st = { version: 1, state: 'running', pid: 1, run: 'r1', cycle: 2, mode: 'build', cycle_started_at: null, heartbeat_at: null, waiting_until: null, wait_reason: null, pause_requested: false, fails_in_row: 0, limits: null, updated_at: '' } as any;
+  const gs = generalStatus(st, cards, ms, []);
+  assert.ok(gs);
+  assert.equal(gs.source, 'synthesized');
+  assert.match(gs.summary, /Last cycle finished: Add waveform zoom controls/);
+  assert.match(gs.summary, /Now working on Bound the decoded-audio cache/);
+
+  // Explicit orchestrator status event takes precedence
+  const gs2 = generalStatus(st, cards, ms, [{ ts: '2026-10-04T10:00:00Z', run: 'r1', cycle: 2, src: 'orchestrator', type: 'status', text: 'Finished waveform zoom; now limiting audio cache memory.' }]);
+  assert.equal(gs2?.source, 'orchestrator');
+  assert.equal(gs2?.summary, 'Finished waveform zoom; now limiting audio cache memory.');
 });

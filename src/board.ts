@@ -39,10 +39,10 @@ const FIELDS = ['title', 'column', 'epic', 'milestone', 'assignee', 'priority', 
 export type BoardOp =
   | ({ ts: string; op: 'add'; id: string; title: string; src: Src; epic: string; column: Column; cycle?: number | null; steer?: boolean } & Pick<Fields, 'milestone' | 'assignee' | 'priority'>)
   | ({ ts: string; op: 'set'; id: string; by: By; cycle?: number | null } & Fields)
-  | { ts: string; op: 'comment'; id: string; text: string; by: By; cycle?: number | null; steer?: boolean }
+  | { ts: string; op: 'comment'; id: string; text: string; by: By; cycle?: number | null; steer?: boolean; quick_reply?: boolean }
   | { ts: string; op: 'ask'; id: string; text: string; by: By; cycle?: number | null }
   | { ts: string; op: 'decide'; id: string; decision: Decision; by: By; note?: string }
-  | { ts: string; op: 'milestone'; id: string; epic: string; title: string; target_s: number | null };
+  | { ts: string; op: 'milestone'; id: string; epic: string; title: string; description?: string | null; target_s: number | null };
 
 export interface Comment {
   ts: string;
@@ -50,6 +50,7 @@ export interface Comment {
   text: string;
   cycle: number | null;
   steer: boolean;
+  quick_reply?: boolean;
 }
 
 export interface Card {
@@ -82,6 +83,7 @@ export interface MilestoneDef {
   id: string;
   epic: string;
   title: string;
+  description: string;
   target_s: number | null;
 }
 
@@ -96,8 +98,8 @@ export function fold(ops: BoardOp[]): Board {
   for (const op of ops) {
     if (op.op === 'milestone') {
       const m = milestones.find((x) => x.id === op.id && x.epic === op.epic);
-      if (m) Object.assign(m, { title: op.title, target_s: op.target_s });
-      else milestones.push({ id: op.id, epic: op.epic, title: op.title, target_s: op.target_s });
+      if (m) Object.assign(m, { title: op.title, target_s: op.target_s, ...(op.description !== undefined ? { description: op.description ?? '' } : {}) });
+      else milestones.push({ id: op.id, epic: op.epic, title: op.title, description: op.description ?? '', target_s: op.target_s });
       continue;
     }
     if (op.op === 'add') {
@@ -112,7 +114,7 @@ export function fold(ops: BoardOp[]): Board {
     if (op.op === 'set') {
       for (const k of FIELDS) if (k in op) (c as any)[k] = op[k] ?? null;
       if (op.column && !('cut' in op)) c.cut = null;
-    } else if (op.op === 'comment') c.comments.push({ ts: op.ts, by: op.by, text: op.text, cycle: op.cycle ?? null, steer: op.steer === true });
+    } else if (op.op === 'comment') c.comments.push({ ts: op.ts, by: op.by, text: op.text, cycle: op.cycle ?? null, steer: op.steer === true, ...(op.quick_reply ? { quick_reply: true } : {}) });
     else if (op.op === 'ask') c.approval = { text: op.text, decision: null, note: null };
     else if (op.op === 'decide' && c.approval) {
       c.approval.decision = op.decision;
@@ -120,8 +122,11 @@ export function fold(ops: BoardOp[]): Board {
       c.comments.push({ ts: op.ts, by: op.by, text: `${op.decision}${op.note ? `: ${op.note}` : ''}`, cycle: null, steer: false });
     }
     // Whose turn it is: the human's comment or answer waits for an agent; any agent op on the card answers it, and
-    // so does the human closing it themselves.
-    if (op.by !== 'user' || (op.op === 'set' && op.column === 'done')) c.waiting = c.steering = false;
+    // so does the human closing it themselves. Quick replies answer immediately without clearing `waiting`, so the
+    // next cycle's orchestrator still sees the human's comment and acts on any requested work.
+    if (op.op === 'comment' && op.quick_reply) {
+      // keep c.waiting / c.steering as-is
+    } else if (op.by !== 'user' || (op.op === 'set' && op.column === 'done')) c.waiting = c.steering = false;
     else if (op.op === 'comment' || op.op === 'decide') {
       c.steering = (c.waiting && c.steering) || (op.op === 'comment' && op.steer === true);
       c.waiting = true;
@@ -191,12 +196,18 @@ export function boardCounts(cards: Card[], milestones: Milestone[]): BoardCounts
 export interface Milestone {
   id: string;
   title: string;
+  /** human-facing description of what this milestone delivers */
+  description: string;
   /** planned active time by which it should be done, or null */
   target_s: number | null;
   todo: number;
   doing: number;
   done: number;
   blocked: number;
+  /** open cards in this milestone waiting on human approval or input */
+  waiting_on_user: number;
+  /** true when the milestone has cards waiting on the user (especially visible when later milestones are running) */
+  paused_for_user: boolean;
   cut: number;
   current: boolean;
 }
@@ -208,10 +219,19 @@ export interface Milestone {
 export function boardMilestones(board: Board, epic: string): Milestone[] {
   const cards = [...board.cards.values()].filter((c) => c.epic === epic);
   const defs = board.milestones.filter((m) => m.epic === epic);
-  for (const c of cards) if (c.milestone && !defs.some((d) => d.id === c.milestone)) defs.push({ id: c.milestone, epic, title: '', target_s: null });
+  for (const c of cards) if (c.milestone && !defs.some((d) => d.id === c.milestone)) defs.push({ id: c.milestone, epic, title: '', description: '', target_s: null });
   const out = defs.map((d): Milestone => {
-    const m = { id: d.id, title: d.title, target_s: d.target_s, todo: 0, doing: 0, done: 0, blocked: 0, cut: 0, current: false };
-    for (const c of cards.filter((x) => x.milestone === d.id)) m[c.cut ? 'cut' : c.column === 'done' ? 'done' : isBlocked(c) ? 'blocked' : c.column === 'backlog' || c.column === 'todo' ? 'todo' : 'doing']++;
+    const m: Milestone = { id: d.id, title: d.title, description: d.description ?? '', target_s: d.target_s, todo: 0, doing: 0, done: 0, blocked: 0, waiting_on_user: 0, paused_for_user: false, cut: 0, current: false };
+    for (const c of cards.filter((x) => x.milestone === d.id)) {
+      if (c.cut) m.cut++;
+      else if (c.column === 'done') m.done++;
+      else if (isBlocked(c)) {
+        m.blocked++;
+        if (c.approval && !c.approval.decision) m.waiting_on_user++;
+      } else if (c.column === 'backlog' || c.column === 'todo') m.todo++;
+      else m.doing++;
+    }
+    m.paused_for_user = m.waiting_on_user > 0 || (m.blocked > 0 && m.todo + m.doing === 0);
     return m;
   });
   const cur = out.find((m) => m.todo + m.doing > 0 || m.todo + m.doing + m.done + m.blocked + m.cut === 0);
@@ -296,12 +316,12 @@ export function setCard(p: GoalPaths, id: string, fields: Fields, by: By, cycle:
 }
 
 /** A comment. The human's comment on a finished card reopens it (to TODO), so an agent looks at it again. */
-export function commentCard(p: GoalPaths, id: string, text: string, by: By, cycle: number | null = null, steer = false) {
+export function commentCard(p: GoalPaths, id: string, text: string, by: By, cycle: number | null = null, steer = false, quickReply = false) {
   text = text.trim();
   if (!text) throw new Error('the comment is empty');
   const c = getCard(p, id);
   const ts = nowIso();
-  appendJsonl(p.board, { ts, op: 'comment', id, text, by, ...cyc(cycle), ...(steer ? { steer: true } : {}) });
+  appendJsonl(p.board, { ts, op: 'comment', id, text, by, ...cyc(cycle), ...(steer ? { steer: true } : {}), ...(quickReply ? { quick_reply: true } : {}) });
   if (by === 'user' && c.column === 'done') appendJsonl(p.board, { ts, op: 'set', id, by, column: 'todo' });
 }
 
@@ -328,12 +348,21 @@ export function decide(p: GoalPaths, id: string, decision: Decision, note?: stri
 const TARGET_HM = /^(\d+):(\d{2})$/;
 
 /** Adds or renames a milestone of the current epic; `target` is active time from the start of a run, "h:mm". */
-export function addMilestone(p: GoalPaths, id: string, title: string, target?: string) {
+export function addMilestone(p: GoalPaths, id: string, title: string, target?: string, description?: string) {
   id = id.toUpperCase();
   if (!/^M\d+[A-Z]?$/.test(id)) throw new Error(`a milestone id looks like M1, M2, M2B (got "${id}")`);
   const t = target ? TARGET_HM.exec(target) : null;
   if (target && !t) throw new Error(`target is h:mm, e.g. 1:20 (got "${target}")`);
-  appendJsonl(p.board, { ts: nowIso(), op: 'milestone', id, epic: currentEpic(p), title: title.trim(), target_s: t ? Number(t[1]) * 3600 + Number(t[2]) * 60 : null });
+  const desc = description?.trim();
+  appendJsonl(p.board, {
+    ts: nowIso(),
+    op: 'milestone',
+    id,
+    epic: currentEpic(p),
+    title: title.trim(),
+    ...(desc !== undefined ? { description: desc || null } : {}),
+    target_s: t ? Number(t[1]) * 3600 + Number(t[2]) * 60 : null,
+  });
 }
 
 // ---------------------------------------------------------------- ingest

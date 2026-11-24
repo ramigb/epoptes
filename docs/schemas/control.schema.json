@@ -17,6 +17,13 @@
     "pause_after_cycle": {
       "type": "boolean"
     },
+    "pause_mode": {
+      "enum": [
+        "task",
+        "cycle"
+      ],
+      "description": "task: signal the running cycle to stop after its current task/round; cycle: finish the full cycle before pausing"
+    },
     "requested_at": {
       "type": "string",
       "format": "date-time"

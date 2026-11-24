@@ -54,7 +54,8 @@
         "needs_you",
         "output",
         "lesson",
-        "job"
+        "job",
+        "status"
       ]
     }
   },
@@ -284,6 +285,12 @@
           },
           "ref": {
             "type": "string"
+          },
+          "mode": {
+            "enum": [
+              "task",
+              "cycle"
+            ]
           }
         }
       }
@@ -299,7 +306,8 @@
               "note",
               "wrapup",
               "done",
-              "needs_you"
+              "needs_you",
+              "status"
             ]
           }
         }

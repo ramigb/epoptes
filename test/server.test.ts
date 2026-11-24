@@ -8,6 +8,7 @@ import { after, before, test } from 'node:test';
 
 const base = fs.mkdtempSync(path.join(os.tmpdir(), 'epoptes-ui-'));
 process.env.EPOPTES_HOME = path.join(base, 'home');
+process.env.EPOPTES_NO_QUICK_REPLY = '1';
 const project = path.join(base, 'project');
 fs.mkdirSync(path.join(project, '.epoptes', 'state'), { recursive: true });
 fs.writeFileSync(path.join(project, '.epoptes', 'loop.md'), 'x');
@@ -156,4 +157,52 @@ test('outputs are served on their own origin, never outside the project or from 
   await new Promise((r) => setTimeout(r, 300));
   const d2 = await req('GET', '/api/goals/ui-test');
   assert.deepEqual([d2.json.output.kind, d2.json.output.href, d2.json.output.from], ['url', 'https://example.com/demo', 'event']);
+});
+
+test('cycle settings and hooks can be customized from the dashboard API', async () => {
+  const res = await post('/api/goals/ui-test/settings', {
+    cycle: { timeout_min: 15, pause_between_s: 5 },
+    hooks: { onStart: 'echo start', onPause: 'echo pause' },
+  });
+  assert.equal(res.status, 200);
+  assert.equal(res.json.cycle.timeout_min, 15);
+  assert.equal(res.json.cycle.pause_between_s, 5);
+  assert.deepEqual(res.json.hooks, { onStart: 'echo start', onPause: 'echo pause' });
+
+  const bad = await post('/api/goals/ui-test/settings', { cycle: { timeout_min: 1 } });
+  assert.equal(bad.status, 400);
+
+  const d = await req('GET', '/api/goals/ui-test');
+  assert.equal(d.json.goal.cycle.timeout_min, 15);
+  assert.deepEqual(d.json.goal.hooks, { onStart: 'echo start', onPause: 'echo pause' });
+});
+
+test('commenting on a card triggers an immediate quick reply without clearing waiting', async () => {
+  delete process.env.EPOPTES_NO_QUICK_REPLY;
+  process.env.EPOPTES_QUICK_REPLY_CMD = 'printf "Immediate plain-English answer for you."';
+  try {
+    const added = await post('/api/goals/ui-test/cards', { title: 'Blocked task needing clarification' });
+    assert.equal(added.status, 200);
+    const id = added.json.id;
+    const res = await post(`/api/goals/ui-test/cards/${id}`, { comment: 'What do you need from me?' });
+    assert.equal(res.status, 200);
+    assert.equal(res.json.replying, true);
+
+    // Wait briefly for the background quick-reply process to finish and append to board.jsonl.
+    let card: any = null;
+    for (let i = 0; i < 30; i++) {
+      await new Promise((r) => setTimeout(r, 100));
+      const d = await req('GET', '/api/goals/ui-test');
+      card = d.json.board_cards.find((c: any) => c.id === id);
+      if (card?.comments?.length >= 2) break;
+    }
+    assert.equal(card.comments.length, 2);
+    assert.equal(card.comments[1].by, 'epoptes');
+    assert.equal(card.comments[1].quick_reply, true);
+    assert.equal(card.comments[1].text, 'Immediate plain-English answer for you.');
+    assert.equal(card.waiting, true, 'quick reply must not clear waiting so the next cycle still acts on it');
+  } finally {
+    delete process.env.EPOPTES_QUICK_REPLY_CMD;
+    process.env.EPOPTES_NO_QUICK_REPLY = '1';
+  }
 });

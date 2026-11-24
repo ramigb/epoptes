@@ -96,6 +96,14 @@
       "type": "boolean",
       "default": false
     },
+    "pause_mode": {
+      "enum": [
+        "task",
+        "cycle",
+        null
+      ],
+      "default": null
+    },
     "fails_in_row": {
       "type": "integer",
       "minimum": 0,

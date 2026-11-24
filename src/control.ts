@@ -64,13 +64,18 @@ export async function start(project: string, { newRun = false, followUp = false 
   throw new Error(`runner did not start; last lines of ${p.runnerLog}:\n${tail}`);
 }
 
-/** Pause after the current cycle (the safe default). The runner pauses the clock and exits. */
-export function pause(project: string) {
+export type PauseMode = 'task' | 'cycle';
+
+/**
+ * Pause safely. `task` (default) signals the running orchestrator via `epoptes clock` and CLI notices to wrap up
+ * after its current task/round instead of starting new work; `cycle` lets the full cycle finish first.
+ */
+export function pause(project: string, { mode = 'task' }: { mode?: PauseMode } = {}) {
   const p = goalPaths(project);
   const s = reconcile(p);
   if (!isLive(s)) throw new Error(`not running (state: ${s.state})`);
-  writeJson(p.control, { version: 1, pause_after_cycle: true, requested_at: nowIso(), by: process.env.EPOPTES_CYCLE ? 'orchestrator' : 'user' });
-  emit(p, { src: 'user', type: 'control', run: s.run, cycle: s.cycle || null, action: 'pause' });
+  writeJson(p.control, { version: 1, pause_after_cycle: true, pause_mode: mode, requested_at: nowIso(), by: process.env.EPOPTES_CYCLE ? 'orchestrator' : 'user' });
+  emit(p, { src: 'user', type: 'control', run: s.run, cycle: s.cycle || null, action: 'pause', mode });
   return s;
 }
 
