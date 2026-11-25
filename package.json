@@ -1,6 +1,6 @@
 {
   "name": "@ramigbcom/epoptes",
-  "version": "0.6.1",
+  "version": "0.7.0",
   "description": "Create, run, watch and steer long-running Claude Code, Codex, pi and Antigravity harnesses",
   "type": "module",
   "license": "MIT",
